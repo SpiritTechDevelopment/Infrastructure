@@ -1,0 +1,246 @@
+---
+- name: Require an unrestricted management-network run over all ACTIVE hosts
+  ansible.builtin.assert:
+    that:
+      # The peer list must include every ACTIVE management host (offline/disabled
+      # nodes are excluded upstream via node_enabled/management_enabled — P1-04).
+      - (ansible_play_hosts_all | sort) == (groups['active_management'] | default(groups['management_network']) | sort)
+    fail_msg: >-
+      Run playbooks/management-network.yml without --limit. The hub peer list must
+      include every ACTIVE management host (those with node_enabled and
+      management_enabled true).
+  run_once: true
+
+- name: Validate management WireGuard variables
+  ansible.builtin.assert:
+    that:
+      - management_wireguard_enabled | bool
+      - management_wireguard_hub_host in ansible_play_hosts_all
+      - management_wireguard_address | length > 0
+      - management_wireguard_address is match('^[0-9.]+/[0-9]+$')
+      - management_wireguard_cidr is match('^[0-9.]+/[0-9]+$')
+      - management_wireguard_interface is match('^[a-zA-Z0-9_.-]{1,15}$')
+      - management_wireguard_port | int > 0
+      - management_wireguard_port | int < 65536
+      - inventory_hostname != management_wireguard_hub_host or management_wireguard_public_endpoint | length > 0
+      - inventory_hostname != management_wireguard_hub_host or ':' in management_wireguard_public_endpoint
+    fail_msg: >-
+      Set one hub host, a unique management_wireguard_address on every managed host,
+      and management_wireguard_public_endpoint on the hub (public-host-or-IP:port).
+
+- name: Validate unique WireGuard addresses
+  ansible.builtin.assert:
+    that:
+      - management_wireguard_addresses | length == (management_wireguard_addresses | unique | length)
+    fail_msg: "Every management-network host must have a unique management_wireguard_address."
+  vars:
+    management_wireguard_addresses: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars, 'management_wireguard_address')
+         | map('regex_replace', '/.*$', '') | list }}
+  run_once: true
+
+- name: Check for a conflicting management route
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -4
+      - route
+      - show
+      - "{{ management_wireguard_cidr }}"
+  register: management_wireguard_existing_route
+  changed_when: false
+  failed_when: >-
+    management_wireguard_existing_route.stdout | trim | length > 0 and
+    ('dev ' ~ management_wireguard_interface) not in management_wireguard_existing_route.stdout
+
+- name: Validate WireGuard address belongs to management CIDR
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        import ipaddress,sys;
+        iface=ipaddress.ip_interface(sys.argv[1]);
+        net=ipaddress.ip_network(sys.argv[2]);
+        is_hub=sys.argv[3] == '1';
+        assert iface.ip in net, 'address outside management CIDR';
+        assert (iface.network == net) if is_hub else (iface.network.prefixlen == 32),
+        'hub must use the management CIDR prefix and spokes must use /32'
+      - "{{ management_wireguard_address }}"
+      - "{{ management_wireguard_cidr }}"
+      - "{{ '1' if inventory_hostname == management_wireguard_hub_host else '0' }}"
+  changed_when: false
+
+- name: Validate external WireGuard peers
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name | length > 0
+      - item.public_key is defined
+      - item.public_key is match('^[A-Za-z0-9+/]{43}=$')
+      - item.allowed_ips is defined
+      - item.allowed_ips | length > 0
+    fail_msg: "External WireGuard peers require name, a valid public key and allowed_ips."
+  loop: "{{ management_wireguard_external_peers }}"
+  when: inventory_hostname == management_wireguard_hub_host
+
+- name: Validate external WireGuard peer routes
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        import ipaddress,json,sys;
+        net=ipaddress.ip_network(sys.argv[1]);
+        managed=json.loads(sys.argv[2]);
+        external=json.loads(sys.argv[3]);
+        routes=[ipaddress.ip_network(x) for x in managed+external];
+        assert all(r.prefixlen == 32 and r.subnet_of(net) for r in routes),
+        'all managed/external peer routes must be unique IPv4 /32 addresses inside the management CIDR';
+        assert len(routes) == len(set(routes)), 'duplicate WireGuard AllowedIPs'
+      - "{{ management_wireguard_cidr }}"
+      - >-
+        {{ ansible_play_hosts_all | map('extract', hostvars, 'management_wireguard_address')
+           | map('regex_replace', '/.*$', '/32') | list | to_json }}
+      - >-
+        {{ management_wireguard_external_peers | map(attribute='allowed_ips') | flatten | list | to_json }}
+  changed_when: false
+  when: inventory_hostname == management_wireguard_hub_host
+
+- name: Validate unique external peer names and public keys
+  ansible.builtin.assert:
+    that:
+      - (management_wireguard_external_peers | map(attribute='name') | list | unique | length) == (management_wireguard_external_peers | length)
+      - (management_wireguard_external_peers | map(attribute='public_key') | list | unique | length) == (management_wireguard_external_peers | length)
+    fail_msg: "External WireGuard peer names and public keys must be unique."
+  when: inventory_hostname == management_wireguard_hub_host
+
+- name: Install WireGuard tools
+  ansible.builtin.apt:
+    name:
+      - wireguard
+      - wireguard-tools
+    state: present
+    update_cache: true
+  when: ansible_os_family == 'Debian'
+
+- name: Ensure WireGuard directory
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check WireGuard private key
+  ansible.builtin.stat:
+    path: "{{ management_wireguard_private_key_path }}"
+  register: management_wireguard_private_key_stat
+
+- name: Generate persistent WireGuard keypair on node
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    wg genkey > {{ management_wireguard_private_key_path | quote }}
+    wg pubkey < {{ management_wireguard_private_key_path | quote }} > {{ management_wireguard_public_key_path | quote }}
+    chmod 0600 {{ management_wireguard_private_key_path | quote }}
+    chmod 0644 {{ management_wireguard_public_key_path | quote }}
+  args:
+    executable: /bin/bash
+  when: not management_wireguard_private_key_stat.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Ensure public key matches private key
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    wg pubkey < {{ management_wireguard_private_key_path | quote }} > {{ management_wireguard_public_key_path | quote }}
+    chmod 0644 {{ management_wireguard_public_key_path | quote }}
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: true
+
+- name: Read WireGuard private key
+  ansible.builtin.slurp:
+    src: "{{ management_wireguard_private_key_path }}"
+  register: management_wireguard_private_key_file
+  no_log: true
+
+- name: Read WireGuard public key
+  ansible.builtin.slurp:
+    src: "{{ management_wireguard_public_key_path }}"
+  register: management_wireguard_public_key_file
+
+- name: Publish WireGuard key facts for peer rendering
+  ansible.builtin.set_fact:
+    management_wireguard_private_key_eff: "{{ management_wireguard_private_key_file.content | b64decode | trim }}"
+    management_wireguard_public_key: "{{ management_wireguard_public_key_file.content | b64decode | trim }}"
+  no_log: true
+
+- name: Enable IPv4 forwarding on the WireGuard hub
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-management-wireguard.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible. Required for hub-and-spoke management routing.
+      net.ipv4.ip_forward = 1
+  register: management_wireguard_hub_sysctl
+  when: inventory_hostname == management_wireguard_hub_host
+
+- name: Remove hub forwarding override from spokes
+  ansible.builtin.file:
+    path: /etc/sysctl.d/90-management-wireguard.conf
+    state: absent
+  register: management_wireguard_spoke_sysctl
+  when: inventory_hostname != management_wireguard_hub_host
+
+- name: Reload sysctl policy
+  ansible.builtin.command: sysctl --system
+  when: >-
+    (management_wireguard_hub_sysctl is defined and management_wireguard_hub_sysctl.changed) or
+    (management_wireguard_spoke_sysctl is defined and management_wireguard_spoke_sysctl.changed)
+  changed_when: true
+
+- name: Render WireGuard configuration
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: "{{ management_wireguard_config_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+    validate: "wg-quick strip %s"
+  no_log: true
+  diff: false
+  notify: Restart management WireGuard
+
+- name: Enable WireGuard service
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ management_wireguard_interface }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Flush WireGuard handler
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for local WireGuard address
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -4
+      - address
+      - show
+      - dev
+      - "{{ management_wireguard_interface }}"
+  register: management_wireguard_address_status
+  changed_when: false
+  failed_when: management_wireguard_address.split('/')[0] not in management_wireguard_address_status.stdout
+
+- name: Show WireGuard public identity
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} {{ management_wireguard_address }} public-key={{ management_wireguard_public_key }}

@@ -1,0 +1,9 @@
+---
+vpn_stack_dir: /opt/vpn
+nginx_mask_image: nginx:1.29-alpine
+nginx_dir: "{{ vpn_stack_dir }}/nginx"
+mask_bind_address: 127.0.0.1
+mask_port: 8443
+mask_listen: "{{ mask_bind_address }}:{{ mask_port }}"
+mask_body: vmshare
+mask_server_names: "{{ reality_server_names }}"

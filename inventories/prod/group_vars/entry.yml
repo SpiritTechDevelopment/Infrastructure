@@ -1,0 +1,12 @@
+---
+node_role: entry
+entry_exits: []
+xray_static_clients: []
+xray_domain_strategy: AsIs
+xray_sniffing_route_only: true
+
+# Every ordinary backend-created user on the entry uses this default exit. Special
+# per-exit selector identities (via-<country>) remain available only for operator
+# smoke tests. This makes a normal unique backend user work immediately.
+entry_default_exit_tag: fr-exit
+xray_entry_block_unmatched: false

@@ -1,0 +1,74 @@
+---
+- name: Refuse Docker daemon policy changes in runtime mode
+  ansible.builtin.assert:
+    that:
+      - not docker_manage_daemon_config | bool
+      - not docker_remove_legacy_no_new_privileges | bool
+    fail_msg: >-
+      Runtime deployment does not edit /etc/docker/daemon.json. Keep both Docker
+      daemon-management flags false.
+
+- name: Check for Docker Engine
+  ansible.builtin.command: docker --version
+  register: _docker_engine
+  changed_when: false
+  failed_when: false
+
+- name: Install Docker Engine when absent
+  ansible.builtin.apt:
+    name: docker.io
+    state: present
+    update_cache: true
+  when:
+    - ansible_os_family == "Debian"
+    - _docker_engine.rc != 0
+
+- name: Enable Docker Engine
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Check for Docker Compose v2
+  ansible.builtin.command:
+    argv: [docker, compose, version]
+  register: _docker_compose_initial
+  changed_when: false
+  failed_when: false
+
+- name: Try Debian docker-compose-v2 package when Compose is absent
+  ansible.builtin.apt:
+    name: docker-compose-v2
+    state: present
+    update_cache: true
+  register: _compose_v2_install
+  failed_when: false
+  when:
+    - ansible_os_family == "Debian"
+    - _docker_compose_initial.rc != 0
+
+- name: Recheck Docker Compose v2 after first package attempt
+  ansible.builtin.command:
+    argv: [docker, compose, version]
+  register: _docker_compose_second
+  changed_when: false
+  failed_when: false
+  when: _docker_compose_initial.rc != 0
+
+- name: Try docker-compose-plugin package as a fallback
+  ansible.builtin.apt:
+    name: docker-compose-plugin
+    state: present
+    update_cache: true
+  register: _compose_plugin_install
+  failed_when: false
+  when:
+    - ansible_os_family == "Debian"
+    - _docker_compose_initial.rc != 0
+    - (_docker_compose_second.rc | default(1)) != 0
+
+- name: Require a working Docker Compose v2 command
+  ansible.builtin.command:
+    argv: [docker, compose, version]
+  register: _docker_compose_final
+  changed_when: false

@@ -1,0 +1,29 @@
+groups:
+  - name: fleet
+    rules:
+      - alert: PublicServiceDown
+        expr: probe_success{job="blackbox-public"} == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{% raw %}{{ $labels.node }} {{ $labels.service }} is unreachable at {{ $labels.instance }}{% endraw %}"
+{% for host in (groups['entry'] | default([])) + (groups['exit'] | default([])) %}
+{% if hostvars[host].node_enabled | default(true) | bool %}
+      - alert: NodeTelemetryMissing
+        expr: absent_over_time(node_uname_info{instance="{{ host }}"}[10m])
+        for: 2m
+        labels:
+          severity: warning
+          node: "{{ host }}"
+        annotations:
+          summary: "Node telemetry is missing for {{ host }}"
+{% endif %}
+{% endfor %}
+      - alert: PlatformTelemetryMissing
+        expr: absent_over_time(node_uname_info{instance="{{ inventory_hostname }}"}[10m])
+        for: 2m
+        labels:
+          severity: warning
+          node: "{{ inventory_hostname }}"
+        annotations:
+          summary: "Platform telemetry is missing for {{ inventory_hostname }}"

@@ -1,0 +1,23 @@
+# Managed by Ansible. Multi-tenant Loki (spec §9.3, §16.2): auth_enabled + per-tenant retention.
+auth_enabled: true                     # X-Scope-OrgID required (ops / activity)
+server: { http_listen_port: {{ loki_port }} }
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage: { filesystem: { chunks_directory: /loki/chunks, rules_directory: /loki/rules } }
+  replication_factor: 1
+  ring: { kvstore: { store: inmemory } }
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index: { prefix: index_, period: 24h }
+limits_config:
+  retention_period: {{ retention_ops }}          # default; overridden per tenant below
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true                         # enforce per-tenant retention
+  delete_request_store: filesystem
+runtime_config: { file: /etc/loki/overrides.yml }

@@ -1,0 +1,63 @@
+---
+# Xray VLESS + REALITY runtime. Infrastructure owns the process, base config,
+# REALITY identity and entry/exit topology. The backend owns runtime customer users.
+vpn_stack_dir: /opt/vpn
+xray_image: ghcr.io/xtls/xray-core:26.3.27
+xray_config_dir: "{{ vpn_stack_dir }}/xray"
+
+public_port: 443
+xray_listen_port: "{{ public_port }}"
+xray_loglevel: info
+xray_access_log: ""
+xray_error_log: ""
+xray_mask_address: ""
+xray_stats_user_traffic: true
+
+# Current Xray prints PrivateKey / Password (PublicKey); older versions used
+# Private key / Public key. These patterns intentionally avoid doubled Jinja
+# backslash escapes, which previously made valid command output unparseable.
+xray_reality_private_key_output_regex: >-
+  (?im)^[ \t]*(?:PrivateKey|Private[ \t]+key)[ \t]*[:=][ \t]*([A-Za-z0-9_-]{43})[ \t]*$
+xray_reality_public_key_output_regex: >-
+  (?im)^[ \t]*(?:Password(?:[ \t]*[(][ \t]*Public[ \t]*Key[ \t]*[)])?|Public[ \t]*Key)[ \t]*[:=][ \t]*([A-Za-z0-9_-]{43})[ \t]*$
+
+xray_service_uid: 10001
+xray_service_gid: 0
+
+# Public functional-phase API. Xray has no application-layer authentication; this
+# exposure is intentional until a separately tested access layer replaces it.
+xray_enable_api: true
+xray_api_public_mode: true
+xray_api_bind: 0.0.0.0
+xray_api_port: 10085
+xray_api_services:
+  - HandlerService
+  - StatsService
+  - ReflectionService
+
+# Local expvar/pprof endpoint for diagnostics. It is not exposed publicly.
+xray_metrics_enabled: true
+xray_metrics_bind: 127.0.0.1
+xray_metrics_port: 11111
+
+# REALITY identity. Leave empty to generate once and retain on the node.
+mask_bind_address: 127.0.0.1
+mask_port: 8443
+reality_dest: "{{ mask_bind_address }}:{{ mask_port }}"
+reality_server_names: []
+reality_short_ids: []
+reality_private_key: ""
+
+# Infrastructure/service identities only. Customer users are added at runtime.
+xray_static_clients: []
+
+# Entry-only exit outbounds. The normal backend path sends every unique user through
+# entry_default_exit_tag. Special via-<country> users can override this for smoke tests.
+entry_exits: []
+entry_default_exit_tag: ""
+xray_entry_block_unmatched: true
+
+xray_domain_strategy: AsIs
+xray_dns_servers: []
+xray_block_domains: []
+xray_sniffing_route_only: true

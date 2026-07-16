@@ -1,0 +1,37 @@
+inventories/*/inventory.yml
+inventories/*/inventory.yml.bak*
+inventories/*/hosts.yml
+inventories/**/host_vars/*
+!inventories/**/host_vars/.gitkeep
+# Track non-secret per-host config (firewall profiles); keep everything else
+# under host_vars ignored by default (generated_exits.yml carries REALITY
+# passwords, etc.). Safe-by-default: re-include the dirs, re-ignore their files,
+# then allow ONLY firewall.yml back.
+!inventories/**/host_vars/*/
+inventories/**/host_vars/*/*
+!inventories/**/host_vars/*/firewall.yml
+_render/
+*.decrypted
+*.plain.yml
+vault-unseal-keys*
+INIT-SECRETS*
+*.key
+*.pem
+!roles/**/templates/*.pem.j2
+.vault_pass
+*.retry
+__pycache__/
+.env
+.local.json
+.local-secrets/
+client-*.json
+smoke-client.json
+s.sh
+generated/
+deploy-e2e.log
+support-bundle/
+# editor / patch / backup cruft — never commit (may contain secrets)
+*.orig
+*.rej
+*.bak
+*.bak.*

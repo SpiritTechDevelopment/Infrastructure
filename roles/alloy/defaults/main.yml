@@ -1,0 +1,10 @@
+---
+vpn_stack_dir: /opt/vpn
+alloy_image: grafana/alloy:v1.17.1
+alloy_dir: "{{ vpn_stack_dir }}/alloy"
+telemetry_tls_ca_file: /etc/ssl/certs/ca-certificates.crt
+telemetry_username: ""
+telemetry_password: ""
+
+node_exporter_bind_address: 127.0.0.1
+node_exporter_port: 9100

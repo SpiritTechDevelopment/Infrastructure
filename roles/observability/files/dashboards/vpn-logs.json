@@ -1,0 +1,69 @@
+{
+  "uid": "vpn-logs",
+  "title": "VPN Logs",
+  "tags": ["vpn", "logs"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "node",
+        "label": "Node",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki-ops" },
+        "query": { "label": "node", "stream": "", "type": 1 },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".+",
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "container",
+        "label": "Container",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki-ops" },
+        "query": { "label": "container", "stream": "{node=~\"$node\"}", "type": 1 },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".+",
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "search",
+        "label": "Search",
+        "type": "textbox",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Log volume by container",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "loki-ops" },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } } } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (container) (count_over_time({node=~\"$node\", container=~\"$container\"} |~ \"$search\" [1m]))", "legendFormat": "{{container}}", "datasource": { "type": "loki", "uid": "loki-ops" } }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "logs",
+      "title": "Logs",
+      "gridPos": { "h": 17, "w": 24, "x": 0, "y": 7 },
+      "datasource": { "type": "loki", "uid": "loki-ops" },
+      "options": { "showTime": true, "wrapLogMessage": true, "prettifyLogMessage": false, "enableLogDetails": true, "dedupStrategy": "none", "sortOrder": "Descending" },
+      "targets": [
+        { "refId": "A", "expr": "{node=~\"$node\", container=~\"$container\"} |~ \"$search\"", "datasource": { "type": "loki", "uid": "loki-ops" } }
+      ]
+    }
+  ]
+}

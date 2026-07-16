@@ -1,0 +1,16 @@
+---
+vpn_stack_dir: /opt/vpn
+compose_project: vpn
+vpn_stack_pull: missing
+
+# Complete image defaults make the example inventory independently deployable.
+xray_image: ghcr.io/xtls/xray-core:26.3.27
+nginx_mask_image: nginx:1.29-alpine
+alloy_image: grafana/alloy:v1.17.1
+node_exporter_image: quay.io/prometheus/node-exporter:v1.9.1
+
+# Local-only support listeners used by the host-networked containers.
+mask_bind_address: 127.0.0.1
+mask_port: 8443
+node_exporter_bind_address: 127.0.0.1
+node_exporter_port: 9100

@@ -1,0 +1,128 @@
+---
+- name: Create observability directories
+  ansible.builtin.file:
+    path: "{{ obs_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - loki
+    - prometheus/rules
+    - prometheus/file_sd
+    - grafana/provisioning/datasources
+    - grafana/provisioning/dashboards/json
+    - alertmanager
+    - blackbox
+    - alloy
+    - xray-usage-exporter
+
+- name: Render observability configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ obs_dir }}/{{ item.dest }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop:
+    - {src: compose.yml.j2, dest: compose.yml, mode: '0600'}
+    - {src: loki-config.yml.j2, dest: loki/config.yml}
+    - {src: loki-overrides.yml.j2, dest: loki/overrides.yml}
+    - {src: prometheus.yml.j2, dest: prometheus/prometheus.yml}
+    - {src: block-detection.rules.j2, dest: prometheus/rules/fleet.rules.yml}
+    - {src: fleet-targets.yml.j2, dest: prometheus/file_sd/fleet.yml}
+    - {src: grafana-datasources.yml.j2, dest: grafana/provisioning/datasources/datasources.yml}
+    - {src: grafana-dashboards.yml.j2, dest: grafana/provisioning/dashboards/dashboards.yml}
+    - {src: blackbox.yml.j2, dest: blackbox/config.yml}
+    - {src: alertmanager.yml.j2, dest: alertmanager/config.yml}
+    - {src: platform-alloy.alloy.j2, dest: alloy/config.alloy, mode: '0600'}
+  no_log: true
+  diff: false
+  # scrape_configs/rules changes need a Prometheus restart to load. The file_sd
+  # targets file is auto-reloaded and does not, but restarting on any config
+  # change here is cheap and keeps Prometheus in sync with rendered config.
+  notify: Restart Prometheus
+
+- name: Provision Grafana dashboards (P2-01)
+  ansible.builtin.copy:
+    src: "dashboards/{{ item }}"
+    dest: "{{ obs_dir }}/grafana/provisioning/dashboards/json/{{ item }}"
+    mode: "0644"
+  loop:
+    - fleet-overview.json
+    - vpn-logs.json
+    - xray-usage.json
+
+- name: Render usage exporter build context and targets
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ obs_dir }}/xray-usage-exporter/{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - {src: Dockerfile.xray-usage-exporter.j2, dest: Dockerfile}
+    - {src: usage-exporter-targets.yml.j2, dest: targets.json}
+  register: _usage_exporter_render
+
+- name: Install usage exporter source into the build context
+  ansible.builtin.copy:
+    src: xray-usage-exporter.py
+    dest: "{{ obs_dir }}/xray-usage-exporter/xray-usage-exporter.py"
+    mode: "0644"
+  register: _usage_exporter_src
+
+- name: Warn when Alertmanager has no alert receiver (P2-01)
+  ansible.builtin.debug:
+    msg: >-
+      Alertmanager has NO receiver: alertmanager_webhook_url is empty, so firing
+      alerts are dropped silently. Set alertmanager_webhook_url to a real endpoint
+      (webhook / email / paging) before production alerting can be trusted.
+  when: alertmanager_webhook_url | default('') | length == 0
+
+- name: Ensure observability stack is running
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ obs_dir }}/compose.yml"
+      - up
+      - -d
+      - --remove-orphans
+      - --wait
+      - --wait-timeout
+      - "180"
+      - --pull
+      - missing
+      - --build
+  register: _observability_apply
+  changed_when: >-
+    ('Created' in (_observability_apply.stdout ~ _observability_apply.stderr))
+    or ('Started' in (_observability_apply.stdout ~ _observability_apply.stderr))
+    or ('Recreated' in (_observability_apply.stdout ~ _observability_apply.stderr))
+    or ('Pulled' in (_observability_apply.stdout ~ _observability_apply.stderr))
+    or ('Built' in (_observability_apply.stdout ~ _observability_apply.stderr))
+
+
+# P1-07: GF_SECURITY_ADMIN_PASSWORD only seeds the password on FIRST start, when the
+# Grafana database is created. On a persistent grafana-data volume the env var is
+# ignored afterwards, so a redeploy can drift and lock operators out. Reset the admin
+# password every run so the declared password is the single source of truth.
+- name: Reset Grafana admin password to the declared value
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ obs_dir }}/compose.yml"
+      - exec
+      - -T
+      - grafana
+      - grafana
+      - cli
+      - --homepath
+      - /usr/share/grafana
+      - admin
+      - reset-admin-password
+      - "{{ grafana_admin_password }}"
+  register: _grafana_pw_reset
+  changed_when: false
+  no_log: true
+  retries: 6
+  delay: 5
+  until: _grafana_pw_reset.rc == 0

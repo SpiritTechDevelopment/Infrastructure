@@ -1,0 +1,80 @@
+---
+- name: Require a Cloudflare API token
+  ansible.builtin.assert:
+    that:
+      - cloudflare_api_token is defined
+      - cloudflare_api_token | default('') | length > 0
+    fail_msg: >-
+      cloudflare_api_token is not set. Pass it through a local protected extra-vars file
+      before running the ACME play.
+
+- name: Install certbot and the Cloudflare DNS plugin
+  ansible.builtin.apt:
+    name:
+      - certbot
+      - python3-certbot-dns-cloudflare
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Ensure the letsencrypt directory exists
+  ansible.builtin.file:
+    path: /etc/letsencrypt
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write Cloudflare API credentials
+  ansible.builtin.copy:
+    content: "dns_cloudflare_api_token = {{ cloudflare_api_token }}\n"
+    dest: "{{ acme_cloudflare_ini }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Issue the certificate via Cloudflare DNS-01
+  ansible.builtin.command:
+    cmd: >-
+      certbot certonly --non-interactive --agree-tos
+      --dns-cloudflare
+      --dns-cloudflare-credentials {{ acme_cloudflare_ini }}
+      --dns-cloudflare-propagation-seconds {{ acme_propagation_seconds }}
+      -m {{ acme_email }}
+      --cert-name {{ acme_cert_name }}
+      {% for d in acme_domains %}-d {{ d }} {% endfor %}
+    creates: "{{ acme_live_dir }}/fullchain.pem"
+  register: certbot_issue
+
+- name: Enable the certbot renewal timer
+  ansible.builtin.systemd:
+    name: certbot.timer
+    enabled: true
+    state: started
+
+- name: Ensure the controller fetch directory exists
+  ansible.builtin.file:
+    path: "{{ acme_fetch_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_become: false
+  run_once: true
+
+- name: Fetch the issued certificate back to the controller
+  ansible.builtin.fetch:
+    src: "{{ acme_live_dir }}/{{ item.remote }}"
+    dest: "{{ acme_fetch_dir }}/{{ item.local }}"
+    flat: true
+  loop:
+    - { remote: "fullchain.pem", local: "{{ acme_cert_name }}-fullchain.pem" }
+    - { remote: "privkey.pem", local: "{{ acme_cert_name }}-privkey.pem" }
+
+- name: Report where the cert landed
+  ansible.builtin.debug:
+    msg: >-
+      Certificate for {{ acme_domains | join(', ') }} issued on {{ inventory_hostname }}
+      and fetched to {{ acme_fetch_dir }}/{{ acme_cert_name }}-fullchain.pem

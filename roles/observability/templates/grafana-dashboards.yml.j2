@@ -1,0 +1,14 @@
+# Provisioned dashboard provider. Dashboards are read (read-only) from the JSON
+# directory below, which is mounted under the read-only provisioning tree.
+apiVersion: 1
+providers:
+  - name: vpn-fleet
+    orgId: 1
+    folder: VPN
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false

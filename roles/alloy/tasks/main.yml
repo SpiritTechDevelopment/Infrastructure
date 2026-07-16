@@ -1,0 +1,19 @@
+---
+- name: Ensure Alloy directory
+  ansible.builtin.file:
+    path: "{{ alloy_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Render Alloy configuration
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: "{{ alloy_dir }}/config.alloy"
+    owner: root
+    group: root
+    mode: "0600"
+  register: _alloy_config_render
+  no_log: true
+  diff: false

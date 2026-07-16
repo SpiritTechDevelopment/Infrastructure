@@ -1,0 +1,44 @@
+stages:
+  - lint
+  - deploy
+
+variables:
+  ANSIBLE_FORCE_COLOR: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+lint:
+  stage: lint
+  image: python:3.12-slim
+  script:
+    - pip install 'ansible-core>=2.18,<2.19' ansible-lint yamllint
+    - ansible-galaxy collection install -r requirements.yml
+    - make check STATIC_INVENTORY=examples/static-check-inventory.yml
+    - make lint STATIC_INVENTORY=examples/static-check-inventory.yml
+
+apply-and-e2e-prod:
+  stage: deploy
+  tags:
+    - self-hosted
+  resource_group: vpn-production
+  script:
+    - ansible-galaxy collection install -r requirements.yml
+    - make deploy-e2e INVENTORY=inventories/prod/inventory.yml
+  environment:
+    name: production
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+verify-prod:
+  stage: deploy
+  tags:
+    - self-hosted
+  resource_group: vpn-production
+  script:
+    - make verify INVENTORY=inventories/prod/inventory.yml
+    - make e2e INVENTORY=inventories/prod/inventory.yml ENTRY=entry-1
+  environment:
+    name: production
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'

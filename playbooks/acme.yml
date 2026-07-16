@@ -1,0 +1,7 @@
+---
+- name: Issue TLS certificates (certbot + Cloudflare DNS-01)
+  hosts: platform
+  become: true
+  gather_facts: true
+  roles:
+    - acme

@@ -1,0 +1,55 @@
+---
+# Operator SSH access management.
+#
+# Manages ONLY root's authorized_keys, rendered from the `operators` roster in
+# group_vars. It touches nothing else: no packages, no services, no containers,
+# no data plane. authorized_keys is read by sshd per-connection, so there is NO
+# sshd reload and running sessions + customer traffic are unaffected. This is the
+# safe, scoped play to add/remove an operator WITHOUT a full `make deploy` (which
+# can restart the vpn containers and wipe in-memory runtime users).
+#
+# EXCLUSIVE management: the file becomes EXACTLY the `operators` list. An
+# incomplete roster removes keys — and since SSH is key-only fleet-wide, a wrong
+# list can lock everyone out (provider console is then the only way back).
+# Therefore ALWAYS dry-run first and read the diff:
+#
+#   Dry-run:  ansible-playbook -i inventories/prod/inventory.yml playbooks/access.yml --check --diff
+#   Apply:    ansible-playbook -i inventories/prod/inventory.yml playbooks/access.yml
+#   One host: ... --limit entry-1
+#
+# Reach hosts however you normally do (public SSH is open key-only; or override
+# ansible_host to an overlay IP). See OPERATIONS.md.
+- name: Manage operator SSH access
+  hosts: "{{ access_target | default('all') }}"
+  become: true
+  gather_facts: false
+  vars:
+    operator_keys_user: root
+    operator_keys_home: /root
+  tasks:
+    - name: Refuse to write an empty authorized_keys (lockout guard)
+      ansible.builtin.assert:
+        that:
+          - operators is defined
+          - operators | length > 0
+          - operators | map(attribute='key') | select('match', '^(ssh-|ecdsa-)') | list | length == (operators | length)
+        fail_msg: >-
+          `operators` is empty or malformed. Refusing to render authorized_keys —
+          an empty/invalid roster would remove every key and lock out SSH. Fix the
+          `operators` list in group_vars before running this play.
+
+    - name: Ensure .ssh directory exists
+      ansible.builtin.file:
+        path: "{{ operator_keys_home }}/.ssh"
+        state: directory
+        owner: "{{ operator_keys_user }}"
+        group: "{{ operator_keys_user }}"
+        mode: "0700"
+
+    - name: Render authorized_keys from the operator roster (exclusive)
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../roles/common/templates/authorized_keys.j2"
+        dest: "{{ operator_keys_home }}/.ssh/authorized_keys"
+        owner: "{{ operator_keys_user }}"
+        group: "{{ operator_keys_user }}"
+        mode: "0600"

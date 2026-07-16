@@ -1,0 +1,119 @@
+---
+- name: Ensure Xray config directory
+  ansible.builtin.file:
+    path: "{{ xray_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Ensure Xray key directory
+  ansible.builtin.file:
+    path: /var/lib/xray
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# Keep one canonical key file on every node. wire-fleet reads this same file after
+# exit deployment, so an inventory-supplied key and a generated key behave identically.
+- name: Persist an explicitly supplied REALITY private key
+  ansible.builtin.copy:
+    content: "{{ reality_private_key | trim }}\n"
+    dest: /var/lib/xray/reality.key
+    owner: root
+    group: root
+    mode: "0600"
+  when: (reality_private_key | default('') | trim | length) > 0
+  no_log: true
+  diff: false
+
+- name: Inspect retained REALITY private key
+  ansible.builtin.stat:
+    path: /var/lib/xray/reality.key
+  register: _reality_key_file
+
+- name: Generate a REALITY key pair when no retained key exists
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - "{{ xray_image }}"
+      - x25519
+  register: _reality_key_generation
+  changed_when: true
+  when: not (_reality_key_file.stat.exists and (_reality_key_file.stat.size | int) > 0)
+  no_log: true
+
+- name: Extract the generated REALITY private key
+  ansible.builtin.set_fact:
+    _generated_reality_private_key: >-
+      {{ [
+           (
+             ((_reality_key_generation.stdout | default(''))
+               | regex_findall(xray_reality_private_key_output_regex)
+               | first)
+             | default('', true)
+           ),
+           (
+             ((_reality_key_generation.stderr | default(''))
+               | regex_findall(xray_reality_private_key_output_regex)
+               | first)
+             | default('', true)
+           )
+         ] | select | first | default('', true) }}
+  when: _reality_key_generation is not skipped
+  no_log: true
+
+- name: Validate generated REALITY private key before storing it
+  ansible.builtin.assert:
+    that:
+      - _generated_reality_private_key | length == 43
+      - _generated_reality_private_key is match('^[A-Za-z0-9_-]{43}$')
+    fail_msg: >-
+      Xray did not emit a parseable PrivateKey value. The key file was not changed.
+  when: _reality_key_generation is not skipped
+  no_log: true
+
+- name: Store generated REALITY private key
+  ansible.builtin.copy:
+    content: "{{ _generated_reality_private_key }}\n"
+    dest: /var/lib/xray/reality.key
+    owner: root
+    group: root
+    mode: "0600"
+  when: _reality_key_generation is not skipped
+  no_log: true
+  diff: false
+
+- name: Read canonical REALITY private key
+  ansible.builtin.slurp:
+    src: /var/lib/xray/reality.key
+  register: _reality_key_readback
+  no_log: true
+
+- name: Select and validate canonical REALITY private key
+  ansible.builtin.set_fact:
+    reality_private_key_eff: "{{ _reality_key_readback.content | b64decode | trim }}"
+  no_log: true
+
+- name: Validate canonical REALITY private key format
+  ansible.builtin.assert:
+    that:
+      - reality_private_key_eff | length == 43
+      - reality_private_key_eff is match('^[A-Za-z0-9_-]{43}$')
+    fail_msg: "/var/lib/xray/reality.key is empty or malformed on {{ inventory_hostname }}."
+  no_log: true
+
+- name: Render and validate Xray configuration with the pinned runtime image
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ xray_config_dir }}/config.json"
+    owner: root
+    group: root
+    mode: "0640"
+    validate: "docker run --rm --user 0:0 -v %s:/config.json:ro {{ xray_image }} run -test -config /config.json"
+  no_log: true
+  diff: false
+  register: _xray_config_render

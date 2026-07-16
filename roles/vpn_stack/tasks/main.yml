@@ -1,0 +1,49 @@
+---
+- name: Ensure VPN stack directory
+  ansible.builtin.file:
+    path: "{{ vpn_stack_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render VPN Compose definition
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ vpn_stack_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  register: _vpn_compose_render
+
+- name: Determine whether the VPN services need recreation
+  ansible.builtin.set_fact:
+    _vpn_stack_recreate: >-
+      {{
+        (_vpn_compose_render.changed | default(false))
+        or (_xray_config_render.changed | default(false))
+        or (_nginx_mask_certificate.changed | default(false))
+        or (_nginx_mask_private_key.changed | default(false))
+        or (_nginx_mask_config.changed | default(false))
+        or (_nginx_mask_page.changed | default(false))
+        or (_alloy_config_render.changed | default(false))
+      }}
+
+# Apply only after Xray, nginx, certificates and Alloy configuration all exist.
+# This avoids the old first-deploy handler race against a missing compose.yml.
+- name: Apply complete VPN stack
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['docker', 'compose', '-f', vpn_stack_dir ~ '/compose.yml',
+         'up', '-d', '--remove-orphans', '--wait', '--wait-timeout', '120',
+         '--pull', vpn_stack_pull]
+        + (['--force-recreate'] if _vpn_stack_recreate | bool else [])
+      }}
+  register: _vpn_stack_apply
+  changed_when: >-
+    _vpn_stack_recreate | bool
+    or ('Created' in _vpn_stack_apply.stderr)
+    or ('Started' in _vpn_stack_apply.stderr)
+    or ('Recreated' in _vpn_stack_apply.stderr)
+    or ('Pulled' in _vpn_stack_apply.stderr)

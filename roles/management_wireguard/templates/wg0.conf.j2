@@ -1,0 +1,34 @@
+# Managed by Ansible. Do not edit manually.
+[Interface]
+Address = {{ management_wireguard_address }}
+PrivateKey = {{ management_wireguard_private_key_eff }}
+MTU = {{ management_wireguard_mtu }}
+{% if inventory_hostname == management_wireguard_hub_host %}
+ListenPort = {{ management_wireguard_port }}
+{% endif %}
+
+{% if inventory_hostname == management_wireguard_hub_host %}
+{% for peer_host in ansible_play_hosts_all | sort %}
+{% if peer_host != management_wireguard_hub_host %}
+[Peer]
+# {{ peer_host }}
+PublicKey = {{ hostvars[peer_host].management_wireguard_public_key }}
+AllowedIPs = {{ hostvars[peer_host].management_wireguard_address.split('/')[0] }}/32
+
+{% endif %}
+{% endfor %}
+{% for peer in management_wireguard_external_peers %}
+[Peer]
+# external: {{ peer.name }}
+PublicKey = {{ peer.public_key }}
+AllowedIPs = {{ peer.allowed_ips | join(', ') }}
+
+{% endfor %}
+{% else %}
+[Peer]
+# management hub: {{ management_wireguard_hub_host }}
+PublicKey = {{ hostvars[management_wireguard_hub_host].management_wireguard_public_key }}
+Endpoint = {{ hostvars[management_wireguard_hub_host].management_wireguard_public_endpoint }}
+AllowedIPs = {{ management_wireguard_cidr }}
+PersistentKeepalive = {{ management_wireguard_persistent_keepalive }}
+{% endif %}

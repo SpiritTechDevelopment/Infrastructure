@@ -1,0 +1,75 @@
+---
+- name: Create Vault directories
+  ansible.builtin.file:
+    path: "{{ vault_dir }}/{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: config, owner: root, group: root, mode: '0755'}
+    - {path: tls, owner: root, group: '1000', mode: '0750'}
+    - {path: data, owner: '100', group: '1000', mode: '0750'}
+    - {path: audit, owner: '100', group: '1000', mode: '0750'}
+    - {path: snapshots, owner: '100', group: '1000', mode: '0750'}
+
+- name: Install Vault TLS certificate
+  ansible.builtin.copy:
+    content: "{{ vault_tls_certificate }}"
+    dest: "{{ vault_dir }}/tls/vault.crt"
+    owner: root
+    group: "1000"
+    mode: "0640"
+  no_log: true
+  diff: false
+  when: vault_tls_enabled | bool
+
+- name: Install Vault TLS key
+  ansible.builtin.copy:
+    content: "{{ vault_tls_private_key }}"
+    dest: "{{ vault_dir }}/tls/vault.key"
+    owner: root
+    group: "1000"
+    mode: "0640"
+  no_log: true
+  diff: false
+  when: vault_tls_enabled | bool
+
+- name: Render Vault files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ vault_dir }}/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {src: vault.hcl.j2, dest: config/vault.hcl, mode: '0644'}
+    - {src: compose.yml.j2, dest: compose.yml, mode: '0640'}
+    - {src: vault-init.sh.j2, dest: vault-init.sh, mode: '0700'}
+    - {src: vault-unseal.sh.j2, dest: vault-unseal.sh, mode: '0700'}
+    - {src: vault-bootstrap.sh.j2, dest: vault-bootstrap.sh, mode: '0700'}
+    - {src: policy-backend.hcl.j2, dest: config/policy-backend.hcl, mode: '0644'}
+  no_log: true
+  diff: false
+
+- name: Ensure Vault stack is running
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ vault_dir }}/compose.yml"
+      - up
+      - -d
+      - --remove-orphans
+      - --wait
+      - --wait-timeout
+      - "90"
+      - --pull
+      - missing
+  register: _vault_apply
+  changed_when: >-
+    ('Created' in (_vault_apply.stdout ~ _vault_apply.stderr))
+    or ('Started' in (_vault_apply.stdout ~ _vault_apply.stderr))
+    or ('Recreated' in (_vault_apply.stdout ~ _vault_apply.stderr))
+    or ('Pulled' in (_vault_apply.stdout ~ _vault_apply.stderr))

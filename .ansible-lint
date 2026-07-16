@@ -1,0 +1,8 @@
+---
+profile: basic
+skip_list:
+  - var-naming[no-role-prefix]
+  - run-once[task]
+exclude_paths:
+  - .local-secrets/
+  - _render/

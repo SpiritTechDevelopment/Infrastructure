@@ -1,0 +1,7 @@
+creation_rules:
+  - path_regex: inventories/.*\.sops\.ya?ml$
+    encrypted_regex: >-
+      ^(ansible_host|address|uuid|id|reality_private_key|reality_public_key|
+      reality_password|.*_secret|.*_token|.*_password|.*_private_key|
+      xray_static_clients|entry_exits)$
+    age: 'age1REPLACE_WITH_YOUR_AGE_RECIPIENT'

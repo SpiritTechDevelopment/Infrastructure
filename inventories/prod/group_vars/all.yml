@@ -1,0 +1,81 @@
+---
+env: prod
+xray_image: ghcr.io/xtls/xray-core:26.3.27
+nginx_mask_image: nginx:1.29-alpine
+alloy_image: grafana/alloy:v1.17.1
+node_exporter_image: quay.io/prometheus/node-exporter:v1.9.1
+vault_disable_mlock: true
+
+# Functional no-hardening mode: deploy a complete usable service without changing host
+# SSH policy, host firewall, fail2ban, sysctl security policy, or WireGuard.
+common_manage_deploy_user: false
+common_remove_legacy_sshd_dropin: false
+common_manage_sshd: false
+common_manage_firewall: false
+common_enable_fail2ban: false
+common_manage_sysctl: false
+common_enable_auditd: false
+common_enable_unattended_upgrades: false
+docker_manage_daemon_config: false
+docker_remove_legacy_no_new_privileges: false
+management_wireguard_enabled: false
+
+# Backend-facing Xray API. During this functional phase it is intentionally public
+# and unauthenticated so the backend and E2E controller can use it immediately.
+# Do not expose this mode on an untrusted production network indefinitely.
+xray_enable_api: true
+xray_api_public_mode: true
+xray_api_bind: "0.0.0.0"
+xray_api_port: 10085
+xray_api_services:
+  - HandlerService
+  - StatsService
+  - ReflectionService
+
+# Emit both access and error logs to container stdout/stderr. Alloy discovers the
+# vpn Compose project and ships these logs to Loki.
+xray_access_log: ""
+xray_error_log: ""
+xray_loglevel: info
+xray_mask_address: ""
+xray_stats_user_traffic: true
+xray_listen_port: 443
+xray_metrics_enabled: true
+xray_metrics_bind: "127.0.0.1"
+xray_metrics_port: 11111
+mask_bind_address: "127.0.0.1"
+mask_port: 8443
+node_exporter_bind_address: "127.0.0.1"
+node_exporter_port: 9100
+
+# Telemetry pushes over the WireGuard overlay to the hub (10.20.0.1), not the
+# public IP — part of the overlay-first exposure model. Depends on wg0 being up
+# on every node (entry-1 10.20.0.11, exit-fr 10.20.0.21).
+telemetry_hub_host: "10.20.0.1"
+loki_ops_endpoint: "http://{{ telemetry_hub_host }}:3100/loki/api/v1/push"
+prometheus_remote_write: "http://{{ telemetry_hub_host }}:9090/api/v1/write"
+
+# Node lifecycle. Disabled hosts stay declared but are excluded from deployment,
+# wiring, verification, and observability target generation.
+node_enabled: true
+
+# --- Operator access (consumed by playbooks/access.yml) -----------------------
+# The fleet operator roster: SSH PUBLIC keys trusted for root login on every
+# host. Public keys only — safe to commit and review in a PR. Add/remove a person
+# here, then run `playbooks/access.yml` (ALWAYS --check --diff first). access.yml
+# manages authorized_keys EXCLUSIVELY, so this list must be COMPLETE or you lock
+# people out (SSH is key-only fleet-wide).
+operators:
+  - name: pavel
+    key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIArouBDJ+F+13H5T0ZgxEhSr9H3zFhrsymJdtBvt/aj5 xvpaul@github.com"
+  # DECISION PENDING: entry-1 also trusts `romanrabinkin@lenza`, which control-1
+  # and exit-fr do NOT. Decide Roman's scope (fleet-wide / entry-only / prune)
+  # before enabling exclusive management — see OPERATIONS.md "Operator roster".
+
+# --- WireGuard overlay peers (for the future management_wireguard role) --------
+# PUBLIC keys + overlay IPs of external admin/CI peers on the hub. Public keys
+# only. The live overlay is hand-configured today; this models it so the hub is
+# reproducible once `management_wireguard` is un-stubbed.
+management_wireguard_external_peers:
+  - { name: workstation, pubkey: "ooq8pY1/+HxkA+lNCaZivEbhqDR1K55FeAOPr4eTfyQ=", ip: "10.20.0.2" }
+  # add each operator's / the CI runner's peer as { name, pubkey, ip }

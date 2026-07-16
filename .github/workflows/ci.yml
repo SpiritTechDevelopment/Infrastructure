@@ -1,0 +1,33 @@
+name: ci
+
+# Static validation only: lint, syntax, template render, dashboard checks.
+# Runs on the GitHub-hosted runner — it needs NO secrets and NO fleet access
+# (make check / make lint operate entirely on the repo + the static fixture
+# inventory). Safe to run on every PR, including from forks.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      # NOTE: pin these to a commit SHA (e.g. actions/checkout@<sha>) before you
+      # start running privileged workflows; tags are mutable. See OPERATIONS.md.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        run: |
+          pip install 'ansible-core>=2.18,<2.19' ansible-lint yamllint
+          ansible-galaxy collection install -r requirements.yml
+      - name: Static checks (render/syntax/dashboards)
+        run: make check STATIC_INVENTORY=examples/static-check-inventory.yml
+      - name: Lint
+        run: make lint STATIC_INVENTORY=examples/static-check-inventory.yml

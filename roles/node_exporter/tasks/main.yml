@@ -1,0 +1,4 @@
+---
+- name: Note node_exporter deployment ownership
+  ansible.builtin.debug:
+    msg: "node_exporter is defined in the vpn_stack Compose file and scraped locally by Alloy."

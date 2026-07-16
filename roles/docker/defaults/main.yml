@@ -1,0 +1,5 @@
+---
+# Normal deployment only installs/starts Docker and confirms Compose v2 exists.
+# It never writes /etc/docker/daemon.json or restarts Docker for daemon policy.
+docker_manage_daemon_config: false
+docker_remove_legacy_no_new_privileges: false

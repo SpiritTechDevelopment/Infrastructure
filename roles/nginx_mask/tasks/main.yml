@@ -1,0 +1,49 @@
+---
+- name: Create nginx mask directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: ["{{ nginx_dir }}", "{{ nginx_dir }}/site", "{{ nginx_dir }}/certs"]
+
+- name: Install mask certificate
+  ansible.builtin.copy:
+    content: "{{ mask_tls_certificate }}"
+    dest: "{{ nginx_dir }}/certs/fullchain.pem"
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+  diff: false
+  register: _nginx_mask_certificate
+
+- name: Install mask private key
+  ansible.builtin.copy:
+    content: "{{ mask_tls_private_key }}"
+    dest: "{{ nginx_dir }}/certs/privkey.pem"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  register: _nginx_mask_private_key
+
+- name: Render nginx configuration
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ nginx_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _nginx_mask_config
+
+- name: Render mask page
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: "{{ nginx_dir }}/site/index.html"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _nginx_mask_page

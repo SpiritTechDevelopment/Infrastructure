@@ -1,0 +1,4 @@
+---
+# Example of a country-scoped override group (--limit country_nl).
+# Keep server-identifying values OUT of git; put only non-identifying policy here.
+tc_egress_rate: "900mbit"   # per-interface shaping default for this country (§17.1)

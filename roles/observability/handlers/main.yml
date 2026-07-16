@@ -1,0 +1,14 @@
+---
+# Prometheus reads scrape_configs only at startup. Its config is bind-mounted, so
+# `docker compose up` does not recreate it when only the config file changes —
+# a restart is required to load new scrape jobs or rules.
+- name: Restart Prometheus
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ obs_dir }}/compose.yml"
+      - restart
+      - prometheus
+  changed_when: true

@@ -1,0 +1,20 @@
+# Generated from active inventory. Disabled nodes are excluded. Both the customer
+# VLESS listener and the backend-facing Xray API are tested from the platform host.
+{% for h in (groups['entry'] | default([])) + (groups['exit'] | default([])) %}
+{% if hostvars[h].node_enabled | default(true) | bool %}
+- targets:
+    - "{{ hostvars[h].public_hostname | default(hostvars[h].ansible_host | default(h)) }}:{{ hostvars[h].public_port | default(443) }}"
+  labels:
+    node: "{{ h }}"
+    service: vless
+    role: "{{ hostvars[h].node_role | default('unknown') }}"
+    country: "{{ hostvars[h].country | default('unknown') }}"
+- targets:
+    - "{{ hostvars[h].xray_api_overlay_host | default(hostvars[h].xray_api_public_host | default(hostvars[h].ansible_host | default(h))) }}:{{ hostvars[h].xray_api_port | default(10085) }}"
+  labels:
+    node: "{{ h }}"
+    service: xray-api
+    role: "{{ hostvars[h].node_role | default('unknown') }}"
+    country: "{{ hostvars[h].country | default('unknown') }}"
+{% endif %}
+{% endfor %}

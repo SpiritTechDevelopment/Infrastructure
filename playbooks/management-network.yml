@@ -1,0 +1,15 @@
+---
+- name: Private management network is intentionally stubbed
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    ansible_become: false
+  tasks:
+    - name: Refuse management-network deployment
+      ansible.builtin.fail:
+        msg: >-
+          WireGuard/private-network deployment is not implemented in the active
+          repository and cannot be enabled by a variable. Design, test and review it
+          as a separate change before restoring an executable role.

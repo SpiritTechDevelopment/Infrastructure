@@ -1,0 +1,10 @@
+-b 8192
+-f 1
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/ssh/sshd_config -p wa -k sshd
+-w /etc/ssh/sshd_config.d -p wa -k sshd
+-w /etc/sudoers -p wa -k privilege
+-w /etc/sudoers.d -p wa -k privilege
+-w /opt/vpn -p wa -k vpn_stack
+-w /opt/vault -p wa -k vault

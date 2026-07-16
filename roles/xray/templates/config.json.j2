@@ -1,0 +1,144 @@
+{
+  "log": {
+    "loglevel": "{{ xray_loglevel }}",
+    "access": "{{ xray_access_log }}",
+    "error": "{{ xray_error_log }}",
+    "maskAddress": "{{ xray_mask_address }}"
+  },
+{% if xray_dns_servers | length > 0 %}
+  "dns": { "servers": {{ xray_dns_servers | to_json }} },
+{% endif %}
+{% if xray_enable_api | bool %}
+  "api": {
+    "tag": "api",
+    "services": {{ xray_api_services | to_json }}
+  },
+{% endif %}
+{% if xray_metrics_enabled | bool %}
+  "metrics": {
+    "listen": "{{ xray_metrics_bind }}:{{ xray_metrics_port }}"
+  },
+{% endif %}
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": {{ xray_stats_user_traffic | lower }},
+        "statsUserDownlink": {{ xray_stats_user_traffic | lower }}
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": true,
+      "statsOutboundDownlink": true
+    }
+  },
+  "inbounds": [
+{% if xray_enable_api | bool %}
+    {
+      "listen": "{{ xray_api_bind }}",
+      "port": {{ xray_api_port }},
+      "protocol": "tunnel",
+      "tag": "api",
+      "settings": {
+        "rewriteAddress": "127.0.0.1"
+      }
+    },
+{% endif %}
+    {
+      "listen": "0.0.0.0",
+      "port": {{ xray_listen_port }},
+      "protocol": "vless",
+      "tag": "vless-in",
+      "settings": {
+        "clients": [
+{% for client in xray_static_clients %}
+          {
+            "id": "{{ client.id }}",
+            "email": "{{ client.email }}",
+            "flow": "{{ client.flow | default('xtls-rprx-vision') }}"
+          }{{ "," if not loop.last }}
+{% endfor %}
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": "{{ reality_dest }}",
+          "xver": 0,
+          "serverNames": {{ reality_server_names | to_json }},
+          "privateKey": "{{ reality_private_key_eff }}",
+          "shortIds": {{ reality_short_ids | to_json }}
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": {{ xray_sniffing_route_only | lower }}
+      }
+    }
+  ],
+  "outbounds": [
+{% if node_role == 'entry' %}
+{% for exit in entry_exits %}
+    {
+      "tag": "{{ exit.tag }}",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "{{ exit.address }}",
+            "port": {{ exit.port | default(443) }},
+            "users": [
+              {
+                "id": "{{ exit.uuid }}",
+                "flow": "xtls-rprx-vision",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "fingerprint": "{{ exit.fingerprint | default('chrome') }}",
+          "serverName": "{{ exit.reality_sni }}",
+          "password": "{{ exit.reality_password }}",
+          "shortId": "{{ exit.reality_short_id | default('') }}"
+        }
+      }
+    },
+{% endfor %}
+{% endif %}
+    { "protocol": "freedom", "tag": "direct" },
+    { "protocol": "blackhole", "tag": "block" }
+  ],
+  "routing": {
+    "domainStrategy": "{{ xray_domain_strategy }}",
+    "rules": [
+{% if xray_enable_api | bool %}
+      { "type": "field", "inboundTag": ["api"], "outboundTag": "api" },
+{% endif %}
+      { "type": "field", "ip": ["geoip:private"], "outboundTag": "block" }
+{% if xray_block_domains | length > 0 %}
+      ,{ "type": "field", "domain": {{ xray_block_domains | to_json }}, "outboundTag": "block" }
+{% endif %}
+{% if node_role == 'entry' %}
+{% for exit in entry_exits %}
+      ,{ "type": "field", "user": ["{{ exit.email }}"], "outboundTag": "{{ exit.tag }}" }
+{% endfor %}
+{% if entry_default_exit_tag | length > 0 %}
+      ,{ "type": "field", "inboundTag": ["vless-in"], "outboundTag": "{{ entry_default_exit_tag }}" }
+{% elif xray_entry_block_unmatched | bool %}
+      ,{ "type": "field", "inboundTag": ["vless-in"], "outboundTag": "block" }
+{% endif %}
+{% endif %}
+    ]
+  }
+}

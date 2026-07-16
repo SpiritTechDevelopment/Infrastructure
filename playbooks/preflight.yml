@@ -1,0 +1,76 @@
+---
+- name: Validate the full runtime inventory before changing any server
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    ansible_become: false
+  tasks:
+    - name: Run repository inventory preflight
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/inventory-preflight.py"
+          - --inventory
+          - "{{ ansible_inventory_sources | first }}"
+      changed_when: false
+      delegate_to: localhost
+      become: false
+
+    - name: Register enabled runtime hosts for SSH preflight
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: active_runtime_preflight
+      loop: >-
+        {{ (groups['platform'] | default([]))
+           + (groups['entry'] | default([]))
+           + (groups['exit'] | default([])) }}
+      when: hostvars[item].node_enabled | default(true) | bool
+      changed_when: false
+
+- name: Prove SSH and Python access to every enabled server before mutation
+  hosts: active_runtime_preflight
+  gather_facts: false
+  become: false
+  ignore_unreachable: true
+  tasks:
+    - name: Run a non-mutating Ansible ping
+      ansible.builtin.ping:
+      register: _runtime_ssh_probe
+      ignore_errors: true
+      ignore_unreachable: true
+
+    - name: Record SSH preflight result
+      ansible.builtin.set_fact:
+        runtime_ssh_preflight_ok: >-
+          {{ (_runtime_ssh_probe is defined)
+             and not (_runtime_ssh_probe.unreachable | default(false) | bool)
+             and not (_runtime_ssh_probe.failed | default(false) | bool)
+             and (_runtime_ssh_probe.ping | default('')) == 'pong' }}
+        runtime_ssh_preflight_message: >-
+          {{ _runtime_ssh_probe.msg | default('no SSH error detail returned') }}
+
+- name: Abort the entire deployment unless every enabled server is reachable
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    ansible_become: false
+  tasks:
+    - name: Build the list of hosts that failed SSH preflight
+      ansible.builtin.set_fact:
+        _runtime_ssh_failed_hosts: >-
+          {{ (_runtime_ssh_failed_hosts | default([])) + [item] }}
+      loop: "{{ groups['active_runtime_preflight'] | default([]) }}"
+      when: not (hostvars[item].runtime_ssh_preflight_ok | default(false) | bool)
+
+    - name: Require successful SSH access to the complete enabled fleet
+      ansible.builtin.assert:
+        that:
+          - (_runtime_ssh_failed_hosts | default([]) | length) == 0
+        fail_msg: >-
+          SSH preflight failed for: {{ _runtime_ssh_failed_hosts | default([]) | join(', ') }}.
+          No server changes were made. Use SSH_AUTH=password to prompt for a shared
+          password, or SSH_AUTH=key SSH_KEY=/path/to/key to force one key.

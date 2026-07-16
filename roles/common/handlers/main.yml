@@ -1,0 +1,12 @@
+---
+# Validate the full assembled sshd config, then reload (never restart — keeps
+# existing sessions alive). Fires only from hardening tasks in bootstrap/hardened.
+- name: Reload sshd
+  ansible.builtin.shell: 'sshd -t && { systemctl reload ssh 2>/dev/null || systemctl reload sshd; }'
+  changed_when: true
+
+# Apply the rendered ruleset. add+delete replaces only inet filter, so Docker's
+# ip nat table is preserved (no docker restart). Transactional: all-or-nothing.
+- name: Reload nftables
+  ansible.builtin.command: nft -f /etc/nftables.conf
+  changed_when: true

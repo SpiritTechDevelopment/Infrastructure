@@ -1,0 +1,14 @@
+---
+management_wireguard_enabled: true
+management_wireguard_interface: wg0
+management_wireguard_cidr: 10.20.0.0/24
+management_wireguard_port: 51820
+management_wireguard_hub_host: control-1
+management_wireguard_public_endpoint: ""
+management_wireguard_address: ""
+management_wireguard_mtu: 1420
+management_wireguard_persistent_keepalive: 25
+management_wireguard_external_peers: []
+management_wireguard_private_key_path: "/etc/wireguard/{{ management_wireguard_interface }}.key"
+management_wireguard_public_key_path: "/etc/wireguard/{{ management_wireguard_interface }}.pub"
+management_wireguard_config_path: "/etc/wireguard/{{ management_wireguard_interface }}.conf"

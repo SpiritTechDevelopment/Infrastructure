@@ -1,0 +1,10 @@
+port 22
+usepam yes
+permitrootlogin yes
+pubkeyauthentication yes
+passwordauthentication yes
+kbdinteractiveauthentication no
+x11forwarding yes
+permitemptypasswords no
+allowtcpforwarding yes
+trustedusercakeys none

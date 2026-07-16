@@ -1,0 +1,97 @@
+---
+# Runtime prerequisites plus deploy_mode-gated host hardening. In runtime mode
+# this role makes no access-control or security-policy changes (the tripwire
+# below enforces that). Hardening runs only in bootstrap/hardened mode.
+- name: Validate deploy_mode
+  ansible.builtin.assert:
+    that:
+      - deploy_mode in ['runtime', 'bootstrap', 'hardened']
+    fail_msg: "deploy_mode must be one of: runtime, bootstrap, hardened."
+
+- name: Refuse access and host-hardening changes in runtime mode
+  ansible.builtin.assert:
+    that:
+      - not common_manage_deploy_user | bool
+      - not common_remove_legacy_sshd_dropin | bool
+      - not common_manage_sshd | bool
+      - not common_manage_firewall | bool
+      - not common_enable_fail2ban | bool
+      - not common_manage_sysctl | bool
+      - not common_enable_auditd | bool
+      - not common_enable_unattended_upgrades | bool
+    fail_msg: >-
+      Runtime deployment is intentionally forbidden from changing users, SSH,
+      sudoers, firewall, fail2ban, sysctl, auditd, or unattended upgrades.
+      Keep every common_* access/hardening flag false, or run with
+      deploy_mode=bootstrap|hardened to enable hardening.
+  when: deploy_mode == 'runtime'
+
+- name: Install base runtime packages
+  ansible.builtin.apt:
+    name:
+      - chrony
+      - python3
+      - curl
+      - ca-certificates
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Enable chrony
+  ansible.builtin.service:
+    name: "{{ 'chrony' if ansible_os_family == 'Debian' else 'chronyd' }}"
+    state: started
+    enabled: true
+
+- name: Read current timezone
+  ansible.builtin.command:
+    argv: [timedatectl, show, --property=Timezone, --value]
+  register: _current_timezone
+  changed_when: false
+
+- name: Set timezone
+  ansible.builtin.command:
+    argv: [timedatectl, set-timezone, "{{ common_timezone }}"]
+  when: _current_timezone.stdout | trim != common_timezone
+  changed_when: true
+
+# --- Host hardening (bootstrap/hardened mode only; each gated by its flag) ---
+
+# Key-only root, no password/keyboard-interactive auth. A drop-in overrides any
+# distro/cloud-init default via first-match ordering (00- sorts before 50-).
+# validate: on the fragment catches syntax errors before placement; the handler
+# re-validates the assembled config with `sshd -t` before reloading.
+- name: Harden sshd (key-only root, disable password auth)
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-spirit-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "/usr/sbin/sshd -t -f %s"
+  when: common_manage_sshd | bool
+  notify: Reload sshd
+
+# nftables firewall. Uses add+delete (not `flush ruleset`) so Docker's ip nat
+# table survives — no `docker restart` needed after a reload. `validate` parses
+# the candidate with `nft -c` before it is placed.
+- name: Render nftables firewall
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "nft -c -f %s"
+  when:
+    - common_manage_firewall | bool
+    - common_firewall_engine == 'nftables'
+  notify: Reload nftables
+
+- name: Enable nftables service (persist across reboot)
+  ansible.builtin.service:
+    name: nftables
+    enabled: true
+  when:
+    - common_manage_firewall | bool
+    - common_firewall_engine == 'nftables'

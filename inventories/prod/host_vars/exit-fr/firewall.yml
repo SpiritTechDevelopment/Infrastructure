@@ -1,0 +1,27 @@
+---
+# nftables firewall profile for exit-fr (VPN exit, France). Inert until
+# deploy_mode != runtime AND common_manage_firewall=true.
+#
+# C3: migrate exit-fr from ufw -> managed nftables and make 10085 overlay-only.
+# exit-fr is HOST-NETWORKED for the data plane (the vpn-xray-1 container binds the
+# host's *:443 and *:10085 directly; `ip nat` has no DNAT rules, only docker0
+# masquerade). So — exactly like entry-1 — 443/10085 are INPUT-chain ports and
+# need NO forward-chain `ct status dnat` rules. exit-fr is also a WG *spoke*
+# (wg0 dials the hub from an ephemeral port), so it needs no inbound udp/51820.
+#
+# EFFECTIVE ACCESS after apply (vs. the current ufw ruleset):
+#   - SSH (:22) open to anyone with a valid key (key-only auth is enforced
+#     fleet-wide; password/keyboard-interactive are already disabled). An empty
+#     ssh_allowed_cidrs renders `tcp dport 22 accept`, which in this inet table
+#     matches BOTH IPv4 and IPv6 — same reachability as the current ufw.
+#   - 443 (VLESS/REALITY) public  ← customer data plane (entry-1 -> exit-fr:443)
+#   - 10085 (Xray API) OVERLAY-ONLY (10.20.0.0/24 over wg0); was public
+#   - Legacy public ports DROPPED: 8000 (out-of-repo gunicorn, being retired),
+#     8001/8091 (stale ufw allows with no listeners)
+#   - Docker-bridge egress preserved (harmless; data plane is host-networked)
+ssh_allowed_cidrs: []   # [] = SSH from anywhere; security is key-only auth
+# Only 443 (VLESS/REALITY) is public. The Xray API (10085) is overlay-only.
+common_public_tcp_ports: [443]
+common_restricted_tcp_rules:
+  - { ports: [10085], cidrs: ['10.20.0.0/24'], interface: wg0 }
+common_docker_bridge_forwarding: true

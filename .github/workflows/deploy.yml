@@ -1,0 +1,96 @@
+name: deploy
+
+# Production deploy + verify. MANUAL trigger, main only, gated by the
+# `production` GitHub Environment (set required reviewers on it — that is the
+# "who may deploy" control). `concurrency` serializes prod applies (equivalent to
+# GitLab's resource_group).
+#
+# ------------------------------------------------------------------------------
+# INTERIM (GitHub-hosted runner) SECURITY MODEL — read CUTOVER.md.
+# During the development phase this runs on a GitHub-hosted runner, which is NOT
+# on the WireGuard overlay. To reach the overlay-only management/API/telemetry
+# ports it brings up a DEDICATED, DISPOSABLE CI WireGuard peer from a secret, and
+# decrypts secrets with a DEDICATED CI age key. Both keys therefore live in
+# GitHub Actions secrets for now. When you move to a self-hosted runner on the
+# overlay: change `runs-on`, delete the "wireguard up/down" steps, and ROTATE
+# every CI secret (see CUTOVER.md). Do not reuse CI-phase keys.
+# ------------------------------------------------------------------------------
+#
+# Required GitHub secrets (Environment: production):
+#   CI_WG_CONF      full wg0.conf for the dedicated CI peer (scoped AllowedIPs)
+#   CI_AGE_KEY      the CI-only age private key (decrypts the SOPS-encrypted inventory)
+#   CI_SSH_KEY      the CI-only SSH private key (its pubkey is an `operators` entry)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_e2e:
+        description: "Run full customer E2E after deploy"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vpn-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest          # INTERIM: swap to [self-hosted, vpn] at cutover
+    environment: production          # set required reviewers here = who may deploy
+    steps:
+      - uses: actions/checkout@v4    # TODO pin to SHA before relying on this pipeline
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tooling (ansible, wireguard, sops)
+        run: |
+          pip install 'ansible-core>=2.18,<2.19'
+          ansible-galaxy collection install -r requirements.yml
+          sudo apt-get update -qq
+          sudo apt-get install -y wireguard-tools age
+          curl -fsSL -o /usr/local/bin/sops https://github.com/getsops/sops/releases/latest/download/sops-linux-amd64 && sudo chmod +x /usr/local/bin/sops
+
+      - name: SSH key
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.CI_SSH_KEY }}" > ~/.ssh/ci_key
+          chmod 600 ~/.ssh/ci_key
+
+      - name: age key (SOPS decrypt)
+        run: |
+          mkdir -p ~/.config/sops/age
+          printf '%s\n' "${{ secrets.CI_AGE_KEY }}" > ~/.config/sops/age/keys.txt
+          chmod 600 ~/.config/sops/age/keys.txt
+
+      # INTERIM: join the overlay. Removed at cutover to a self-hosted runner.
+      - name: WireGuard up (join overlay)
+        run: |
+          printf '%s\n' "${{ secrets.CI_WG_CONF }}" | sudo tee /etc/wireguard/wg0.conf >/dev/null
+          sudo chmod 600 /etc/wireguard/wg0.conf
+          sudo wg-quick up wg0
+          sudo wg show wg0
+
+      - name: Deploy + reconcile + verify
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+          SSH_KEY: /home/runner/.ssh/ci_key
+          SOPS_AGE_KEY_FILE: /home/runner/.config/sops/age/keys.txt
+        run: |
+          make deploy INVENTORY=inventories/prod/inventory.yml SSH_AUTH=key
+          # Runtime users are in-memory; a deploy that restarts xray wipes them.
+          # Replay the desired-users state so customers are never stranded.
+          make reconcile NODE=entry-1 STATE="${DESIRED_USERS:-/secure/desired-users.json}" || echo "reconcile: no state file, skipping"
+          make verify INVENTORY=inventories/prod/inventory.yml
+
+      - name: Customer E2E
+        if: ${{ inputs.run_e2e }}
+        run: make e2e-all INVENTORY=inventories/prod/inventory.yml ENTRY=entry-1
+
+      - name: WireGuard down
+        if: always()
+        run: sudo wg-quick down wg0 || true

@@ -1,0 +1,6 @@
+---
+# STUB (spec §9.2). Self-hosted CI runner that reaches Vault + fleet and acts as the
+# steady-state Ansible control node; registered via a short-lived Vault-held token.
+- name: Runner role placeholder
+  ansible.builtin.debug:
+    msg: "TODO: provision self-hosted runner (SSH to fleet + Vault reach); becomes the Ansible control node."

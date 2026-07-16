@@ -1,0 +1,13 @@
+route:
+  receiver: default
+  group_by: [alertname, node]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: default
+{% if alertmanager_webhook_url | default('') | length > 0 %}
+    webhook_configs:
+      - url: "{{ alertmanager_webhook_url }}"
+        send_resolved: true
+{% endif %}

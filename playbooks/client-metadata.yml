@@ -1,0 +1,122 @@
+---
+# Export sensitive client bootstrap metadata used by the backend and E2E tests.
+# The mode-0600 file removes any need for the backend to SSH to an entry merely to build profiles.
+- name: Select active entries for client metadata
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    ansible_become: false
+  tasks:
+    - name: Register enabled entries
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: active_entry_metadata
+      loop: "{{ groups['entry'] | default([]) }}"
+      when: hostvars[item].node_enabled | default(true) | bool
+      changed_when: false
+
+- name: Derive entry REALITY client passwords
+  hosts: active_entry_metadata
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    _reality_public_key_output_regex: >-
+      (?im)^[ \t]*(?:Password(?:[ \t]*[(][ \t]*Public[ \t]*Key[ \t]*[)])?|Public[ \t]*Key)[ \t]*[:=][ \t]*([A-Za-z0-9_-]{43})[ \t]*$
+  tasks:
+    - name: Read retained entry REALITY private key
+      ansible.builtin.slurp:
+        src: /var/lib/xray/reality.key
+      register: _entry_reality_private
+      no_log: false
+
+    - name: Derive entry REALITY client password with the deployed image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - "{{ xray_image }}"
+          - x25519
+          - -i
+          - "{{ _entry_reality_private.content | b64decode | trim }}"
+      register: _entry_reality_output
+      changed_when: false
+      no_log: false
+
+    - name: Extract and validate entry REALITY client password
+      ansible.builtin.set_fact:
+        _entry_reality_private_value: "{{ _entry_reality_private.content | b64decode | trim }}"
+        entry_reality_password: >-
+          {{ (_entry_reality_output.stdout
+              | regex_findall(_reality_public_key_output_regex)
+              | first) | default('', true) }}
+      no_log: false
+
+    - name: Require a valid non-private client password
+      ansible.builtin.assert:
+        that:
+          - entry_reality_password | length == 43
+          - entry_reality_password is match('^[A-Za-z0-9_-]{43}$')
+          - entry_reality_password != _entry_reality_private_value
+        fail_msg: "Could not derive safe client metadata for {{ inventory_hostname }}."
+      no_log: false
+
+- name: Write backend client endpoint manifest
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    ansible_become: false
+    client_metadata_dir: "{{ playbook_dir }}/../generated"
+    client_metadata_file: "{{ client_metadata_dir }}/client-endpoints.json"
+  tasks:
+    - name: Require at least one enabled entry
+      ansible.builtin.assert:
+        that:
+          - groups['active_entry_metadata'] | default([]) | length > 0
+        fail_msg: "At least one enabled entry is required to export client metadata."
+
+    - name: Build entry metadata map
+      ansible.builtin.set_fact:
+        _client_metadata_entries: >-
+          {{ _client_metadata_entries | default({}) | combine({
+            item: {
+              'address': hostvars[item].public_hostname | default(hostvars[item].ansible_host),
+              'port': hostvars[item].public_port | default(443) | int,
+              'server_name': hostvars[item].reality_server_names[0],
+              'short_id': hostvars[item].reality_short_ids[0],
+              'reality_password': hostvars[item].entry_reality_password,
+              'fingerprint': hostvars[item].reality_fingerprint | default('chrome'),
+              'flow': 'xtls-rprx-vision',
+              'api_host': hostvars[item].xray_api_overlay_host | default(hostvars[item].xray_api_public_host | default(hostvars[item].ansible_host)),
+              'api_port': hostvars[item].xray_api_port | default(10085) | int,
+              'default_exit_tag': hostvars[item].entry_default_exit_tag,
+              'xray_image': hostvars[item].xray_image
+            }
+          }) }}
+      loop: "{{ groups['active_entry_metadata'] }}"
+      no_log: false
+
+    - name: Create local generated-data directory
+      ansible.builtin.file:
+        path: "{{ client_metadata_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Persist backend client endpoint manifest
+      ansible.builtin.copy:
+        dest: "{{ client_metadata_file }}"
+        content: "{{ {'schema_version': 1, 'entries': _client_metadata_entries} | to_nice_json }}\n"
+        mode: "0600"
+      no_log: false
+      diff: false
+
+    - name: Report exported backend contract
+      ansible.builtin.debug:
+        msg: >-
+          Exported {{ groups['active_entry_metadata'] | length }} active entry endpoint(s)
+          to {{ client_metadata_file }}.

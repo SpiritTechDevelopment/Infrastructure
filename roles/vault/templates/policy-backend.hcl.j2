@@ -1,0 +1,7 @@
+# Runtime backend AppRole: read application secrets only.
+path "secret/data/backend/*" {
+  capabilities = ["read"]
+}
+path "secret/metadata/backend/*" {
+  capabilities = ["list", "read"]
+}
