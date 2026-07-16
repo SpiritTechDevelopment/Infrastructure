@@ -95,3 +95,112 @@
   when:
     - common_manage_firewall | bool
     - common_firewall_engine == 'nftables'
+
+# fail2ban — SSH brute-force protection (systemd journal backend, port-aware ban).
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+    update_cache: true
+  when: common_enable_fail2ban | bool
+
+- name: Configure fail2ban sshd jail
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_enable_fail2ban | bool
+  notify: Restart fail2ban
+
+- name: Enable fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+  when: common_enable_fail2ban | bool
+
+# sysctl — conservative kernel hardening. PRESERVES ip_forward=1 (Docker + WG hub
+# need it) and omits rp_filter (would break overlay/asymmetric routing).
+- name: Deploy sysctl hardening
+  ansible.builtin.template:
+    src: sysctl-hardening.conf.j2
+    dest: /etc/sysctl.d/90-spirit-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_manage_sysctl | bool
+  notify: Reload sysctl
+
+# auditd — file/identity/privilege watch rules (uses the existing audit.rules.j2).
+- name: Install auditd
+  ansible.builtin.apt:
+    name: auditd
+    state: present
+    update_cache: true
+  when: common_enable_auditd | bool
+
+- name: Deploy audit rules
+  ansible.builtin.template:
+    src: audit.rules.j2
+    dest: /etc/audit/rules.d/90-spirit.rules
+    owner: root
+    group: root
+    mode: "0640"
+  when: common_enable_auditd | bool
+  notify: Load audit rules
+
+# Remove the hand-placed 50-vpn.rules — it is byte-identical drift that the
+# managed 90-spirit.rules supersedes. Leaving both makes augenrules --load fail
+# with "Rule exists" (duplicate watches).
+- name: Remove legacy hand-placed audit rules
+  ansible.builtin.file:
+    path: /etc/audit/rules.d/50-vpn.rules
+    state: absent
+  when: common_enable_auditd | bool
+  notify: Load audit rules
+
+- name: Enable auditd
+  ansible.builtin.service:
+    name: auditd
+    state: started
+    enabled: true
+  when: common_enable_auditd | bool
+
+# Guarantee rules are loaded on every hardened run — the Load-audit-rules handler
+# only fires on a file change, so an interrupted prior run could leave rules
+# written-but-not-loaded. augenrules --load is idempotent ("No change" when
+# already current).
+- name: Ensure audit rules are loaded
+  ansible.builtin.command: augenrules --load
+  changed_when: false
+  when: common_enable_auditd | bool
+
+# unattended-upgrades — auto security updates, never auto-reboot.
+- name: Install unattended-upgrades
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - apt-listchanges
+    state: present
+    update_cache: true
+  when: common_enable_unattended_upgrades | bool
+
+- name: Enable periodic unattended-upgrades
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_enable_unattended_upgrades | bool
+
+- name: Constrain unattended-upgrades (no auto-reboot)
+  ansible.builtin.template:
+    src: 52-spirit-unattended.conf.j2
+    dest: /etc/apt/apt.conf.d/52-spirit-unattended
+    owner: root
+    group: root
+    mode: "0644"
+  when: common_enable_unattended_upgrades | bool

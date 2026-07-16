@@ -10,3 +10,19 @@
 - name: Reload nftables
   ansible.builtin.command: nft -f /etc/nftables.conf
   changed_when: true
+
+- name: Restart fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: restarted
+
+# Reload all sysctl.d drop-ins. Safe: our file preserves ip_forward=1.
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: true
+
+# Recompile + load audit rules without restarting auditd (systemd can't restart
+# auditd cleanly). Our rules use -f 1 (not -e 2), so they are reloadable.
+- name: Load audit rules
+  ansible.builtin.command: augenrules --load
+  changed_when: true

@@ -130,13 +130,28 @@ management/telemetry/API surfaces are overlay-only; only `:443` (data plane) and
 `:22` (key-only SSH) are public fleet-wide. What remains is the deferred/future
 hardening below — none of it blocks the overlay-first goal.
 
+### Done (host hardening — L6)
+- **fail2ban / sysctl / auditd / unattended-upgrades** codified in `roles/common`
+  (deploy_mode-gated) and applied fleet-wide. fail2ban: port-aware sshd jail,
+  systemd backend, **`ignoreip` = loopback + overlay + workstation** (an SSH client
+  offering multiple agent keys logs "Failed publickey" and can trip fail2ban — the
+  ignoreip prevents operator lockout). sysctl: conservative hardening that
+  **preserves `ip_forward=1`** (Docker + WG hub) and omits `rp_filter`. auditd:
+  wired `audit.rules.j2`; the managed `90-spirit.rules` **replaced the hand-placed
+  duplicate `50-vpn.rules`** (the dup made `augenrules --load` fail "Rule exists");
+  added an "ensure loaded" task so an interrupted run can't leave rules unloaded.
+  unattended-upgrades: security-only, never auto-reboot. Verified fleet-wide;
+  data plane + overlay + telemetry intact.
+  Apply: `harden.yml -e deploy_mode=hardened -e common_enable_fail2ban=true
+  -e common_manage_sysctl=true -e common_enable_auditd=true
+  -e common_enable_unattended_upgrades=true --limit <host>`.
+
 ### Deferred / future
 - **Codify the WireGuard overlay** via `management_wireguard` role with zero-diff
   (currently hand-configured); un-stub `make management`; model external peers
   (10.20.0.2 workstation, 10.20.0.23) in `management_wireguard_external_peers`.
 - **Vault SSH CA** (24h, source-address-locked) + full Vault production init.
-- **Remaining host hardening:** sysctl, auditd (`audit.rules.j2` orphaned),
-  fail2ban, unattended-upgrades, `deploy` user creation.
+- **`deploy` user creation** (`common_manage_deploy_user`) — named non-root account.
 - **Workstation:** fix `/etc/wireguard/wg0.conf` so `wg0` gets its address on
   boot (it has `Address = 10.20.0.2/32` but a half-failed bring-up skipped it;
   clean `wg-quick down/up` fixes it). Enable local docker on boot.

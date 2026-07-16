@@ -1,0 +1,14 @@
+# Managed by Ansible — do not edit by hand.
+# fail2ban SSH brute-force protection using the systemd journal backend (reads
+# sshd failures from journald regardless of port). `port` is the real SSH port so
+# the ban action blocks the attacker on the port SSH actually listens on.
+[DEFAULT]
+ignoreip = {{ common_fail2ban_ignoreip }}
+bantime  = {{ common_fail2ban_bantime }}
+findtime = {{ common_fail2ban_findtime }}
+maxretry = {{ common_fail2ban_maxretry }}
+backend  = systemd
+
+[sshd]
+enabled = true
+port    = {{ ssh_port }}

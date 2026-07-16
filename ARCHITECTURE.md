@@ -153,7 +153,7 @@ graph LR
 | Layer | What | Managed by |
 |---|---|---|
 | **L7 Provisioning** | Ansible, reconcile loop, backend contract | repo (application only) |
-| **L6 Host hardening** | sshd / fail2ban / sysctl / auditd / unattended-upgrades / deploy user | sshd **codified** (key-only, `deploy_mode`-gated); fail2ban/sysctl/auditd/deploy-user **deferred** |
+| **L6 Host hardening** | sshd / fail2ban / sysctl / auditd / unattended-upgrades / deploy user | **codified** (`deploy_mode`-gated): sshd key-only, fail2ban (ignoreip-protected), conservative sysctl, auditd, unattended-upgrades. `deploy` user still **deferred** |
 | **L5 Firewall** | nftables (all hosts) | **codified** (`roles/common` + per-host `firewall.yml`); managed nftables fleet-wide (exit migrated off ufw) |
 | **L4 Overlay** | WireGuard `10.20.0.0/24` hub-and-spoke | live + **required for management**; still **hand-configured** (`management_wireguard` role stubbed) |
 | **L3 Container net** | host-mode (VPN nodes) vs bridge + DNAT (control-1) | repo (compose) |
@@ -400,10 +400,12 @@ convergence is **done** and codified. Full state/decisions/gotchas live in
   with dry-run + dead-man auto-revert + E2E gate.
 - **Operator access** is codified: `operators` roster → `authorized_keys` via the
   scoped `playbooks/access.yml`; secrets are SOPS-encrypted (`make decrypt`).
-- **Still deferred** (not yet codified): the `management_wireguard` role (overlay
-  hand-configured), the Vault SSH CA, and fail2ban / sysctl / auditd /
-  unattended-upgrades / `deploy` user. `tc-shaping.sh.j2` / `audit.rules.j2`
-  remain orphaned.
+- **Host hardening codified & applied fleet-wide:** fail2ban (port-aware jail,
+  `ignoreip`-protected), conservative sysctl (preserves `ip_forward=1`), auditd
+  (`audit.rules.j2` now wired; replaced the hand-placed `50-vpn.rules`), and
+  unattended-upgrades (security-only, no auto-reboot).
+- **Still deferred:** the `management_wireguard` role (overlay hand-configured),
+  the Vault SSH CA, and the `deploy` user. `tc-shaping.sh.j2` remains orphaned.
 
 Blocker-avoidance rules (still enforced for every host change):
 

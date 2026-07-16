@@ -39,3 +39,19 @@ common_management_cidr: 10.20.0.0/24
 # Docker bridge egress in the forward chain (the rule the orphaned template lacked).
 common_docker_bridge_forwarding: false
 common_docker_bridge_cidr: 172.16.0.0/12
+
+# --- fail2ban (rendered only when common_enable_fail2ban) ---
+# SSH brute-force protection via the systemd journal backend. `port` derives from
+# ssh_port so the ban action targets the real SSH port (232 on entry-1, 22 else).
+common_fail2ban_maxretry: 5
+common_fail2ban_findtime: 600
+common_fail2ban_bantime: 3600
+# Never ban these sources — the operator/overlay must not get locked out (an SSH
+# client offering several agent keys logs multiple "Failed publickey" lines and
+# can trip fail2ban even on a legitimate login). Loopback + the overlay + admin.
+common_fail2ban_ignoreip: "127.0.0.1/8 ::1 10.20.0.0/24 206.84.238.130/32"
+
+# --- unattended-upgrades (common_enable_unattended_upgrades) ---
+# Auto-apply security updates only; never auto-reboot (a reboot would drop the
+# data plane + in-memory runtime users).
+common_unattended_auto_reboot: false

@@ -1,0 +1,30 @@
+# Managed by Ansible — conservative kernel hardening. Loaded via `sysctl --system`.
+#
+# DELIBERATELY PRESERVES packet forwarding: Docker AND the WireGuard hub
+# (control-1 forwards wg0<->wg0) require ip_forward=1. A naive hardening baseline
+# that sets ip_forward=0 would break the overlay and all bridge containers.
+# rp_filter is intentionally NOT set — strict reverse-path filtering can drop
+# the overlay's asymmetric/forwarded traffic.
+net.ipv4.ip_forward = 1
+
+# ICMP redirects: don't accept or send (standard, safe on a forwarding host).
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# Source routing off.
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+
+# TCP SYN flood mitigation + log spoofed/martian packets.
+net.ipv4.tcp_syncookies = 1
+net.ipv4.conf.all.log_martians = 1
+
+# General kernel hardening.
+kernel.randomize_va_space = 2
+kernel.dmesg_restrict = 1
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1

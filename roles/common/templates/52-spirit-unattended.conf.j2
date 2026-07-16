@@ -1,0 +1,4 @@
+// Managed by Ansible. Security updates only; never auto-reboot (a reboot would
+// drop the data plane + in-memory Xray runtime users — reboot on a maintenance
+// window instead).
+Unattended-Upgrade::Automatic-Reboot "{{ 'true' if common_unattended_auto_reboot | bool else 'false' }}";
