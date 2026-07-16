@@ -1,17 +1,18 @@
 # Spirit VPN — Architecture & Administration Guide
 
 This document describes the fleet **as it actually runs today**, and how to
-administer it. It is deliberately honest about the gap between what the
-repository manages (the application: containers, configs, runtime users) and
-what is currently maintained by hand on the live hosts (firewalls, the
-WireGuard overlay, OS hardening). Read [Security posture](#12-security-posture--hardening-state)
+administer it. Read [Security posture](#12-security-posture--hardening-state)
 before making any firewall or hardening change.
 
-> **One-line mental model:** this repo is a solid *application deployment*
-> system (VPN data plane + observability + Vault + runtime-user management).
-> Host hardening is **not implemented in the repo** and is hand-applied on the
-> live boxes, where it has drifted. Treat the two as separate concerns until a
-> convergence project brings hardening under Ansible.
+> **One-line mental model:** this repo deploys the *application* (VPN data plane +
+> observability + Vault + runtime-user management) **and** manages host hardening
+> and exposure. The overlay-first hardening convergence is **done**: the firewall
+> is codified (managed nftables on every host), SSH is key-only fleet-wide, and
+> all management/telemetry/API surfaces are **overlay-only** — only `:443` (data)
+> and `:22`/`:232` (key-only SSH) are public. The WireGuard overlay is live and
+> **required** for management, though still hand-configured (its role is not yet
+> un-stubbed). See [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md) for the full
+> state and [OPERATIONS.md](OPERATIONS.md) for the access/deploy model.
 
 ## Table of contents
 
@@ -55,8 +56,8 @@ Source of truth: `inventories/prod/inventory.yml`.
 
 ```mermaid
 graph TB
-    subgraph PROV["L7 · Provisioning — Ansible (owns the APP; disowns hardening today)"]
-        ANS["make deploy · make reconcile · BACKEND_INTEGRATION contract"]
+    subgraph PROV["L7 · Provisioning — Ansible (app + codified firewall/SSH/exposure)"]
+        ANS["make deploy · make reconcile · make decrypt · access.yml"]
     end
 
     CUST(["Customer"])
@@ -65,21 +66,21 @@ graph TB
     subgraph CTRL["control-1 · WG hub · 193.247.81.167"]
         CTRLc["Compose: observability + vault<br/>Prometheus 9090 · Loki 3100 · Grafana 3000<br/>Alertmanager 9093 · blackbox · xray-usage-exporter · Vault 8200"]
         CTRLnet["L3 net: bridge + DNAT (Docker ip nat table)"]
-        CTRLfw["L5 fw: nftables — hand-maintained (drifted)"]
+        CTRLfw["L5 fw: nftables — managed (overlay-only mgmt)"]
         CTRLc --- CTRLnet --- CTRLfw
     end
 
     subgraph ENTRY["entry-1 · 5.101.67.252 (ssh :232)"]
         ENTRYc["Compose vpn: xray :443 · nginx-mask :8443<br/>node-exporter · alloy · Xray API :10085"]
         ENTRYnet["L3 net: network_mode host (no NAT)"]
-        ENTRYfw["L5 fw: nftables — hand-maintained (drifted)"]
+        ENTRYfw["L5 fw: nftables — managed (443 public, 10085 overlay)"]
         ENTRYc --- ENTRYnet --- ENTRYfw
     end
 
     subgraph EXIT["exit-fr · 151.247.196.239"]
         EXITc["Compose vpn: xray :443 · nginx-mask<br/>node-exporter · alloy · Xray API :10085"]
         EXITnet["L3 net: network_mode host (no NAT)"]
-        EXITfw["L5 fw: ufw — hand-maintained (drifted)"]
+        EXITfw["L5 fw: nftables — managed (migrated off ufw)"]
         EXITc --- EXITnet --- EXITfw
     end
 
@@ -94,7 +95,7 @@ graph TB
     ANS ==>|"MGMT"| EXITc
     ANS ==>|"MGMT"| CTRLc
 
-    WG{{"L4 · WireGuard overlay wg0 · 10.20.0.0/24 · hub-and-spoke · MGMT<br/>live but UNMANAGED by repo (make management is a stub; enabled:false)"}}
+    WG{{"L4 · WireGuard overlay wg0 · 10.20.0.0/24 · hub-and-spoke · MGMT<br/>live + REQUIRED for management; hand-configured (role still stubbed)"}}
     CTRL --- WG
     ENTRY --- WG
     EXIT --- WG
@@ -152,9 +153,9 @@ graph LR
 | Layer | What | Managed by |
 |---|---|---|
 | **L7 Provisioning** | Ansible, reconcile loop, backend contract | repo (application only) |
-| **L6 Host hardening** | sshd / fail2ban / sysctl / auditd / unattended-upgrades / deploy user | **tripwire only — not implemented in repo** |
-| **L5 Firewall** | nftables (entry, control) · ufw (exit) | **hand-rolled, drifted from repo** |
-| **L4 Overlay** | WireGuard `10.20.0.0/24` hub-and-spoke | role exists but **off in prod; live overlay unmanaged** |
+| **L6 Host hardening** | sshd / fail2ban / sysctl / auditd / unattended-upgrades / deploy user | sshd **codified** (key-only, `deploy_mode`-gated); fail2ban/sysctl/auditd/deploy-user **deferred** |
+| **L5 Firewall** | nftables (all hosts) | **codified** (`roles/common` + per-host `firewall.yml`); managed nftables fleet-wide (exit migrated off ufw) |
+| **L4 Overlay** | WireGuard `10.20.0.0/24` hub-and-spoke | live + **required for management**; still **hand-configured** (`management_wireguard` role stubbed) |
 | **L3 Container net** | host-mode (VPN nodes) vs bridge + DNAT (control-1) | repo (compose) |
 | **L2 Containers** | Compose projects: `vpn` / `observability` / `vault` | repo |
 | **L1 Hosts** | Ubuntu + Docker + kernel (nftables/wg/tc) | mixed |
@@ -164,8 +165,8 @@ graph LR
 ## 4. The three planes
 
 - **Data plane** — paying-customer traffic: `Customer → entry-1:443 → REALITY tunnel → exit-fr:443 → Internet`. Highest priority; never break it.
-- **Management plane** — operator/automation reaching nodes: SSH (`root@…`, ports 22 / **232 for entry-1**) and the Xray gRPC API on `:10085`. Intended to run over the WireGuard overlay; **currently reachable publicly** (see [§6](#6-firewalls--port-exposure)).
-- **Telemetry plane** — `entry-1`/`exit-fr` push metrics (`prometheus_remote_write` → `:9090`) and logs (`loki_ops_endpoint` → `:3100`) to `control-1`; blackbox on control probes the nodes' public ports.
+- **Management plane** — operator/automation reaching nodes: SSH (`root@…`, ports 22 / **232 for entry-1**, key-only) and the Xray gRPC API on `:10085`. The API is **overlay-only** (`wg0`, `10.20.0.0/24`); SSH is public but key-only (see [§6](#6-firewalls--port-exposure)).
+- **Telemetry plane** — `entry-1`/`exit-fr` push metrics (`prometheus_remote_write`) and logs (`loki_ops_endpoint`) to the hub over the overlay (`telemetry_hub_host: 10.20.0.1`, ports `9090`/`3100`); blackbox on control probes `:443` (public) and `:10085` (over the overlay).
 
 ---
 
@@ -176,61 +177,78 @@ graph LR
 - **VPN nodes (`entry-1`, `exit-fr`) use `network_mode: host`.** Containers share the host network namespace — no Docker bridge, **no DNAT**. Port 443 in the container *is* 443 on the host. These hosts have **no Docker NAT table to break**.
 - **`control-1` uses bridge networking with published ports.** Prometheus/Grafana/etc. sit on a `172.x` bridge; Docker programs **DNAT** rules in nftables' `ip nat` table to forward host ports to container IPs.
 
-**Consequence (learned the hard way):** on `control-1` only, a full `nft -f` reload (which begins with `flush ruleset`) also wipes Docker's `ip nat` table, breaking every published port until you run `systemctl restart docker` to reprogram it. The `forward` chain must also permit Docker-bridge egress (`ip saddr 172.16.0.0/12 accept`) or containers can't scrape each other or reach the internet. See [§13](#13-operational-runbook-gotchas).
+**Consequence (learned the hard way):** on `control-1` only, a `flush ruleset` (or
+`nft delete table ip nat`) wipes Docker's `ip nat` table, breaking every published
+port until `systemctl restart docker` reprograms it. The **managed template avoids
+this** — it uses an add+delete of only `inet filter`, never `flush ruleset`, so
+Docker's NAT survives and no restart is needed. The `forward` chain also permits
+Docker-bridge egress (`ip saddr 172.16.0.0/12 accept`, via
+`common_docker_bridge_forwarding`) or bridge containers can't scrape/egress. See
+[§13](#13-operational-runbook-gotchas).
 
 ---
 
 ## 6. Firewalls & port exposure
 
-> **Current state is hand-maintained and drifted from the repo.** The repo's
-> `roles/common/templates/nftables.conf.j2` is **orphaned** (no task renders
-> it), and `common_manage_firewall: false`. Editing the live firewall is a
-> manual, per-host operation today.
+> **Codified and overlay-first.** The firewall is managed by Ansible on every
+> host: `roles/common` renders `nftables.conf.j2` from a per-host profile
+> (`inventories/prod/host_vars/<host>/firewall.yml`), gated by `deploy_mode` +
+> `common_manage_firewall`. The engine is **nftables fleet-wide** (exit-fr was
+> migrated off ufw). Only `:443` and SSH are public; management/telemetry/API are
+> overlay-only.
 
-Firewall engine per host:
+Firewall engine per host — all **nftables, managed** (`/etc/nftables.conf`,
+`nftables.service` enabled):
 
-| Host | Engine | Config file |
+| Host | Engine | Profile |
 |---|---|---|
-| `control-1` | nftables | `/etc/nftables.conf` (`nft -f`, then `systemctl reload-or-restart nftables`) |
-| `entry-1` | nftables | `/etc/nftables.conf` |
-| `exit-fr` | ufw | `ufw allow …` |
+| `control-1` | nftables (bridge/DNAT) | `host_vars/control-1/firewall.yml` |
+| `entry-1` | nftables (host-net) | `host_vars/entry-1/firewall.yml` |
+| `exit-fr` | nftables (host-net) | `host_vars/exit-fr/firewall.yml` |
 
-**Ports currently exposed publicly** (operator decisions made during bring-up; they contradict the overlay-first intent and should be revisited during hardening):
+**Current exposure** (after the C1/C2/C3 overlay-first rollback):
 
-| Host | Port | Service | Note |
+| Host | Port | Service | Exposure |
 |---|---|---|---|
-| entry-1 / exit-fr | 443 | VLESS/REALITY | data plane — must be public |
-| entry-1 / exit-fr | 10085 | Xray gRPC API | **opened publicly** (was WG-only) |
-| control-1 | 9090 | Prometheus | **opened publicly** (was WG-only) |
-| control-1 | 3100 | Loki | **opened publicly** |
-| control-1 | 3000 | Grafana | **opened publicly** (Grafana admin auth is the only gate) |
-| control-1 | 8200 / 9093 | Vault / Alertmanager | WG-only |
-| all | 22 / 232 | SSH | source-restricted on some hosts |
+| entry-1 / exit-fr | 443 | VLESS/REALITY | **public** (data plane) |
+| all | 22 / 232 | SSH | **public**, key-only (no source whitelist) |
+| entry-1 / exit-fr | 10085 | Xray gRPC API | **overlay-only** (`wg0`, `10.20.0.0/24`) |
+| control-1 | 9090 / 3100 | Prometheus / Loki | **overlay-only** (whole `/24` — nodes remote-write/push) |
+| control-1 | 3000 / 9093 / 8200 | Grafana / Alertmanager / Vault | **overlay-only** (workstation `10.20.0.2`) |
 
-**Editing the firewall safely (control-1):** always back up first, validate, apply, then restart Docker:
+**Editing the firewall (managed):** change the host's `firewall.yml`, dry-run,
+then apply via `playbooks/harden.yml` with a dead-man auto-revert — never hand-edit
+live. The managed template uses an add+delete idiom (not `flush ruleset`), so
+Docker's `ip nat` survives and **no `docker restart` is needed**:
 
 ```bash
-ssh root@193.247.81.167 "cp /etc/nftables.conf /etc/nftables.conf.bak.$(date +%s) \
-  && nft -c -f /etc/nftables.conf \
-  && systemctl reload-or-restart nftables \
-  && systemctl restart docker"    # <-- REQUIRED on control-1 after any nft reload
+ansible-playbook -i inventories/prod/inventory.yml playbooks/harden.yml \
+  -e deploy_mode=hardened -e common_manage_firewall=true --check --diff --limit <host>
+# then re-run without --check, behind the dead-man switch (CONVERGENCE_STATUS.md §5)
 ```
 
-On `entry-1`/`exit-fr` (host networking) the `systemctl restart docker` step is not required, but restarting the `vpn` containers there drops runtime users (see [§13](#13-operational-runbook-gotchas)).
+Reach `control-1` over the overlay (`-e ansible_host=10.20.0.1`); its public `:22`
+banner-hangs from the workstation. Restarting the `vpn` containers on
+entry-1/exit-fr drops runtime users (see [§13](#13-operational-runbook-gotchas)).
 
 ---
 
 ## 7. WireGuard overlay
 
-A hub-and-spoke overlay exists on the live hosts — `wg0`, `10.20.0.0/24`, hub =
-`control-1`, spokes = entry/exit. Its intent is a private, authenticated path
-for the management plane (SSH, Xray API, telemetry).
+A hub-and-spoke overlay runs on the live hosts — `wg0`, `10.20.0.0/24`, hub =
+`control-1` (`10.20.0.1`), spokes = entry/exit. After the overlay-first rollback
+it is the **required** path for the management plane: the Xray API (`10085`),
+telemetry ingest (`9090`/`3100`), and the operator's Grafana/Vault access are all
+reachable **only** over it. Operate from a machine that is a `wg0` peer.
 
-**Current management status:** the repo role `roles/management_wireguard` is
-complete, but `management_wireguard_enabled: false` in prod and `make
-management` is a **stub** ("private management network is intentionally
-unavailable"). **The live overlay is therefore unmanaged by the repo** — it was
-applied out of band. Do not assume `make deploy` will reconcile it.
+Peers: `control-1` `.1`, `entry-1` `.11`, `exit-fr` `.21`, operator workstation
+`.2`, plus external/CI peers. The roster's public keys live in `operators` /
+`management_wireguard_external_peers` (`group_vars/all.yml`).
+
+**Codification status:** the `roles/management_wireguard` role is **still stubbed**
+(`management_wireguard_enabled: false`; `make management` refuses), so the live
+overlay is **hand-configured** — `make deploy` does not reconcile it. Un-stubbing
+it (peers as data, zero-diff) is deferred; see [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md).
 
 ---
 
@@ -241,12 +259,16 @@ Every `make` command runs from the repo root on the operator workstation.
 ```bash
 cd /home/xvpaul/Desktop/spirit_vpn/infra_v1
 source ../../venv/bin/activate     # ansible-core 2.18.x lives in this venv
+sudo wg-quick up wg0               # join the management overlay (required to reach 10085/telemetry)
 sudo systemctl start docker        # local Docker is used by xray-api/gen-client; it is NOT enabled on boot
+make decrypt                       # materialize SOPS deploy secrets (needs your age key)
 make deps                          # verify prerequisites
 ```
 
-SSH auth modes (for remote targets): `SSH_AUTH=auto|key|password`, `SSH_KEY=…`.
-Passwords are entered interactively (`ASK_PASS=1`) — never store them in the repo.
+SSH is **key-only fleet-wide** (`SSH_AUTH=auto|key`, `SSH_KEY=…`); password auth is
+disabled on every host. Reach `control-1` over the overlay (`-e ansible_host=10.20.0.1`)
+— its public `:22` banner-hangs from the workstation. Access onboarding + the secrets
+model are in [OPERATIONS.md](OPERATIONS.md).
 
 Command reference (from `make help`):
 
@@ -340,13 +362,13 @@ After any deploy that restarts `vpn` containers, **reconcile runtime users** (§
 
 ## 11. Observability & usage
 
-All on `control-1` (`193.247.81.167`), currently public:
+All on `control-1`, **overlay-only** (reach them as a `wg0` peer at `10.20.0.1`):
 
-| Tool | URL | Auth |
+| Tool | URL (over the overlay) | Auth |
 |---|---|---|
-| Grafana | `http://193.247.81.167:3000` | `admin` / `.local-secrets/grafana-admin-password.txt` |
-| Prometheus | `http://193.247.81.167:9090` | none (public) |
-| Loki | `http://193.247.81.167:3100` | header `X-Scope-OrgID: ops` |
+| Grafana | `http://10.20.0.1:3000` | `admin` / SOPS (`grafana_admin_password`, via `make decrypt`) |
+| Prometheus | `http://10.20.0.1:9090` | overlay is the gate |
+| Loki | `http://10.20.0.1:3100` | header `X-Scope-OrgID: ops` |
 
 Provisioned Grafana dashboards:
 
@@ -364,27 +386,26 @@ Prometheus restart to load — the observability role now does this via a
 
 ## 12. Security posture & hardening state
 
-**Read this before any hardening or firewall change.** The repository is an
-application-deployment tool; **host hardening is not implemented in it today.**
+**Read this before any hardening or firewall change.** The overlay-first hardening
+convergence is **done** and codified. Full state/decisions/gotchas live in
+[CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md); the summary:
 
-- `roles/common` only installs runtime prerequisites (chrony/python/curl,
-  timezone). An **unconditional assert refuses to deploy** if any hardening flag
-  (`common_manage_firewall`, `common_manage_sshd`, `common_enable_fail2ban`,
-  `common_manage_sysctl`, `common_enable_auditd`, `common_enable_unattended_upgrades`,
-  `common_manage_deploy_user`) is `true`.
-- The hardening **templates exist but are orphaned** — `nftables.conf.j2`,
-  `tc-shaping.sh.j2`, `audit.rules.j2` are rendered by **no task**.
-- The **live hosts are hardened by hand** (nftables/ufw, WireGuard overlay,
-  fail2ban packages) — and that state has **drifted** from anything in the repo.
+- **`deploy_mode` gate** (`runtime` | `bootstrap` | `hardened`) replaced the old
+  unconditional tripwire. In `runtime` the `common_*` hardening flags must stay
+  false; `bootstrap`/`hardened` enable the tasks.
+- **Codified & live:** managed **nftables** firewall on every host (per-host
+  `firewall.yml`, Docker-NAT-safe add+delete idiom), **key-only SSH** fleet-wide
+  (`sshd-hardening.conf.j2`), and **overlay-only** exposure of `10085`/`9090`/
+  `3100`/`3000`/`9093`/`8200` (only `:443` + SSH public). Applied host-by-host
+  with dry-run + dead-man auto-revert + E2E gate.
+- **Operator access** is codified: `operators` roster → `authorized_keys` via the
+  scoped `playbooks/access.yml`; secrets are SOPS-encrypted (`make decrypt`).
+- **Still deferred** (not yet codified): the `management_wireguard` role (overlay
+  hand-configured), the Vault SSH CA, and fail2ban / sysctl / auditd /
+  unattended-upgrades / `deploy` user. `tc-shaping.sh.j2` / `audit.rules.j2`
+  remain orphaned.
 
-**Implication:** "organize hardening" here is a *convergence* project, not
-greenfield. The safe path is: capture the live nft/ufw/wg state into
-repo-managed templates → dry-run diff → replace the tripwire with a real
-`deploy_mode` → wire the orphaned templates into **Docker-aware** tasks (bridge
-egress + reconcile Docker after apply) → verify-gate each phase. The one
-genuinely risky step is the first cutover (managed rules replacing hand-rolled
-ones under a live fleet); everything after is idempotent. Blocker-avoidance
-rules to bake in:
+Blocker-avoidance rules (still enforced for every host change):
 
 1. Firewall tasks must include Docker-bridge egress and reconcile Docker on
    bridge hosts (control-1).
@@ -425,13 +446,13 @@ make api-ping NODE=entry-1       # Xray API reachable
 Quick manual checks:
 
 ```bash
-# data plane reachable
+# data plane reachable (public :443)
 for h in 5.101.67.252 151.247.196.239; do nc -z -w5 "$h" 443 && echo "$h:443 ok"; done
-# telemetry healthy
-curl -s http://193.247.81.167:9090/-/ready
-curl -s http://193.247.81.167:9090/api/v1/query?query=up | python3 -m json.tool
+# telemetry healthy — over the overlay (must be a wg0 peer)
+curl -s http://10.20.0.1:9090/-/ready
+curl -s http://10.20.0.1:9090/api/v1/query?query=up | python3 -m json.tool
 # per-user usage present
-curl -s 'http://193.247.81.167:9090/api/v1/query?query=xray_user_traffic_bytes_total' | python3 -m json.tool
+curl -s 'http://10.20.0.1:9090/api/v1/query?query=xray_user_traffic_bytes_total' | python3 -m json.tool
 ```
 
 A healthy fleet: all `probe_success` = 1, node metrics present for every enabled

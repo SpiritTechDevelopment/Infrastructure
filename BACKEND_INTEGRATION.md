@@ -9,8 +9,9 @@ generated/client-endpoints.json
 ```
 
 For each active entry it contains the public customer address/port, REALITY server name,
-short ID, derived client password, fingerprint, default exit tag, Xray image, and public API
-endpoint. The file is mode `0600` and must be treated as sensitive client bootstrap data.
+short ID, derived client password, fingerprint, default exit tag, Xray image, and the Xray
+API endpoint (the **overlay** address, `xray_api_overlay_host` — the API is overlay-only).
+The file is mode `0600` and must be treated as sensitive client bootstrap data.
 
 ## Runtime user lifecycle
 

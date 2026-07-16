@@ -1,5 +1,11 @@
 # Repository audit and corrections
 
+> **⚠ Historical audit (point-in-time).** This snapshot predates the hardening
+> convergence. Its "Xray API and telemetry are public / unauthenticated" findings
+> are **resolved**: those surfaces are now overlay-only and the firewall is
+> codified fleet-wide. For current state see [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md)
+> and [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Failure pattern removed
 
 The prior design coupled fixed SSH source allowlists, root/login restrictions, a

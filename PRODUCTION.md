@@ -1,5 +1,13 @@
 # Current operational boundary
 
+> **⚠ SUPERSEDED (historical).** This "no-hardening / public API + telemetry"
+> boundary no longer holds. The fleet is now hardened and overlay-first: firewall
+> codified, SSH key-only, and the Xray API + telemetry are **overlay-only**. Vault
+> stays loopback-only. For the current boundary read
+> [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md), [OPERATIONS.md](OPERATIONS.md),
+> and [ARCHITECTURE.md](ARCHITECTURE.md) §6. The break-glass / backup / reconcile
+> advice at the bottom still applies.
+
 The active repository is intentionally a functional, no-hardening deployment. It changes
 application/runtime packages and Compose stacks, but refuses to manage:
 

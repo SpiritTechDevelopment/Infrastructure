@@ -1,7 +1,9 @@
 # Xray API test workflow
 
-The active Xray API is native gRPC on public TCP/10085. The wrapper accepts either an
-inventory host name or an explicit `host:port` endpoint.
+The active Xray API is native gRPC on TCP/10085, now **overlay-only** — reachable
+only over the WireGuard overlay (`xray_api_overlay_host`, e.g. `10.20.0.11`), not
+publicly. `make api-*` targets the overlay host automatically; you must be a `wg0`
+peer. The wrapper accepts either an inventory host name or an explicit `host:port`.
 
 ```bash
 make api-ping NODE=entry-1
@@ -38,5 +40,6 @@ For the complete automated proof, including expected exit IP and post-removal re
 make e2e ENTRY=entry-1
 ```
 
-The API is unauthenticated in this functional phase. Do not expose port 10085 beyond the
-period needed to validate backend integration.
+The API has no built-in authentication — the WireGuard overlay is its access
+control. Port 10085 is **not** public (firewalled to `10.20.0.0/24` over `wg0`);
+keep it that way.

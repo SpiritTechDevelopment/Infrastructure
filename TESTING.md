@@ -20,7 +20,7 @@ This verifies on every active VPN node:
 - Xray, nginx mask, node_exporter and Alloy are running;
 - local Xray gRPC API works;
 - Xray diagnostics and TLS mask respond;
-- public VLESS and API TCP ports are reachable from the controller.
+- public VLESS (`:443`) is reachable; the Xray API (`:10085`) is reachable over the overlay.
 
 On the platform it verifies Loki, Prometheus, Alertmanager, Grafana, both dashboard UIDs,
 Vault process health, metrics from every node, public blackbox probes, and Xray logs from every
