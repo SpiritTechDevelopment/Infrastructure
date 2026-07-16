@@ -68,9 +68,8 @@ node_enabled: true
 operators:
   - name: pavel
     key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIArouBDJ+F+13H5T0ZgxEhSr9H3zFhrsymJdtBvt/aj5 xvpaul@github.com"
-  # DECISION PENDING: entry-1 also trusts `romanrabinkin@lenza`, which control-1
-  # and exit-fr do NOT. Decide Roman's scope (fleet-wide / entry-only / prune)
-  # before enabling exclusive management — see OPERATIONS.md "Operator roster".
+  - name: roman
+    key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGrWDKriCu9TfHIRz8NBLI88AluJD0tNA2aFSBcghIC4 romanrabinkin@lenza"
 
 # --- WireGuard overlay peers (for the future management_wireguard role) --------
 # PUBLIC keys + overlay IPs of external admin/CI peers on the hub. Public keys

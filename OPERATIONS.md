@@ -107,14 +107,12 @@ hub public key (`REiFPldc8cv5rQeE0i4rFEumslWT/zbJvZHCG21q/2I=`), the hub endpoin
 `sops updatekeys`, run `access.yml`, and **rotate any shared secret they could
 decrypt**.
 
-### ⚠ Operator roster decision (unresolved)
+### Operator roster
 
-Today `control-1` and `exit-fr` trust one operator key (`xvpaul@github.com`);
-`entry-1` **also** trusts `romanrabinkin@lenza`. The committed `operators` roster
-currently lists only `pavel`, so enabling exclusive management would **remove
-Roman from entry-1**. Decide first: is Roman a **fleet-wide** operator (add his
-key to `operators`), **entry-1 only** (use a `host_vars/entry-1` override), or
-should the key be **pruned**? Resolve this before running `access.yml` fleet-wide.
+Current fleet operators (trusted for root login on **every** host): `pavel`
+(`xvpaul@github.com`) and `roman` (`romanrabinkin@lenza`). Enabling exclusive
+management adds Roman to `control-1` + `exit-fr` (he was previously only on
+`entry-1`) — an intentional grant, so Roman now has access to the Vault host too.
 
 ## 5. Add a new server
 
