@@ -97,13 +97,21 @@ umask 077; wg genkey > ~/spirit_wg.key; wg pubkey < ~/spirit_wg.key > ~/spirit_w
 age-keygen -o ~/.config/sops/age/keys.txt
 ```
 
-They then open a **PR** adding their three PUBLIC parts:
+They then open a **PR** adding their PUBLIC keys as **one operator block** in
+`inventories/prod/group_vars/all.yml`:
 
-| Public part | Goes to |
-|---|---|
-| `~/.ssh/spirit_ops.pub` | `operators:` in `inventories/prod/group_vars/all.yml` |
-| `~/spirit_wg.pub` (+ a free `10.20.0.x`) | `management_wireguard_external_peers` |
-| `age1...` recipient | `.sops.yaml` (then `sops updatekeys` on the encrypted files) |
+```yaml
+operators:
+  - name: alice
+    ssh_key: "ssh-ed25519 AAAA… alice"        # -> root authorized_keys (access.yml)
+    wg_pubkey: "…="                            # -> overlay peer on the hub
+    wg_ip: "10.20.0.4"                         # a free 10.20.0.x
+    age_recipient: "age1…"                     # ALSO add to .sops.yaml (see below)
+```
+
+Because `sops` reads `.sops.yaml` (not Ansible vars), also add their `age1…` to
+`.sops.yaml` and run `sops updatekeys inventories/prod/secrets.sops.yml` so they can
+decrypt. (SSH-only operators can leave `wg_*`/`age_recipient` empty.)
 
 You review + merge, then apply the **scoped, non-disruptive** access play:
 

@@ -2,5 +2,5 @@
 # Do not edit by hand — changes are overwritten. Add/remove operators via a
 # reviewed PR to `operators`, then run playbooks/access.yml (--check --diff first).
 {% for op in operators %}
-{{ op.key }}
+{{ op.ssh_key }}
 {% endfor %}

@@ -59,22 +59,27 @@ prometheus_remote_write: "http://{{ telemetry_hub_host }}:9090/api/v1/write"
 # wiring, verification, and observability target generation.
 node_enabled: true
 
-# --- Operator access (consumed by playbooks/access.yml) -----------------------
-# The fleet operator roster: SSH PUBLIC keys trusted for root login on every
-# host. Public keys only — safe to commit and review in a PR. Add/remove a person
-# here, then run `playbooks/access.yml` (ALWAYS --check --diff first). access.yml
-# manages authorized_keys EXCLUSIVELY, so this list must be COMPLETE or you lock
-# people out (SSH is key-only fleet-wide).
+# --- Operators (public-key roster) --------------------------------------------
+# One block per operator = ALL their public keys in one place. Public keys are
+# safe to commit/review in a PR. Consumed by:
+#   - playbooks/access.yml -> root authorized_keys (uses ssh_key). EXCLUSIVE
+#     management, so this roster must be COMPLETE or you lock people out (SSH is
+#     key-only fleet-wide). Always `--check --diff` before applying.
+#   - management_wireguard role (uses wg_pubkey/wg_ip; role still stubbed).
+#   - .sops.yaml: age_recipient must ALSO be listed there — sops reads .sops.yaml,
+#     not Ansible vars. Keep the two in sync when adding/removing an operator.
 operators:
   - name: pavel
-    key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIArouBDJ+F+13H5T0ZgxEhSr9H3zFhrsymJdtBvt/aj5 xvpaul@github.com"
+    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIArouBDJ+F+13H5T0ZgxEhSr9H3zFhrsymJdtBvt/aj5 xvpaul@github.com"
+    wg_pubkey: "ooq8pY1/+HxkA+lNCaZivEbhqDR1K55FeAOPr4eTfyQ="
+    wg_ip: "10.20.0.2"
+    age_recipient: "age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax"
   - name: roman
-    key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGrWDKriCu9TfHIRz8NBLI88AluJD0tNA2aFSBcghIC4 romanrabinkin@lenza"
+    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGrWDKriCu9TfHIRz8NBLI88AluJD0tNA2aFSBcghIC4 romanrabinkin@lenza"
+    wg_pubkey: ""       # TBD — Roman generates a WireGuard key
+    wg_ip: ""           # TBD — assign a free 10.20.0.x
+    age_recipient: ""   # TBD — add to .sops.yaml too when set
 
-# --- WireGuard overlay peers (for the future management_wireguard role) --------
-# PUBLIC keys + overlay IPs of external admin/CI peers on the hub. Public keys
-# only. The live overlay is hand-configured today; this models it so the hub is
-# reproducible once `management_wireguard` is un-stubbed.
-management_wireguard_external_peers:
-  - { name: workstation, pubkey: "ooq8pY1/+HxkA+lNCaZivEbhqDR1K55FeAOPr4eTfyQ=", ip: "10.20.0.2" }
-  # add each operator's / the CI runner's peer as { name, pubkey, ip }
+# Overlay peers derived from the roster (operators who have a wg_ip assigned). The
+# management_wireguard role (when un-stubbed) reads .name / .wg_pubkey / .wg_ip.
+management_wireguard_external_peers: "{{ operators | selectattr('wg_ip', 'truthy') | list }}"

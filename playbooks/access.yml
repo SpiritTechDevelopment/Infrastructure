@@ -32,7 +32,7 @@
         that:
           - operators is defined
           - operators | length > 0
-          - operators | map(attribute='key') | select('match', '^(ssh-|ecdsa-)') | list | length == (operators | length)
+          - operators | map(attribute='ssh_key') | select('match', '^(ssh-|ecdsa-)') | list | length == (operators | length)
         fail_msg: >-
           `operators` is empty or malformed. Refusing to render authorized_keys —
           an empty/invalid roster would remove every key and lock out SSH. Fix the

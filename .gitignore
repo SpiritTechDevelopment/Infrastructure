@@ -35,3 +35,8 @@ support-bundle/
 *.rej
 *.bak
 *.bak.*
+# recovery bundles: commit ONLY the passphrase-encrypted .age blobs; never any
+# decrypted or extracted material.
+recovery/*
+!recovery/*.age
+!recovery/.gitkeep
