@@ -19,6 +19,13 @@ SSH_AUTH ?= $(if $(filter 1 yes true,$(ASK_PASS)),password,auto)
 SSH_KEY ?=
 ANSIBLE_EXTRA_ARGS ?=
 
+# SOPS-encrypted deploy secrets (committed) and their decrypted form (gitignored).
+# `make decrypt` materializes the plaintext; deploy targets depend on it and pass
+# it to Ansible as extra-vars. Replaces the old hand-placed .local-secrets files.
+SECRETS_SOPS  ?= inventories/prod/secrets.sops.yml
+SECRETS_PLAIN ?= inventories/prod/secrets.plain.yml
+SECRETS_ARGS  = --extra-vars @$(SECRETS_PLAIN)
+
 # SSH_AUTH modes:
 #   auto      use normal OpenSSH config/agent/default keys
 #   key       use exactly SSH_KEY and do not offer agent keys
@@ -74,8 +81,15 @@ check: ## Run all local static, parser, dashboard, syntax, and render checks
 test-api-wrapper: ## Offline test of add/list/stats/remove wrapper semantics
 	./scripts/test-api-wrapper.sh
 
-deploy: ## One-command full deployment plus infrastructure/telemetry verification
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/site.yml
+decrypt: ## Materialize SOPS-encrypted deploy secrets -> $(SECRETS_PLAIN) (gitignored)
+	@if [ -f "$(SECRETS_SOPS)" ]; then \
+	  command -v sops >/dev/null || { echo "sops is required (see OPERATIONS.md)" >&2; exit 2; }; \
+	  sops -d "$(SECRETS_SOPS)" > "$(SECRETS_PLAIN)" && chmod 600 "$(SECRETS_PLAIN)" && \
+	    echo "decrypted -> $(SECRETS_PLAIN)"; \
+	else echo "no $(SECRETS_SOPS); nothing to decrypt"; fi
+
+deploy: decrypt ## One-command full deployment plus infrastructure/telemetry verification
+	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/site.yml $(SECRETS_ARGS)
 
 verify: ## Re-run runtime, API, dashboards, logs, and metrics verification
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/verify.yml
@@ -92,19 +106,19 @@ deploy-e2e: ## Static checks, full deployment, infrastructure verification, and 
 	$(MAKE) deploy INVENTORY="$(INVENTORY)"
 	$(if $(EXIT),$(MAKE) e2e INVENTORY="$(INVENTORY)" ENTRY="$(ENTRY)" EXIT="$(EXIT)",$(MAKE) e2e-all INVENTORY="$(INVENTORY)" ENTRY="$(ENTRY)")
 
-platform: ## Deploy only Vault and observability
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/platform.yml $(if $(LIMIT),--limit "$(LIMIT)",)
+platform: decrypt ## Deploy only Vault and observability
+	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/platform.yml $(SECRETS_ARGS) $(if $(LIMIT),--limit "$(LIMIT)",)
 
 wire: ## Rebuild entry outbounds from deployed exit REALITY client passwords
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/wire-fleet.yml
 
-apply-node: ## Manual selected-node redeploy; LIMIT is mandatory and entries must be wired
+apply-node: decrypt ## Manual selected-node redeploy; LIMIT is mandatory and entries must be wired
 	@test -n "$(LIMIT)" || (echo 'LIMIT is required' >&2; exit 2)
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/fleet-infra.yml --limit "localhost,$(LIMIT)"
+	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/fleet-infra.yml $(SECRETS_ARGS) --limit "localhost,$(LIMIT)"
 
-check-node: ## Dry-run selected-node redeploy; LIMIT is mandatory
+check-node: decrypt ## Dry-run selected-node redeploy; LIMIT is mandatory
 	@test -n "$(LIMIT)" || (echo 'LIMIT is required' >&2; exit 2)
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/fleet-infra.yml --check --diff --limit "localhost,$(LIMIT)"
+	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/fleet-infra.yml $(SECRETS_ARGS) --check --diff --limit "localhost,$(LIMIT)"
 
 api-ping: ## Test Xray API; NODE=entry-1 or ENDPOINT=host:10085
 	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" ping
@@ -152,6 +166,6 @@ management: ## Stub: private management network is intentionally unavailable
 certs: ## Obtain/renew certificates; LIMIT defaults to control-1
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/acme.yml --limit "$(or $(LIMIT),control-1)" $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)
 
-.PHONY: help deps inventory ping lint syntax render check test-api-wrapper deploy verify e2e e2e-all deploy-e2e \
+.PHONY: help deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
 	platform wire apply-node check-node api-ping api-list api-emails api-has api-add api-remove api-stats \
 	gen-client smoke-via reconcile management certs

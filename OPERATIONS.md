@@ -46,26 +46,45 @@ make reconcile NODE=entry-1 STATE=/secure/desired-users.json   # after any xray 
 > runtime users**. Always `reconcile` afterwards. To change *only* operator SSH
 > access, do NOT use `make deploy` — use the scoped play in §4.
 
-## 3. Secrets: SOPS + Vault, never plaintext in Git
+## 3. Secrets: SOPS-encrypted in Git, decrypted at deploy time
 
-- **In Git, encrypted:** inventory secrets (REALITY keys, passwords, UUIDs) via
-  **SOPS** (`.sops.yaml` already targets the sensitive fields). Commit ciphertext;
-  distribute the age key out of band.
-- **In Vault:** shared recoverable material + (future) the SSH CA.
-- **Never in Git:** SSH/WireGuard **private** keys, Vault unseal keys/root token,
-  `.local-secrets/`. These are gitignored; keep them that way.
+Deploy secrets live **encrypted in the repo** (`inventories/prod/secrets.sops.yml`,
+committed) and are materialized locally with **`make decrypt`** (writes the
+gitignored `secrets.plain.yml`, which the deploy targets pass to Ansible as
+extra-vars). This replaced the hand-placed `.local-secrets/` files.
 
-### Wiring SOPS (one-time)
+```bash
+make decrypt        # sops -d secrets.sops.yml -> secrets.plain.yml (needs your age key)
+make deploy         # depends on decrypt; passes the secrets as --extra-vars
+sops inventories/prod/secrets.sops.yml   # edit/add a secret (re-encrypts on save)
+```
+
+What lives where — the important split:
+
+| Material | Home | In Git? |
+|---|---|---|
+| grafana pw, TLS **private** key, REALITY keys, UUIDs | `secrets.sops.yml` (SOPS) | ✅ ciphertext |
+| TLS certificate (public) | `secrets.sops.yml` | ✅ plaintext (it's public) |
+| operator age / SSH / WireGuard **private** keys | each operator's machine | ❌ never |
+| per-node SSH host keys, node WireGuard private keys | on the node | ❌ never |
+| **Vault unseal keys + root token** (`vault-init.json`), vault TLS key | **out-of-band** (password manager / safe) | ❌ never, even encrypted |
+
+> `.local-secrets/` today still holds break-glass material (`vault-init.json`,
+> `wireguard/`). That is **out-of-band** material — move it to a password manager
+> or offline store; do **not** migrate it into SOPS/Git. Only deploy secrets go in
+> SOPS.
+
+### First-time SOPS setup (per operator)
 
 ```bash
 sudo apt install -y age sops
-age-keygen -o ~/.config/sops/age/keys.txt          # each operator + the deploy machine
-# put every operator's PUBLIC age recipient in .sops.yaml (replace the placeholder),
-# then encrypt the sensitive inventory:
-sops --encrypt inventories/prod/inventory.yml > inventories/prod/inventory.sops.yml
-# add a decrypt step (or community.sops lookup) to the deploy flow; keep the
-# plaintext inventory.yml gitignored.
+age-keygen -o ~/.config/sops/age/keys.txt      # prints your age PUBLIC key: age1...
+# add your (and each operator's) age PUBLIC key to .sops.yaml, then re-wrap:
+sops updatekeys inventories/prod/secrets.sops.yml
 ```
+
+Back up your age **private** key (`~/.config/sops/age/keys.txt`) out of band — if
+every recipient loses their key, the secrets are unrecoverable.
 
 ## 4. Onboard / offboard an operator
 
@@ -141,3 +160,41 @@ Monitoring needs only an **overlay peer + a Grafana account** — no repo access
   the actions to commit SHAs** and set required reviewers on the `production`
   Environment. To move to a self-hosted runner (and drop the cloud secrets), see
   `CUTOVER.md`.
+
+## 8. Losing your keys — recovery
+
+**Principle: GitHub is the recovery *coordination* layer, not a key store.**
+GitHub access alone must never equal infra access — otherwise one compromised
+GitHub account = the whole fleet. So GitHub privileges let a locked-out operator
+*propose* new keys and *read* encrypted secrets, but **not decrypt or SSH in by
+themselves**. That separation is deliberate.
+
+If you lose your SSH / WireGuard / age keys:
+
+1. Regenerate all three keypairs locally (§4).
+2. Using your **GitHub** access, open a PR replacing your old public keys with the
+   new ones (`operators`, `management_wireguard_external_peers`, `.sops.yaml`).
+3. **Another operator** reviews + merges, then runs `sops updatekeys` (re-wraps the
+   secrets to your new age key — this *requires* an existing key-holder) and
+   `playbooks/access.yml` (re-installs your SSH key). They re-send you the hub
+   WireGuard facts.
+4. You regenerate `wg0.conf`, rejoin the overlay, and you're back.
+
+This needs a second operator on purpose: SOPS re-encryption and access grants
+can't be self-served from GitHub alone — that's the security property, not a gap.
+
+**If no second operator is available / total loss** — the break-glass paths, all
+**org-held and out-of-band (never in GitHub)**:
+
+- **Provider console / KVM** — always-on hard fallback to the hosts.
+- **Static break-glass SSH key** — offline-stored, never rotated away.
+- **Vault unseal keys + root token** — offline (from `vault-init.json`, which must
+  leave `.local-secrets/` for a password manager / safe).
+- *(Optional)* a **break-glass recovery age key** whose private half lives in that
+  same offline store and is a second recipient on every SOPS file — so decryption
+  is recoverable without another operator. It must stay **out of band, never in
+  GitHub**, exactly like the unseal keys.
+
+What may safely live in GitHub for recovery: the **public-key roster**, the
+**SOPS-encrypted secrets** (ciphertext), and this runbook. Nothing whose mere
+possession (without a separate key) grants access.
