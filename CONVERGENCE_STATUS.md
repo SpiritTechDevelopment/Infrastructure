@@ -146,12 +146,23 @@ hardening below — none of it blocks the overlay-first goal.
   -e common_manage_sysctl=true -e common_enable_auditd=true
   -e common_enable_unattended_upgrades=true --limit <host>`.
 
+### Done (deploy user — L5 access)
+- **Named `deploy` user** codified in `roles/common` (`common_manage_deploy_user`):
+  docker+sudo groups, NOPASSWD sudoers, authorized_keys = operator roster.
+  Reconciled the hand-created drift (control-1/entry-1 lacked docker group; exit-fr
+  had no deploy user). Applied fleet-wide; verified login + `sudo -n`→root + docker
+  on all three. **`ansible_user` migrated root→deploy** in `group_vars/all.yml`
+  (`ansible_user: deploy` + `ansible_become: true`; remote plays already
+  `become: true`, localhost plays `become: false`). Root stays key-only break-glass.
+
 ### Deferred / future
 - **Codify the WireGuard overlay** via `management_wireguard` role with zero-diff
   (currently hand-configured); un-stub `make management`; model external peers
   (10.20.0.2 workstation, 10.20.0.23) in `management_wireguard_external_peers`.
 - **Vault SSH CA** (24h, source-address-locked) + full Vault production init.
-- **`deploy` user creation** (`common_manage_deploy_user`) — named non-root account.
+- **Workstation `wg0.conf`**: set `Address = 10.20.0.2/24` under `[Interface]` so
+  the overlay address survives bring-up (it currently drops — clean `wg-quick
+  down/up` restores it). Enable local docker on boot.
 - **Workstation:** fix `/etc/wireguard/wg0.conf` so `wg0` gets its address on
   boot (it has `Address = 10.20.0.2/32` but a half-failed bring-up skipped it;
   clean `wg-quick down/up` fixes it). Enable local docker on boot.

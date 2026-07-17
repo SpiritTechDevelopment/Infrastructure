@@ -153,7 +153,7 @@ graph LR
 | Layer | What | Managed by |
 |---|---|---|
 | **L7 Provisioning** | Ansible, reconcile loop, backend contract | repo (application only) |
-| **L6 Host hardening** | sshd / fail2ban / sysctl / auditd / unattended-upgrades / deploy user | **codified** (`deploy_mode`-gated): sshd key-only, fail2ban (ignoreip-protected), conservative sysctl, auditd, unattended-upgrades. `deploy` user still **deferred** |
+| **L6 Host hardening** | sshd / fail2ban / sysctl / auditd / unattended-upgrades / deploy user | **codified** (`deploy_mode`-gated): sshd key-only, fail2ban (ignoreip-protected), conservative sysctl, auditd, unattended-upgrades, **deploy user** (ansible_user=deploy+sudo; root break-glass) |
 | **L5 Firewall** | nftables (all hosts) | **codified** (`roles/common` + per-host `firewall.yml`); managed nftables fleet-wide (exit migrated off ufw) |
 | **L4 Overlay** | WireGuard `10.20.0.0/24` hub-and-spoke | live + **required for management**; still **hand-configured** (`management_wireguard` role stubbed) |
 | **L3 Container net** | host-mode (VPN nodes) vs bridge + DNAT (control-1) | repo (compose) |
@@ -165,7 +165,10 @@ graph LR
 ## 4. The three planes
 
 - **Data plane** — paying-customer traffic: `Customer → entry-1:443 → REALITY tunnel → exit-fr:443 → Internet`. Highest priority; never break it.
-- **Management plane** — operator/automation reaching nodes: SSH (`root@…`, ports 22 / **232 for entry-1**, key-only) and the Xray gRPC API on `:10085`. The API is **overlay-only** (`wg0`, `10.20.0.0/24`); SSH is public but key-only (see [§6](#6-firewalls--port-exposure)).
+- **Management plane** — operator/automation reaching nodes: SSH (`deploy@…` + sudo
+  for steady-state, `root@…` key-only break-glass; ports 22 / **232 for entry-1**)
+  and the Xray gRPC API on `:10085`. The API is **overlay-only** (`wg0`,
+  `10.20.0.0/24`); SSH is public but key-only (see [§6](#6-firewalls--port-exposure)).
 - **Telemetry plane** — `entry-1`/`exit-fr` push metrics (`prometheus_remote_write`) and logs (`loki_ops_endpoint`) to the hub over the overlay (`telemetry_hub_host: 10.20.0.1`, ports `9090`/`3100`); blackbox on control probes `:443` (public) and `:10085` (over the overlay).
 
 ---
@@ -404,8 +407,10 @@ convergence is **done** and codified. Full state/decisions/gotchas live in
   `ignoreip`-protected), conservative sysctl (preserves `ip_forward=1`), auditd
   (`audit.rules.j2` now wired; replaced the hand-placed `50-vpn.rules`), and
   unattended-upgrades (security-only, no auto-reboot).
-- **Still deferred:** the `management_wireguard` role (overlay hand-configured),
-  the Vault SSH CA, and the `deploy` user. `tc-shaping.sh.j2` remains orphaned.
+- **`deploy` user codified + `ansible_user` migrated root→deploy** (docker+sudo,
+  operator keys; root is key-only break-glass).
+- **Still deferred:** the `management_wireguard` role (overlay hand-configured)
+  and the Vault SSH CA. `tc-shaping.sh.j2` remains orphaned.
 
 Blocker-avoidance rules (still enforced for every host change):
 

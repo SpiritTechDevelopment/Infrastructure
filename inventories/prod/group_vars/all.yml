@@ -1,5 +1,12 @@
 ---
 env: prod
+
+# Steady-state deploys authenticate as the named `deploy` user and escalate via
+# sudo (NOPASSWD), instead of logging in as root. Remote plays set `become: true`;
+# localhost plays set `become: false` (this global default is overridden there).
+# Root remains key-only break-glass. See OPERATIONS.md.
+ansible_user: deploy
+ansible_become: true
 xray_image: ghcr.io/xtls/xray-core:26.3.27
 nginx_mask_image: nginx:1.29-alpine
 alloy_image: grafana/alloy:v1.17.1
