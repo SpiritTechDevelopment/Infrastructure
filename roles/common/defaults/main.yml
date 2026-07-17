@@ -55,3 +55,13 @@ common_fail2ban_ignoreip: "127.0.0.1/8 ::1 10.20.0.0/24 206.84.238.130/32"
 # Auto-apply security updates only; never auto-reboot (a reboot would drop the
 # data plane + in-memory runtime users).
 common_unattended_auto_reboot: false
+
+# --- deploy user (common_manage_deploy_user) ---
+# Named, auditable non-root account for steady-state deploys. docker group + sudo
+# make it root-equivalent on a Docker host — accepted deliberately; the win is a
+# named account with no root-password login, not a hard boundary. Its
+# authorized_keys is the operator roster (operators log in AS deploy). Root stays
+# as key-only break-glass. ansible_user is migrated to deploy separately, after
+# this is verified.
+common_deploy_user: deploy
+common_deploy_groups: [sudo, docker]
