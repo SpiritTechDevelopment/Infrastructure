@@ -187,16 +187,13 @@ hardening below — none of it blocks the overlay-first goal.
     was shredded (token still in `vault-init.json`, out-of-band).
 
 ### Deferred / future
-- **Workstation `wg0.conf`**: `Address = 10.20.0.2/24` under `[Interface]` so the
-  overlay address survives bring-up.
+- **Workstation `wg0` boot persistence** — **DONE (2026-07-18):**
+  `Address = 10.20.0.2/24` under `[Interface]`, `wg-quick@wg0` enabled, NM leaves
+  `wg0` externally-managed. `/24` takes effect on next clean bring-up.
+- **Workstation local docker on boot** — still pending (`xray-api.sh`/`gen-client`
+  need it running).
 - **WireGuard live-apply** (codified; restarts wg0 — do in a maintenance window).
 - **Vault auto-unseal** + expose-on-overlay for remote operator signing.
-- **Workstation `wg0.conf`**: set `Address = 10.20.0.2/24` under `[Interface]` so
-  the overlay address survives bring-up (it currently drops — clean `wg-quick
-  down/up` restores it). Enable local docker on boot.
-- **Workstation:** fix `/etc/wireguard/wg0.conf` so `wg0` gets its address on
-  boot (it has `Address = 10.20.0.2/32` but a half-failed bring-up skipped it;
-  clean `wg-quick down/up` fixes it). Enable local docker on boot.
 - **Rotate** the workstation WG private key (pasted in a prior chat) when convenient.
 
 ---

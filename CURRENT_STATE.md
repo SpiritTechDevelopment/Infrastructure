@@ -77,5 +77,6 @@ Everything else is **overlay-only** (reachable only as a `wg0` peer):
   re-applied — see [WIREGUARD.md](WIREGUARD.md)).
 - **Vault:** initialized + **currently unsealed**; **no auto-unseal** (re-seals on
   restart); loopback-only; SSH CA configured.
-- **Workstation `wg0`:** works, but drops its address on bring-up occasionally (fix
-  pending — see NEXT_STEPS).
+- **Workstation `wg0`:** boot-persistent — `Address = 10.20.0.2/24` under
+  `[Interface]` and `wg-quick@wg0` enabled; NetworkManager leaves it
+  externally-managed. Survives reboot and half-failed bring-ups.

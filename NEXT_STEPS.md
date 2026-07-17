@@ -7,13 +7,11 @@ depends on.
 
 ## High priority (small, unblocks reliability)
 
-1. **Fix the workstation `wg0` so the overlay survives boot.** It intermittently
-   comes up without its address (management link drops). *Needs your sudo:*
-   ```bash
-   sudo systemctl enable wg-quick@wg0
-   sudo sed -i 's#^Address = 10.20.0.2/32#Address = 10.20.0.2/24#' /etc/wireguard/wg0.conf
-   ```
-   Also confirm NetworkManager isn't managing `wg0` (`nmcli device status | grep wg0`).
+1. ~~**Fix the workstation `wg0` so the overlay survives boot.**~~ **DONE
+   (2026-07-18).** `Address = 10.20.0.2/24` under `[Interface]` and
+   `wg-quick@wg0` enabled; `nmcli` shows `wg0` externally-managed (NM won't fight
+   `wg-quick`). Live `wg0` still shows `/32` until the next clean bring-up — the
+   `/24` takes effect on reboot or `sudo wg-quick down/up wg0`.
 
 2. **Revoke / rotate the Vault bootstrap root token.** The root-token *file* on
    control-1 was shredded, but the token value still lives in `.local-secrets/vault-init.json`.
