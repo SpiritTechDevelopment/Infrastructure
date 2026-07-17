@@ -159,9 +159,8 @@ reconcile: ## Replay desired users; STATE=path [PRUNE=1] [REPLACE=1]
 	@test -n "$(STATE)" || (echo 'STATE is required' >&2; exit 2)
 	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-reconcile.sh "$(API_TARGET)" "$(STATE)" $(if $(filter 1 yes true,$(PRUNE)),--prune,) $(if $(filter 1 yes true,$(REPLACE)),--replace-existing,)
 
-management: ## Stub: private management network is intentionally unavailable
-	@echo 'WireGuard/private-network deployment is stubbed and cannot be enabled from this repository.' >&2
-	@exit 2
+management: decrypt ## Deploy/reconcile the WireGuard management overlay (all active hosts; no --limit)
+	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/management-network.yml $(SECRETS_ARGS)
 
 certs: ## Obtain/renew certificates; LIMIT defaults to control-1
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/acme.yml --limit "$(or $(LIMIT),control-1)" $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)

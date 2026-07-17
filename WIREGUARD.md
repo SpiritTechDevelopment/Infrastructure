@@ -6,19 +6,29 @@ the Xray API (`10085`), telemetry ingest (`9090`/`3100`), and operator access to
 Grafana/Vault are reachable **only** over it — you must be a `wg0` peer to operate
 the fleet. See [ARCHITECTURE.md](ARCHITECTURE.md) §7 and [OPERATIONS.md](OPERATIONS.md).
 
-**The Ansible role is still stubbed, though.** The overlay is currently
-**hand-configured** on the hosts; the repo does not yet reconcile it:
+**Codified — but not yet re-applied to the live overlay.** `roles/management_wireguard`
+is un-stubbed and runnable:
 
 ```bash
-make management
+make management     # runs playbooks/management-network.yml over the whole
+                    # management_network group (control-1/entry-1/exit-fr), no --limit
 ```
 
-still exits with an error, and `playbooks/management-network.yml` is a refusal
-stub. `management_wireguard_enabled: false` in prod. So `make deploy` does **not**
-manage `wg0` — peers are added by hand on the hub.
+The inputs live in `inventories/prod/group_vars/all.yml`
+(`management_wireguard_addresses`, `_public_endpoint`, `_external_peers` =
+exit-ru + the operator workstation) and the `management_network` inventory group.
+The role reuses each host's existing on-node key (never regenerates), and an
+offline render was proven **functionally identical** to the live `wg0.conf` on
+every host (same addresses/keys/peers/AllowedIPs/routing).
 
-**Deferred work:** un-stub `roles/management_wireguard` so the overlay is codified
-(peers as data in `operators` / `management_wireguard_external_peers`, zero-diff
-against live), then enable it. Track this in [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md).
-Do not copy commands from `docs/legacy/` into production; design any overlay
-automation change with its own dry-run + rollback, separate from SSH/firewall/app.
+> **The live overlay is still the hand-configured version.** The first
+> `make management` run rewrites the on-disk configs to the role's canonical form
+> (cosmetic header/comment/whitespace changes — exit-fr's hand-onboard header, the
+> `# exit-ru` comment) and therefore **restarts `wg-quick@wg0`**, a brief
+> overlay/telemetry blip (the data plane is unaffected). Apply it in a maintenance
+> window with **provider console ready** — restarting the hub's `wg0` bounces every
+> peer, and you are typically tunnelled through the overlay you're restarting.
+> Managing `wg0` from a machine on that same overlay will drop your own connection
+> mid-run; run it over the hosts' public SSH, or from the console.
+
+Do not copy commands from `docs/legacy/` into production.

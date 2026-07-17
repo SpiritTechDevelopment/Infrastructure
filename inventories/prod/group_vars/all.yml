@@ -87,6 +87,20 @@ operators:
     wg_ip: ""           # TBD — assign a free 10.20.0.x
     age_recipient: ""   # TBD — add to .sops.yaml too when set
 
-# Overlay peers derived from the roster (operators who have a wg_ip assigned). The
-# management_wireguard role (when un-stubbed) reads .name / .wg_pubkey / .wg_ip.
-management_wireguard_external_peers: "{{ operators | selectattr('wg_ip', 'truthy') | list }}"
+# --- WireGuard management overlay (consumed by roles/management_wireguard via
+# playbooks/management-network.yml). Reproduces the live wg0 hub-and-spoke.
+# Per-host overlay address (hub uses the /24 prefix, spokes /32). Public keys are
+# read on-node from /etc/wireguard/wg0.pub at run time (the role reuses existing
+# keys — it never regenerates when wg0.key already exists).
+management_wireguard_addresses:
+  control-1: "10.20.0.1/24"      # hub
+  entry-1:   "10.20.0.11/32"
+  exit-fr:   "10.20.0.21/32"
+management_wireguard_address: "{{ management_wireguard_addresses[inventory_hostname] | default('') }}"
+# Hub's reachable WireGuard endpoint (spokes dial this). Only the hub value is used.
+management_wireguard_public_endpoint: "{{ (control_plane_host ~ ':' ~ management_wireguard_port) if inventory_hostname == management_wireguard_hub_host else '' }}"
+# External (non-fleet) peers on the hub: the exit-ru node peer and the operator
+# workstation (= pavel's wg key in the operators roster above). PUBLIC keys only.
+management_wireguard_external_peers:
+  - { name: exit-ru,    public_key: "m6IdULVcF9Lrn42M1dbjbqdfYbG1w4VnFfpCY1nYHwI=", allowed_ips: ["10.20.0.23/32"] }
+  - { name: controller, public_key: "ooq8pY1/+HxkA+lNCaZivEbhqDR1K55FeAOPr4eTfyQ=", allowed_ips: ["10.20.0.2/32"] }

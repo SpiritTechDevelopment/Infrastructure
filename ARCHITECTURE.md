@@ -248,10 +248,13 @@ Peers: `control-1` `.1`, `entry-1` `.11`, `exit-fr` `.21`, operator workstation
 `.2`, plus external/CI peers. The roster's public keys live in `operators` /
 `management_wireguard_external_peers` (`group_vars/all.yml`).
 
-**Codification status:** the `roles/management_wireguard` role is **still stubbed**
-(`management_wireguard_enabled: false`; `make management` refuses), so the live
-overlay is **hand-configured** — `make deploy` does not reconcile it. Un-stubbing
-it (peers as data, zero-diff) is deferred; see [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md).
+**Codification status:** the `roles/management_wireguard` role is **codified and
+runnable** (`make management` over the `management_network` group; inputs in
+`group_vars/all.yml`). An offline render is proven functionally identical to the
+live `wg0.conf`. It has **not been re-applied to the live overlay yet** — the
+first run rewrites configs to canonical form and restarts `wg-quick@wg0` (brief
+blip), so apply it in a maintenance window over public SSH. See
+[WIREGUARD.md](WIREGUARD.md). `make deploy` still does not manage `wg0`.
 
 ---
 

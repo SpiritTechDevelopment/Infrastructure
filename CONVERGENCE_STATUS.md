@@ -155,11 +155,24 @@ hardening below — none of it blocks the overlay-first goal.
   (`ansible_user: deploy` + `ansible_become: true`; remote plays already
   `become: true`, localhost plays `become: false`). Root stays key-only break-glass.
 
+### Done (WireGuard overlay codified — L4)
+- **`management_wireguard` role un-stubbed + runnable** (`make management`,
+  `playbooks/management-network.yml` over the `management_network` group; no
+  `--limit`). Inputs in `group_vars/all.yml` (`management_wireguard_addresses`,
+  `_public_endpoint`, `_external_peers` = exit-ru + operator workstation). Role
+  reuses on-node keys (never regenerates). Offline render proven **functionally
+  identical** to the live `wg0.conf` on all three hosts.
+  - **NOT yet re-applied to live.** First `make management` rewrites the configs
+    to canonical form (cosmetic: exit-fr hand-header, `# exit-ru` comment,
+    whitespace) → restarts `wg-quick@wg0` (brief overlay/telemetry blip; data
+    plane unaffected). Apply in a maintenance window with provider console ready;
+    run over the hosts' **public SSH** (managing wg0 over the overlay drops your
+    own connection). See WIREGUARD.md.
+
 ### Deferred / future
-- **Codify the WireGuard overlay** via `management_wireguard` role with zero-diff
-  (currently hand-configured); un-stub `make management`; model external peers
-  (10.20.0.2 workstation, 10.20.0.23) in `management_wireguard_external_peers`.
 - **Vault SSH CA** (24h, source-address-locked) + full Vault production init.
+- **Workstation `wg0.conf`**: `Address = 10.20.0.2/24` under `[Interface]` so the
+  overlay address survives bring-up.
 - **Workstation `wg0.conf`**: set `Address = 10.20.0.2/24` under `[Interface]` so
   the overlay address survives bring-up (it currently drops — clean `wg-quick
   down/up` restores it). Enable local docker on boot.
