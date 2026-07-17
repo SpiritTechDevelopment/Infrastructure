@@ -7,6 +7,10 @@ env: prod
 # Root remains key-only break-glass. See OPERATIONS.md.
 ansible_user: deploy
 ansible_become: true
+
+# Vault SSH CA public key — hosts trust short-lived, overlay-locked certs signed
+# by it (in addition to authorized_keys). Public key, safe to commit.
+common_ssh_ca_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCjEri3JZDgR2TtK/i1Xlzvy/iZfvVLRHC/SivJdQqco0q3dthfJx5fbBlAQ6ESj8xZ92nvQyBrNqb3RMLnuctS2XHpchgJrteS5aExUTF8vzLXq17PMMByIpMnku+HxwpG2bi3tjqtH4FQdwI22H+vSM8cRywPyLxwqnaMXbL5ikknTXBY0lWl/VbFWSP0eLmGTvIFEuGsRhzXjQKviMTiNWhXHFXlw75oYdC/hm7oK7D5SIXIOGSso+kIkUd7YCTUPbPdnMMGLVBhwllT9DiRcSnIQcL3u8e4PwA9WjQy4oAZDLB6EbQhZnm5fwB7DefF9Epiqk8f6RcEG26mJxeCpg8/bpekJKiv09GLgFFFDNu+fZ3C0L1Wix5CTdImuz+a9gxtauS5d4pRTW+Ji4+wLKuBgo9G7zxSN9MIzoYIlG8RmxTWaOEEPYWB4cYjJ2isUKjSI9tKjIce7+TEIzgZUf2Jp2KoRdd1Gp6Lp7Y0468sMKhlCAkdCUI6diyxQG96y+96guLkYThQloJd0PfHtVn4wt1YSJ2mb8HBzW0R9vKs/VG6Li4I1/g71dGcFyV+i8mq2TX2E36MbIiFSI/REGztN0+MCN/+7unssYEMNDyFPfO14yZeBSWFKn2fZK/9427byvaSYV+lKZThWCpTqCScd5/ahmIgRsQSkJQgFQ=="
 xray_image: ghcr.io/xtls/xray-core:26.3.27
 nginx_mask_image: nginx:1.29-alpine
 alloy_image: grafana/alloy:v1.17.1

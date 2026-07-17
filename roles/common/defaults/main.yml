@@ -14,6 +14,9 @@ deploy_mode: runtime
 common_manage_deploy_user: false
 common_remove_legacy_sshd_dropin: false
 common_manage_sshd: false
+# Vault SSH CA public key. When set, hosts trust certs signed by it
+# (TrustedUserCAKeys). Public key — safe to commit. Set in group_vars.
+common_ssh_ca_public_key: ""
 common_manage_firewall: false
 common_enable_fail2ban: false
 common_manage_sysctl: false

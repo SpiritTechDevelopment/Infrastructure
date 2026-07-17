@@ -97,6 +97,21 @@
     mode: "0600"
   when: common_manage_deploy_user | bool
 
+# Vault SSH CA trust: deploy the CA public key BEFORE the sshd drop-in that
+# references it (TrustedUserCAKeys). Hosts then accept short-lived, overlay-locked
+# certs signed by the CA — in addition to authorized_keys (break-glass).
+- name: Deploy Vault SSH CA public key
+  ansible.builtin.copy:
+    content: "{{ common_ssh_ca_public_key }}\n"
+    dest: /etc/ssh/trusted-user-ca-keys.pem
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - common_manage_sshd | bool
+    - common_ssh_ca_public_key | default('') | length > 0
+  notify: Reload sshd
+
 # Key-only root, no password/keyboard-interactive auth. A drop-in overrides any
 # distro/cloud-init default via first-match ordering (00- sorts before 50-).
 # validate: on the fragment catches syntax errors before placement; the handler

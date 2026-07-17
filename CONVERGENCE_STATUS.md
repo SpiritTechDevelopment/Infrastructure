@@ -169,10 +169,28 @@ hardening below — none of it blocks the overlay-first goal.
     run over the hosts' **public SSH** (managing wg0 over the overlay drops your
     own connection). See WIREGUARD.md.
 
+### Done (Vault SSH CA — L5 access)
+- **Vault SSH CA live + proven.** Unsealed Vault (was sealed); enabled the
+  `ssh-client-signer` engine (CA mode), roles `operator` (24h, principals
+  deploy/root, **source-address-locked to 10.20.0.0/24**, permit-pty, rsa-sha2-256)
+  and `automation` (15m). Host trust via `TrustedUserCAKeys` +
+  `/etc/ssh/trusted-user-ca-keys.pem` (roles/common, `common_ssh_ca_public_key`);
+  applied fleet-wide. **Proven end-to-end**: a cert-only login (throwaway key not
+  in authorized_keys) succeeds over the overlay and is `Permission denied` from a
+  public source (overlay lock). `userpass` + `ssh-operator` policy enabled.
+  Codified in `roles/vault` (`vault-ssh-ca.sh`, `policy-ssh-operator.hcl`). See
+  **VAULT_SSH_CA.md**.
+  - **Remaining refinements** (not blockers): Vault is loopback-only, so operators
+    sign by SSHing to control-1 — to sign from their own machine, expose Vault on
+    the overlay (restart → re-seal); **auto-unseal** not configured (manual 3-of-5
+    on restart); create per-operator `userpass` users. Bootstrap root-token file
+    was shredded (token still in `vault-init.json`, out-of-band).
+
 ### Deferred / future
-- **Vault SSH CA** (24h, source-address-locked) + full Vault production init.
 - **Workstation `wg0.conf`**: `Address = 10.20.0.2/24` under `[Interface]` so the
   overlay address survives bring-up.
+- **WireGuard live-apply** (codified; restarts wg0 — do in a maintenance window).
+- **Vault auto-unseal** + expose-on-overlay for remote operator signing.
 - **Workstation `wg0.conf`**: set `Address = 10.20.0.2/24` under `[Interface]` so
   the overlay address survives bring-up (it currently drops — clean `wg-quick
   down/up` restores it). Enable local docker on boot.

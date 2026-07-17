@@ -49,6 +49,8 @@
     - {src: vault-unseal.sh.j2, dest: vault-unseal.sh, mode: '0700'}
     - {src: vault-bootstrap.sh.j2, dest: vault-bootstrap.sh, mode: '0700'}
     - {src: policy-backend.hcl.j2, dest: config/policy-backend.hcl, mode: '0644'}
+    - {src: vault-ssh-ca.sh.j2, dest: vault-ssh-ca.sh, mode: '0700'}
+    - {src: policy-ssh-operator.hcl.j2, dest: config/policy-ssh-operator.hcl, mode: '0644'}
   no_log: true
   diff: false
 

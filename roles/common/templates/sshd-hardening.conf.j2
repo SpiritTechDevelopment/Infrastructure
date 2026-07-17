@@ -2,3 +2,7 @@
 PasswordAuthentication no
 PermitRootLogin prohibit-password
 KbdInteractiveAuthentication no
+{% if common_ssh_ca_public_key | default('') | length > 0 %}
+# Trust short-lived user certificates signed by the Vault SSH CA (overlay-locked).
+TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem
+{% endif %}

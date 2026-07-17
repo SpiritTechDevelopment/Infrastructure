@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Configure the Vault SSH client-signer CA (idempotent). Run once after Vault is
+# unsealed, with a privileged token in VAULT_TOKEN (or it prompts). Mirrors what
+# was applied live during the convergence.
+#
+#   VAULT_TOKEN=$(cat /root/.vault-ca-token) {{ vault_dir }}/vault-ssh-ca.sh
+#
+# The CA public key it prints goes into group_vars `common_ssh_ca_public_key`, and
+# hosts trust it via TrustedUserCAKeys (roles/common). Certs are overlay-locked
+# (source-address) and short-lived (24h operator / 15m automation).
+set -euo pipefail
+if [[ -z "${VAULT_TOKEN:-}" ]]; then
+  read -rsp "Vault token: " VAULT_TOKEN; echo
+fi
+export VAULT_ADDR="{{ vault_api_addr }}"
+v(){ docker compose -f {{ vault_dir }}/compose.yml exec -T -e VAULT_ADDR="$VAULT_ADDR"{% if vault_tls_enabled | bool %} -e VAULT_CACERT=/vault/tls/vault.crt{% endif %} -e VAULT_TOKEN="$VAULT_TOKEN" vault vault "$@"; }
+
+# SSH secrets engine in CA mode (generate the signing key once).
+v secrets enable -path=ssh-client-signer ssh 2>/dev/null || true
+v write ssh-client-signer/config/ca generate_signing_key=true 2>/dev/null || true
+
+# Human role: 24h certs, principals deploy/root, permit-pty, LOCKED to the overlay
+# via source-address (a leaked cert is useless off wg0). rsa-sha2-256 (no SHA-1).
+printf '%s' '{"key_type":"ca","allow_user_certificates":true,"allowed_users":"deploy,root","default_user":"deploy","ttl":"24h","max_ttl":"24h","allowed_extensions":"permit-pty","default_extensions":{"permit-pty":""},"default_critical_options":{"source-address":"{{ management_wireguard_cidr | default('10.20.0.0/24') }}"},"algorithm_signer":"rsa-sha2-256"}' | v write ssh-client-signer/roles/operator -
+
+# Automation/CI role: 15m certs (fresh per run), deploy only, same overlay lock.
+printf '%s' '{"key_type":"ca","allow_user_certificates":true,"allowed_users":"deploy","default_user":"deploy","ttl":"15m","max_ttl":"15m","allowed_extensions":"permit-pty","default_extensions":{"permit-pty":""},"default_critical_options":{"source-address":"{{ management_wireguard_cidr | default('10.20.0.0/24') }}"},"algorithm_signer":"rsa-sha2-256"}' | v write ssh-client-signer/roles/automation -
+
+# Operator policy (may sign with the operator role) + userpass auth for operators.
+v policy write ssh-operator /vault/config/policy-ssh-operator.hcl
+v auth enable userpass 2>/dev/null || true
+
+echo "SSH CA configured. CA public key (put in group_vars common_ssh_ca_public_key):"
+v read -field=public_key ssh-client-signer/config/ca
