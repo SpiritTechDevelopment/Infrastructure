@@ -47,9 +47,21 @@ depends on.
 7. **Stand up a self-hosted CI runner** (on the overlay, a dedicated box — not control-1)
    to move deploys off the workstation with a `production` Environment + required
    reviewers, and retire the interim hosted-runner secrets. See [CUTOVER.md](CUTOVER.md).
-8. **GitHub repo hygiene:** confirm the repo is **private**; add branch protection on
-   `main` (require the `ci` check + review); set the real `@team` in `.github/CODEOWNERS`;
-   pin the workflow Actions to commit SHAs.
+8. **GitHub repo hygiene** — partially done (2026-07-18):
+   - ✅ **Action SHAs pinned** — `ci.yml`/`deploy.yml` pin `actions/checkout`
+     (v4.3.1) + `actions/setup-python` (v5.6.0) to commit SHAs.
+   - ✅ **CODEOWNERS** — real owners `@xvpaul @RomanRyabinkin` on all critical
+     paths. *Requires `@RomanRyabinkin` to have write access to the repo, else
+     GitHub ignores the entry.*
+   - ⬜ **Confirm repo is private** — needs a GitHub API token / web UI (SSH can't
+     query the REST API from the workstation).
+   - ⬜ **Branch protection on `main`** — operator-run (token). Full ruleset:
+     require PR + `lint` status check (the `ci` workflow's job, *not* `ci`) + ≥1
+     code-owner review; `enforce_admins:false` (2-person team can't self-approve
+     — avoid lockout); `allow_force_pushes:false`. Enabling it **ends direct
+     pushes to `main`** — deploys/commits go via PR.
+   - ⬜ **sops `releases/latest` in `deploy.yml`** is a mutable ref — pin to a
+     fixed sops version + checksum when that interim pipeline goes live (#7).
 9. **Rotate the workstation WireGuard private key** (older note: it may have been pasted
    into a prior chat) when convenient — regenerate on-node, swap the hub peer.
 10. **`tc-shaping.sh.j2`** remains an orphaned template (traffic shaping never wired) —
