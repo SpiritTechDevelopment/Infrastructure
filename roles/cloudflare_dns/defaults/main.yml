@@ -1,0 +1,10 @@
+---
+# Label-driven Cloudflare DNS. Records reference a node label and resolve to that
+# node's public IP, so DNS follows the topology (add/replace = config change).
+# cloudflare_api_token is NOT defaulted — it is required at runtime (shared with the
+# acme role) and comes from SOPS. The role no-ops unless zone + records + token are set.
+cloudflare_zone: ""
+cloudflare_dns_records: []
+cloudflare_dns_default_ttl: 1          # 1 = "automatic" TTL in Cloudflare
+cloudflare_dns_default_proxied: false  # REALITY :443 MUST be DNS-only (grey cloud)
+cloudflare_apply: false                # plan by default; -e cloudflare_apply=true to apply

@@ -179,6 +179,9 @@ management: decrypt ## Deploy/reconcile the WireGuard management overlay (all ac
 certs: ## Obtain/renew certificates; LIMIT defaults to control-1
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/acme.yml --limit "$(or $(LIMIT),control-1)" $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)
 
+dns: decrypt ## Reconcile Cloudflare DNS from the inventory (plan; APPLY=1 to apply)
+	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
+
 .PHONY: help deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
 	platform wire apply-node check-node api-ping api-list api-emails api-has api-add api-remove api-stats \
-	gen-client smoke-via reconcile management certs
+	gen-client smoke-via reconcile management certs dns

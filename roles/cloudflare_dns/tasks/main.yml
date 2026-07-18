@@ -1,0 +1,67 @@
+---
+- name: DNS reconciliation is disabled (zone/records/token not all set)
+  ansible.builtin.debug:
+    msg: >-
+      Cloudflare DNS reconciliation skipped: set cloudflare_zone, a non-empty
+      cloudflare_dns_records, and cloudflare_api_token (SOPS) to enable it.
+  when: >-
+    (cloudflare_zone | default('') | length == 0)
+    or (cloudflare_dns_records | default([]) | length == 0)
+    or (cloudflare_api_token | default('') | length == 0)
+
+- name: Reconcile Cloudflare DNS
+  when:
+    - cloudflare_zone | default('') | length > 0
+    - cloudflare_dns_records | default([]) | length > 0
+    - cloudflare_api_token | default('') | length > 0
+  block:
+    - name: Resolve desired records (label -> node -> public IP)
+      ansible.builtin.set_fact:
+        _cf_records: "{{ _cf_records | default([]) + [_rec] }}"
+      loop: "{{ cloudflare_dns_records }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        _ip: "{{ hostvars[item.node].public_ip | default(hostvars[item.node].ansible_host) }}"
+        _rec:
+          name: "{{ item.name }}"
+          content: "{{ item.content | default(_ip) }}"
+          type: "{{ item.type | default('A') }}"
+          ttl: "{{ item.ttl | default(cloudflare_dns_default_ttl) }}"
+          proxied: "{{ item.proxied | default(cloudflare_dns_default_proxied) }}"
+
+    - name: Stage the desired-records file
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .cfdns.json
+      register: _cf_tmp
+
+    - name: Write desired records
+      ansible.builtin.copy:
+        content: "{{ {'zone': cloudflare_zone, 'records': _cf_records} | to_json }}"
+        dest: "{{ _cf_tmp.path }}"
+        mode: "0600"
+
+    - name: Reconcile records via the Cloudflare API (plan unless cloudflare_apply=true)
+      ansible.builtin.command:
+        argv:
+          - "{{ role_path }}/../../scripts/cloudflare-dns-sync.py"
+          - "{{ _cf_tmp.path }}"
+          - "{{ '--apply' if (cloudflare_apply | bool) else '--dry-run' }}"
+      environment:
+        CLOUDFLARE_API_TOKEN: "{{ cloudflare_api_token }}"
+      register: _cf_run
+      changed_when:
+        - cloudflare_apply | bool
+        - "'applied — 0 change(s)' not in _cf_run.stdout"
+
+    - name: Show the DNS plan/result
+      ansible.builtin.debug:
+        var: _cf_run.stdout_lines
+
+  always:
+    - name: Clean up the desired-records file
+      ansible.builtin.file:
+        path: "{{ _cf_tmp.path | default('') }}"
+        state: absent
+      when: _cf_tmp.path is defined

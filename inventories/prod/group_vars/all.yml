@@ -72,6 +72,16 @@ prometheus_remote_write: "http://{{ telemetry_hub_host }}:9090/api/v1/write"
 alertmanager_telegram_chat_id: -1003544840208
 alertmanager_telegram_message_thread_id: 13
 
+# Label-driven Cloudflare DNS (reconciled by `make dns`). Each record references a
+# node label and resolves to that node's public IP, so DNS follows the topology —
+# a replacement is just changing which node a record points at. proxied stays false
+# (REALITY :443 must be DNS-only). Token = cloudflare_api_token (SOPS, shared with
+# the acme role). Leave cloudflare_zone empty to disable. See TOPOLOGY.md.
+cloudflare_zone: ""
+cloudflare_dns_records: []
+#   - { name: "entry.example.com", node: entry-1 }   # A -> entry-1 public IP, DNS-only
+#   - { name: "fr.example.com",    node: exit-fr }
+
 # Node lifecycle. Disabled hosts stay declared but are excluded from deployment,
 # wiring, verification, and observability target generation.
 node_enabled: true

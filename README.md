@@ -68,6 +68,7 @@ make deploy                   # full deploy + verify  (see the discipline below)
 | [RECAP.md](RECAP.md) | Change history of the hardening convergence |
 | [OPERATIONS.md](OPERATIONS.md) | **Start here to operate** — access model, Git workflow, onboarding, deploying, monitoring, Vault unseal (§9) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design, the three planes, container networking, runbook |
+| [TOPOLOGY.md](TOPOLOGY.md) | The config-driven model: how labels drive routing/telemetry/quotas/DNS, and what a topology change touches |
 | [VAULT_SSH_CA.md](VAULT_SSH_CA.md) / [WIREGUARD.md](WIREGUARD.md) | The SSH certificate authority + the management overlay |
 | [RECOVERY.md](RECOVERY.md) | Passphrase-encrypted recovery bundles — surviving a lost laptop |
 | [CUTOVER.md](CUTOVER.md) | Moving CI from a hosted runner to a self-hosted one on the overlay |
