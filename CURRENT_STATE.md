@@ -76,7 +76,10 @@ Everything else is **overlay-only** (reachable only as a `wg0` peer):
 - **WireGuard overlay:** live and healthy (hand-configured; role codified but not
   re-applied — see [WIREGUARD.md](WIREGUARD.md)).
 - **Vault:** initialized + **currently unsealed**; **no auto-unseal** (re-seals on
-  restart); loopback-only; SSH CA configured.
+  restart); loopback-only; SSH CA configured. Seal state is now monitored — a
+  host-side timer exports `vault_sealed`/`vault_up` to node-exporter and the
+  `VaultSealed`/`VaultUnreachable` alerts fire on a silent reseal (manual-unseal
+  runbook: OPERATIONS §9). Alerts page only once `alertmanager_webhook_url` is set.
 - **Workstation `wg0`:** boot-persistent — `Address = 10.20.0.2/24` under
   `[Interface]` and `wg-quick@wg0` enabled; NetworkManager leaves it
   externally-managed. Survives reboot and half-failed bring-ups.

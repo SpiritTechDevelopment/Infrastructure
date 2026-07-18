@@ -18,10 +18,20 @@ depends on.
    If you consider it exposed (it briefly configured the CA), rotate the root token.
    Keep `vault-init.json` out-of-band only.
 
-3. **Set up Vault auto-unseal, or a manual-unseal runbook.** Vault is unsealed now,
-   but re-seals on any restart (manual 3-of-5). Anything that depends on Vault (the
-   SSH CA) wants it reliably up. Decide transit/KMS auto-unseal vs. an accepted runbook
-   (see OPEN_QUESTIONS #1).
+3. **Vault reliability.** Vault re-seals on any restart (manual 3-of-5).
+   - ✅ **Manual-unseal runbook** — OPERATIONS.md §9 (procedure, key location, verify).
+   - ✅ **"Vault sealed" alert (2026-07-18)** — a host-side timer on control-1
+     exports `vault_sealed`/`vault_up` as a node-exporter textfile metric (blackbox
+     can't reach loopback-only Vault); `VaultSealed`/`VaultUnreachable`/
+     `VaultSealMetricMissing` rules loaded. Applied + verified. *Only pages once
+     `alertmanager_webhook_url` is set — currently empty (see #3a below).*
+   - ⬜ **Auto-unseal (transit/KMS)** — deferred. Rationale: only worth its cost once
+     the SSH CA is load-bearing, which it isn't yet (authorized_keys is still the
+     bootstrap; certs are additive). Revisit alongside expose-on-overlay (#5) and
+     OPEN_QUESTIONS #1.
+   - ⬜ **3a. Set `alertmanager_webhook_url`** to a real paging/webhook endpoint —
+     without it every alert (not just Vault) is dropped silently. Needs an endpoint
+     choice + likely a SOPS secret.
 
 ## Medium priority (finish the WireGuard + SSH-CA loops)
 
