@@ -106,9 +106,11 @@ node/platform telemetry-missing, and **Vault seal state** — `VaultSealed` /
 `VaultUnreachable`, fed by a host-side timer since Vault is loopback-only). The
 manual Vault unseal runbook is [OPERATIONS.md](OPERATIONS.md) §9.
 
-> **Alerting isn't wired to a receiver yet:** `alertmanager_webhook_url` is empty,
-> so firing alerts show in Prometheus/Alertmanager but **page nowhere**. Set it to a
-> real webhook/paging endpoint to make alerting actionable (NEXT_STEPS #3a).
+**Notifications → Telegram:** Alertmanager sends firing/resolved alerts to Telegram
+natively (Grafana can also *view* them via its Alertmanager data source). It
+activates once `alertmanager_telegram_bot_token` (SOPS) + `alertmanager_telegram_chat_id`
+are set — see [OPERATIONS.md](OPERATIONS.md) §6. Until then, alerts show in
+Prometheus/Alertmanager/Grafana but page nowhere.
 
 ## Verify
 

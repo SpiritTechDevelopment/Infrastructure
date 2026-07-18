@@ -11,3 +11,11 @@ receivers:
       - url: "{{ alertmanager_webhook_url }}"
         send_resolved: true
 {% endif %}
+{% if (alertmanager_telegram_bot_token | default('') | length > 0) and (alertmanager_telegram_chat_id | default('') | string | length > 0) %}
+    telegram_configs:
+      - bot_token: "{{ alertmanager_telegram_bot_token }}"
+        chat_id: {{ alertmanager_telegram_chat_id }}
+        parse_mode: ''
+        send_resolved: true
+        message: "{% raw %}{{ range .Alerts }}{{ .Status | toUpper }}: {{ .Labels.alertname }}{{ if .Labels.node }} ({{ .Labels.node }}){{ end }} — {{ .Annotations.summary }}\n{{ end }}{% endraw %}"
+{% endif %}

@@ -20,6 +20,11 @@ node_exporter_textfile_dir: /var/lib/node_exporter/textfile-collector
 retention_ops: 720h
 retention_activity: 168h
 alertmanager_webhook_url: ""
+# Telegram notifications. bot_token is a SECRET (put it in secrets.sops.yml);
+# chat_id is not sensitive (set in group_vars/all.yml or host_vars/control-1).
+# The receiver activates only when BOTH are set. See OPERATIONS.md §6.
+alertmanager_telegram_bot_token: ""
+alertmanager_telegram_chat_id: ""
 
 # Per-user usage exporter: reads Xray StatsService per-user byte counters from
 # each entry node and re-exposes them as Prometheus metrics for the top-talkers

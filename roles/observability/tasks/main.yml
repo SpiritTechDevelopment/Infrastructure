@@ -69,10 +69,12 @@
 - name: Warn when Alertmanager has no alert receiver (P2-01)
   ansible.builtin.debug:
     msg: >-
-      Alertmanager has NO receiver: alertmanager_webhook_url is empty, so firing
-      alerts are dropped silently. Set alertmanager_webhook_url to a real endpoint
-      (webhook / email / paging) before production alerting can be trusted.
-  when: alertmanager_webhook_url | default('') | length == 0
+      Alertmanager has NO receiver: neither alertmanager_webhook_url nor a Telegram
+      receiver (alertmanager_telegram_bot_token + _chat_id) is set, so firing alerts
+      are dropped silently. Configure one before production alerting can be trusted.
+  when:
+    - alertmanager_webhook_url | default('') | length == 0
+    - alertmanager_telegram_bot_token | default('') | length == 0
 
 - name: Ensure observability stack is running
   ansible.builtin.command:

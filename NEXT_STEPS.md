@@ -37,9 +37,11 @@ depends on.
      the SSH CA is load-bearing, which it isn't yet (authorized_keys is still the
      bootstrap; certs are additive). Revisit alongside expose-on-overlay (#5) and
      OPEN_QUESTIONS #1.
-   - ⬜ **3a. Set `alertmanager_webhook_url`** to a real paging/webhook endpoint —
-     without it every alert (not just Vault) is dropped silently. Needs an endpoint
-     choice + likely a SOPS secret.
+   - ◑ **3a. Telegram notifications** — Alertmanager Telegram receiver + Grafana
+     Alertmanager datasource are **codified** (`roles/observability`). Activates once
+     you create a bot and set `alertmanager_telegram_bot_token` (SOPS) +
+     `alertmanager_telegram_chat_id`. Until then all alerts page nowhere. Steps:
+     [OPERATIONS.md](OPERATIONS.md) §6.
 
 ## Medium priority (finish the WireGuard + SSH-CA loops)
 

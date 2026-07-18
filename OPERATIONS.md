@@ -162,9 +162,25 @@ Monitoring needs only an **overlay peer + a Grafana account** — no repo access
 **Vault seal alert:** a host-side timer on control-1 exports `vault_sealed` /
 `vault_up` as a node-exporter textfile metric; the `VaultSealed` /
 `VaultUnreachable` / `VaultSealMetricMissing` rules fire on a silent re-seal or a
-down health endpoint (§9). Note these only *page* once `alertmanager_webhook_url`
-is set — until then they show in Prometheus/Alertmanager but no notification is
-sent.
+down health endpoint (§9).
+
+**Alert notifications → Telegram.** Alert rules live in Prometheus and route to
+Alertmanager, which sends to Telegram natively (Grafana can *view* the same alerts
+via its Alertmanager data source, but notifications come from Alertmanager). To
+enable:
+
+1. Create a bot with **@BotFather**; note the **bot token**. Message the bot (or add
+   it to your group) and get the **chat_id** (e.g. via
+   `https://api.telegram.org/bot<token>/getUpdates` after sending a message).
+2. Put the token in SOPS: add `alertmanager_telegram_bot_token: <token>` to
+   `inventories/prod/secrets.sops.yml` (`sops` edit) — **never** commit it in plain.
+3. Set the non-secret chat id: `alertmanager_telegram_chat_id: <id>` in
+   `group_vars/all.yml` (or `host_vars/control-1`).
+4. Apply the observability role (`make platform LIMIT=control-1`) and confirm.
+
+The receiver activates only when **both** are set; until then alerts show in
+Prometheus/Alertmanager (and Grafana) but page nowhere. Alertmanager on control-1
+needs egress to `api.telegram.org:443` (available — no proxy).
 
 ## 7. CI/CD notes
 

@@ -21,3 +21,9 @@ datasources:
     url: http://loki:{{ loki_port }}
     jsonData: { httpHeaderName1: "X-Scope-OrgID" }
     secureJsonData: { httpHeaderValue1: "activity" }
+  - name: Alertmanager           # view firing alerts + manage silences in Grafana
+    uid: alertmanager
+    type: alertmanager
+    access: proxy
+    url: http://alertmanager:{{ alertmanager_port }}
+    jsonData: { implementation: prometheus, handleGrafanaManagedAlerts: false }
