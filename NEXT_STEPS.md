@@ -13,6 +13,14 @@ depends on.
    `wg-quick`). Live `wg0` still shows `/32` until the next clean bring-up — the
    `/24` takes effect on reboot or `sudo wg-quick down/up wg0`.
 
+1b. ~~**Auto-reconcile runtime users on Xray restart.**~~ **DONE (2026-07-18).**
+   Entries run `spirit-xray-reconcile.timer` (~30s, add-only) that re-adds the
+   backend's desired users from `/var/lib/xray/desired-users.json` after a restart
+   (`roles/vpn_stack`, `xray_auto_reconcile_enabled`). Closes the "unplanned restart
+   strands customers until someone replays" gap. Applied + verified on entry-1.
+   **Backend TODO:** write the snapshot (atomically; update before enforcing a
+   removal) — contract in [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md).
+
 2. **Revoke / rotate the Vault bootstrap root token.** The root-token *file* on
    control-1 was shredded, but the token value still lives in `.local-secrets/vault-init.json`.
    If you consider it exposed (it briefly configured the CA), rotate the root token.

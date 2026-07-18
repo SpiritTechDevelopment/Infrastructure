@@ -76,6 +76,11 @@ Everything else is **overlay-only** (reachable only as a `wg0` peer):
 ## Live component status
 
 - **Data plane:** healthy — customer E2E passes (entry-1 → exit-fr → egress).
+- **Runtime-user self-heal:** entries run `spirit-xray-reconcile.timer` (~30s,
+  add-only) that re-adds the backend's desired users from an on-node snapshot
+  (`/var/lib/xray/desired-users.json`) after an Xray restart — so an unplanned
+  restart recovers in seconds instead of stranding customers. No-op until the
+  backend writes the snapshot (contract in [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md)).
 - **Telemetry:** Prometheus/Loki/Grafana fresh over the overlay; both nodes reporting.
 - **WireGuard overlay:** live and healthy (hand-configured; role codified but not
   re-applied — see [WIREGUARD.md](WIREGUARD.md)).
