@@ -37,10 +37,11 @@ depends on.
      the SSH CA is load-bearing, which it isn't yet (authorized_keys is still the
      bootstrap; certs are additive). Revisit alongside expose-on-overlay (#5) and
      OPEN_QUESTIONS #1.
-   - ◑ **3a. Telegram notifications** — Alertmanager Telegram receiver + Grafana
-     Alertmanager datasource are **codified** (`roles/observability`). Activates once
-     you create a bot and set `alertmanager_telegram_bot_token` (SOPS) +
-     `alertmanager_telegram_chat_id`. Until then all alerts page nowhere. Steps:
+   - ✅ **3a. Telegram notifications (2026-07-18)** — Alertmanager Telegram receiver
+     live: bot token in SOPS, `chat_id` + `message_thread_id` (topic 13) in
+     group_vars; Grafana Alertmanager datasource for viewing/silences. Verified
+     end-to-end (test alerts delivered to thread 13). Also fixed: Alertmanager/
+     Grafana now reload on config change (previously only Prometheus did). Steps:
      [OPERATIONS.md](OPERATIONS.md) §6.
 
 ## Medium priority (finish the WireGuard + SSH-CA loops)
