@@ -10,9 +10,12 @@ before making any firewall or hardening change.
 > is codified (managed nftables on every host), SSH is key-only fleet-wide, and
 > all management/telemetry/API surfaces are **overlay-only** — only `:443` (data)
 > and `:22`/`:232` (key-only SSH) are public. The WireGuard overlay is live and
-> **required** for management, though still hand-configured (its role is not yet
-> un-stubbed). See [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md) for the full
-> state and [OPERATIONS.md](OPERATIONS.md) for the access/deploy model.
+> **required** for management (its `management_wireguard` role is codified). Access
+> adds a **Vault SSH CA** (24h overlay-locked certs) on top of key auth; the
+> **inventory itself is SOPS-encrypted**; topology (routing/telemetry/quotas/DNS)
+> is **config-driven from inventory labels** ([TOPOLOGY.md](TOPOLOGY.md)); and
+> alerts **page to Telegram**. See [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md)
+> for the full state and [OPERATIONS.md](OPERATIONS.md) for the access/deploy model.
 
 ## Table of contents
 
@@ -35,7 +38,9 @@ before making any firewall or hardening change.
 
 ## 1. Fleet inventory
 
-Source of truth: `inventories/prod/inventory.yml`.
+Source of truth: `inventories/prod/inventory.sops.yml` (SOPS-encrypted whole-file —
+host IPs hidden; `make decrypt` materializes the gitignored `inventory.yml`). Edit
+topology via `sops inventories/prod/inventory.sops.yml`.
 
 | Host | Role | Public IP | SSH | Purpose | Compose projects |
 |---|---|---|---|---|---|
@@ -95,7 +100,7 @@ graph TB
     ANS ==>|"MGMT"| EXITc
     ANS ==>|"MGMT"| CTRLc
 
-    WG{{"L4 · WireGuard overlay wg0 · 10.20.0.0/24 · hub-and-spoke · MGMT<br/>live + REQUIRED for management; hand-configured (role still stubbed)"}}
+    WG{{"L4 · WireGuard overlay wg0 · 10.20.0.0/24 · hub-and-spoke · MGMT<br/>live + REQUIRED for management; management_wireguard role codified (not yet re-applied live)"}}
     CTRL --- WG
     ENTRY --- WG
     EXIT --- WG
@@ -152,10 +157,10 @@ graph LR
 
 | Layer | What | Managed by |
 |---|---|---|
-| **L7 Provisioning** | Ansible, reconcile loop, backend contract | repo (application only) |
+| **L7 Provisioning** | Ansible (app + hardening + firewall/exposure + overlay + DNS), backend contract | repo (VM provisioning is out of scope — Terraform/provider) |
 | **L6 Host hardening** | sshd / fail2ban / sysctl / auditd / unattended-upgrades / deploy user | **codified** (`deploy_mode`-gated): sshd key-only, fail2ban (ignoreip-protected), conservative sysctl, auditd, unattended-upgrades, **deploy user** (ansible_user=deploy+sudo; root break-glass) |
 | **L5 Firewall** | nftables (all hosts) | **codified** (`roles/common` + per-host `firewall.yml`); managed nftables fleet-wide (exit migrated off ufw) |
-| **L4 Overlay** | WireGuard `10.20.0.0/24` hub-and-spoke | live + **required for management**; still **hand-configured** (`management_wireguard` role stubbed) |
+| **L4 Overlay** | WireGuard `10.20.0.0/24` hub-and-spoke | live + **required for management**; `management_wireguard` role **codified** (proven identical; not yet re-applied live) |
 | **L3 Container net** | host-mode (VPN nodes) vs bridge + DNAT (control-1) | repo (compose) |
 | **L2 Containers** | Compose projects: `vpn` / `observability` / `vault` | repo |
 | **L1 Hosts** | Ubuntu + Docker + kernel (nftables/wg/tc) | mixed |
@@ -267,7 +272,7 @@ cd /home/xvpaul/Desktop/spirit_vpn/infra_v1
 source ../../venv/bin/activate     # ansible-core 2.18.x lives in this venv
 sudo wg-quick up wg0               # join the management overlay (required to reach 10085/telemetry)
 sudo systemctl start docker        # local Docker is used by xray-api/gen-client; it is NOT enabled on boot
-make decrypt                       # materialize SOPS deploy secrets (needs your age key)
+make decrypt                       # materialize SOPS deploy secrets + inventory.yml (needs your age key)
 make deps                          # verify prerequisites
 ```
 
@@ -290,6 +295,7 @@ Command reference (from `make help`):
 | Single-node redeploy (apply) | `make apply-node LIMIT=entry-1` |
 | Rebuild entry→exit wiring | `make wire` |
 | Certificates (ACME) | `make certs [LIMIT=control-1]` |
+| Reconcile Cloudflare DNS (plan; `APPLY=1` to apply) | `make dns` |
 
 Xray runtime-user API (`NODE=entry-1` or `ENDPOINT=host:10085`):
 
@@ -332,10 +338,16 @@ make api-remove NODE=entry-1 EMAIL="$EMAIL"
 Grafana dashboard for top-talkers over time.
 
 > **Runtime users are in-memory only.** A restart of the `vpn-xray-1` container
-> (deploy, firewall change, crash) **wipes all API-added users**. Restore them
-> with `make reconcile` (below) or they lose service. Their `vless://` link is
-> keyed on the UUID, so re-adding the *same* UUID/EMAIL restores access without
-> reissuing the link.
+> (deploy, firewall change, crash) **wipes all API-added users**. Their `vless://`
+> link is keyed on the UUID, so re-adding the *same* UUID/EMAIL restores access
+> without reissuing the link.
+>
+> **Self-heal:** each entry runs `spirit-xray-reconcile.timer` (~30s, add-only)
+> that re-adds the backend's desired users from an on-node snapshot
+> (`/var/lib/xray/desired-users.json`) after a restart — so an *unplanned* restart
+> recovers in seconds instead of stranding customers. It no-ops until the backend
+> writes the snapshot (contract in `BACKEND_INTEGRATION.md`). `make reconcile`
+> (below) is the manual/authoritative equivalent.
 
 **Reconcile desired users after a restart** (idempotent; the backend's
 authoritative user list should drive this):
@@ -384,9 +396,19 @@ Provisioned Grafana dashboards:
   (fed by `xray-usage-exporter`; see `CHANGELOG_V8.md`). Visibility only —
   durable quota accounting is the backend's job.
 
-Note: adding a Prometheus **scrape job** (edit to `prometheus.yml`) requires a
-Prometheus restart to load — the observability role now does this via a
-`Restart Prometheus` handler. `file_sd` targets (`fleet-targets.yml`) auto-reload.
+**Alerting.** Prometheus rules → Alertmanager → **Telegram** (native receiver;
+`alertmanager_telegram_bot_token` in SOPS, `chat_id`/`message_thread_id` in
+group_vars). Grafana also has an **Alertmanager datasource** to view firing alerts +
+manage silences. Rules include fleet reachability, node/platform telemetry-missing,
+and **Vault seal state** (`VaultSealed`/`VaultUnreachable`/`VaultSealMetricMissing`)
+— fed by a host-side timer that exports `vault_sealed`/`vault_up` as a node-exporter
+textfile metric, since Vault is loopback-only and the containerized blackbox can't
+reach it. Vault manual-unseal runbook: [OPERATIONS.md](OPERATIONS.md) §9.
+
+Note: Prometheus/Alertmanager/Grafana read their (bind-mounted) config only at
+start, so the observability role restarts the affected service on a config change
+via `Restart Prometheus` / `Restart Alertmanager` / `Restart Grafana` handlers.
+`file_sd` targets (`fleet-targets.yml`) auto-reload without a restart.
 
 ---
 
@@ -405,15 +427,21 @@ convergence is **done** and codified. Full state/decisions/gotchas live in
   `3100`/`3000`/`9093`/`8200` (only `:443` + SSH public). Applied host-by-host
   with dry-run + dead-man auto-revert + E2E gate.
 - **Operator access** is codified: `operators` roster → `authorized_keys` via the
-  scoped `playbooks/access.yml`; secrets are SOPS-encrypted (`make decrypt`).
+  scoped `playbooks/access.yml`; secrets **and the inventory** are SOPS-encrypted
+  (`make decrypt`). A **Vault SSH CA** issues 24h, overlay-source-locked certs on
+  top of key auth (`TrustedUserCAKeys` fleet-wide; see [VAULT_SSH_CA.md](VAULT_SSH_CA.md)).
+- **Vault** is loopback-only + manual 3-of-5 unseal (re-seals on restart); seal
+  state is **monitored** (alerts to Telegram) with a manual-unseal runbook
+  (OPERATIONS §9). Auto-unseal is deferred until the CA is load-bearing.
 - **Host hardening codified & applied fleet-wide:** fail2ban (port-aware jail,
   `ignoreip`-protected), conservative sysctl (preserves `ip_forward=1`), auditd
   (`audit.rules.j2` now wired; replaced the hand-placed `50-vpn.rules`), and
   unattended-upgrades (security-only, no auto-reboot).
 - **`deploy` user codified + `ansible_user` migrated root→deploy** (docker+sudo,
   operator keys; root is key-only break-glass).
-- **Still deferred:** the `management_wireguard` role (overlay hand-configured)
-  and the Vault SSH CA. `tc-shaping.sh.j2` remains orphaned.
+- **Still deferred:** re-applying the (codified) `management_wireguard` role to the
+  live overlay; Vault auto-unseal; a self-hosted CI runner + branch protection.
+  `tc-shaping.sh.j2` remains orphaned.
 
 Blocker-avoidance rules (still enforced for every host change):
 
@@ -470,6 +498,8 @@ node, Loki has logs from every node, and `make e2e-all` passes end to end.
 
 ---
 
-*See also: `BACKEND_INTEGRATION.md` (runtime-user contract), `CHANGELOG_V6…V8.md`
-(recent changes), `governance/` (logging/data policy), `INFRASTRUCTURE_SPEC.md` /
-`VPN_INFRASTRUCTURE_SPEC.md` (design intent).*
+*See also: [TOPOLOGY.md](TOPOLOGY.md) (config-driven model: labels →
+routing/telemetry/quotas/DNS), `BACKEND_INTEGRATION.md` (runtime-user + quota
+snapshot contract), `WIREGUARD.md`, `VAULT_SSH_CA.md`, `CHANGELOG_V6…V8.md`
+(recent changes), `INFRASTRUCTURE_SPEC.md` / `VPN_INFRASTRUCTURE_SPEC.md` (design
+intent).*
