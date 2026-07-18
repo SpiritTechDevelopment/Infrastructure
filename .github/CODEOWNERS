@@ -1,12 +1,13 @@
 # Require review on infrastructure-critical paths before merge to a protected
-# branch. Replace @xvpaul with your GitHub org team (e.g. @your-org/infra-admins).
-# Pair this with a branch-protection rule on `main`: require PR, require the `ci`
-# status check, require ≥1 approving review from code owners.
+# branch. Owners are the two operators directly (no org team). Either can satisfy
+# a code-owner review. Paired with the branch-protection rule on `main`: require
+# PR, require the `lint` status check (job of the `ci` workflow), require ≥1
+# approving review from code owners.
 
-*                          @xvpaul
-/roles/                    @xvpaul
-/inventories/              @xvpaul
-/playbooks/                @xvpaul
-/.github/                  @xvpaul
-/playbooks/access.yml      @xvpaul
-/.sops.yaml                @xvpaul
+*                          @xvpaul @RomanRyabinkin
+/roles/                    @xvpaul @RomanRyabinkin
+/inventories/              @xvpaul @RomanRyabinkin
+/playbooks/                @xvpaul @RomanRyabinkin
+/.github/                  @xvpaul @RomanRyabinkin
+/playbooks/access.yml      @xvpaul @RomanRyabinkin
+/.sops.yaml                @xvpaul @RomanRyabinkin
