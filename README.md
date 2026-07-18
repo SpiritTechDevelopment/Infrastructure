@@ -14,6 +14,19 @@ internet.
 > else (Xray API `10085`, Grafana `3000`, Prometheus `9090`, Loki `3100`, Vault,
 > Alertmanager) is reachable **only over the overlay**.
 
+**Access.** SSH is **key-only fleet-wide** (no source whitelist — the key is the
+gate). Steady-state deploys run as a named **`deploy`** user (sudo + docker); root
+is **key-only break-glass**. A **Vault SSH CA** issues 24h, overlay-locked certs on
+top of `authorized_keys`. Operators are a roster in
+`inventories/prod/group_vars/all.yml`. See [OPERATIONS.md](OPERATIONS.md) §1 and
+[VAULT_SSH_CA.md](VAULT_SSH_CA.md).
+
+> **Where things stand right now:** [CURRENT_STATE.md](CURRENT_STATE.md) is the
+> canonical point-in-time snapshot (fleet, exposure, access, hardening, secrets).
+> [NEXT_STEPS.md](NEXT_STEPS.md) and [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) track
+> the remaining work and the decisions that gate it; [RECAP.md](RECAP.md) is the
+> change history.
+
 ## Fleet
 
 | Host | Role | Public IP | SSH | Overlay |
@@ -50,8 +63,12 @@ make deploy                   # full deploy + verify  (see the discipline below)
 
 | Doc | What |
 |---|---|
-| [OPERATIONS.md](OPERATIONS.md) | **Start here** — access model (repo/secrets/overlay), Git workflow, onboarding an operator, deploying, monitoring |
+| [CURRENT_STATE.md](CURRENT_STATE.md) | **Where the fleet is now** — the canonical point-in-time snapshot |
+| [NEXT_STEPS.md](NEXT_STEPS.md) / [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) | Remaining work + the decisions that gate it |
+| [RECAP.md](RECAP.md) | Change history of the hardening convergence |
+| [OPERATIONS.md](OPERATIONS.md) | **Start here to operate** — access model, Git workflow, onboarding, deploying, monitoring, Vault unseal (§9) |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | System design, the three planes, container networking, runbook |
+| [VAULT_SSH_CA.md](VAULT_SSH_CA.md) / [WIREGUARD.md](WIREGUARD.md) | The SSH certificate authority + the management overlay |
 | [RECOVERY.md](RECOVERY.md) | Passphrase-encrypted recovery bundles — surviving a lost laptop |
 | [CUTOVER.md](CUTOVER.md) | Moving CI from a hosted runner to a self-hosted one on the overlay |
 | [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md) | Hardening convergence: state, decisions, what's next, gotchas |
@@ -79,6 +96,19 @@ make api-remove NODE=entry-1 EMAIL="$EMAIL"
 
 Runtime API users live in Xray memory and are lost on restart; the backend keeps
 desired state and replays it (`make reconcile`). Contract: [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md).
+
+## Monitoring
+
+Metrics/logs land on the platform host and are reachable **over the overlay only**:
+Grafana `http://10.20.0.1:3000`, Prometheus `:9090`, Loki `:3100` (header
+`X-Scope-OrgID: ops`). Alert rules live in `roles/observability` (fleet reachability,
+node/platform telemetry-missing, and **Vault seal state** — `VaultSealed` /
+`VaultUnreachable`, fed by a host-side timer since Vault is loopback-only). The
+manual Vault unseal runbook is [OPERATIONS.md](OPERATIONS.md) §9.
+
+> **Alerting isn't wired to a receiver yet:** `alertmanager_webhook_url` is empty,
+> so firing alerts show in Prometheus/Alertmanager but **page nowhere**. Set it to a
+> real webhook/paging endpoint to make alerting actionable (NEXT_STEPS #3a).
 
 ## Verify
 

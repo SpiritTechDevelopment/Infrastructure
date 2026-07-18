@@ -66,7 +66,11 @@ Everything else is **overlay-only** (reachable only as a `wg0` peer):
 - **`.local-secrets/`** now holds only out-of-band break-glass material
   (`vault-init.json` = Vault unseal keys + root token; per-node WireGuard keys).
 - **CI:** `.github/workflows/ci.yml` (lint, hosted, no secrets) + `deploy.yml`
-  (interim hosted-runner). Deploys currently run from the workstation.
+  (interim hosted-runner). Deploys currently run from the workstation. Workflow
+  Actions **pinned to commit SHAs**; `CODEOWNERS` = `@xvpaul @RomanRyabinkin`.
+  **Branch protection on `main` is not yet enabled** (operator to set in the GitHub
+  UI: require PR + `lint` check + code-owner review). Repo-privacy unconfirmed here
+  (needs a GitHub token). See [NEXT_STEPS.md](NEXT_STEPS.md) #8.
 - **Recovery:** `scripts/recovery-bundle.sh` → passphrase-encrypted `recovery/*.age`.
 
 ## Live component status
