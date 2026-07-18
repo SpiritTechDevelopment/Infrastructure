@@ -26,6 +26,11 @@ SECRETS_SOPS  ?= inventories/prod/secrets.sops.yml
 SECRETS_PLAIN ?= inventories/prod/secrets.plain.yml
 SECRETS_ARGS  = --extra-vars @$(SECRETS_PLAIN)
 
+# SOPS-encrypted inventory (committed, whole-file/binary) and its decrypted form
+# ($(INVENTORY), gitignored). `make decrypt` materializes it so a clean clone can
+# reproduce the fleet topology. Edit the topology via `sops $(INVENTORY_SOPS)`.
+INVENTORY_SOPS ?= inventories/prod/inventory.sops.yml
+
 # SSH_AUTH modes:
 #   auto      use normal OpenSSH config/agent/default keys
 #   key       use exactly SSH_KEY and do not offer agent keys
@@ -81,12 +86,21 @@ check: ## Run all local static, parser, dashboard, syntax, and render checks
 test-api-wrapper: ## Offline test of add/list/stats/remove wrapper semantics
 	./scripts/test-api-wrapper.sh
 
-decrypt: ## Materialize SOPS-encrypted deploy secrets -> $(SECRETS_PLAIN) (gitignored)
+decrypt: ## Materialize SOPS-encrypted deploy secrets + inventory (gitignored)
 	@if [ -f "$(SECRETS_SOPS)" ]; then \
 	  command -v sops >/dev/null || { echo "sops is required (see OPERATIONS.md)" >&2; exit 2; }; \
 	  sops -d "$(SECRETS_SOPS)" > "$(SECRETS_PLAIN)" && chmod 600 "$(SECRETS_PLAIN)" && \
 	    echo "decrypted -> $(SECRETS_PLAIN)"; \
 	else echo "no $(SECRETS_SOPS); nothing to decrypt"; fi
+	@if [ -f "$(INVENTORY_SOPS)" ]; then \
+	  command -v sops >/dev/null || { echo "sops is required (see OPERATIONS.md)" >&2; exit 2; }; \
+	  sops -d --input-type yaml --output-type binary "$(INVENTORY_SOPS)" > "$(INVENTORY).tmp"; \
+	  if [ -f "$(INVENTORY)" ] && ! cmp -s "$(INVENTORY).tmp" "$(INVENTORY)"; then \
+	    cp -a "$(INVENTORY)" "$(INVENTORY).bak.$$(date +%Y%m%d-%H%M%S)"; \
+	    echo "note: local $(INVENTORY) differed from $(INVENTORY_SOPS); backed it up before overwriting (edit via 'sops $(INVENTORY_SOPS)')"; \
+	  fi; \
+	  mv "$(INVENTORY).tmp" "$(INVENTORY)" && echo "materialized -> $(INVENTORY)"; \
+	fi
 
 deploy: decrypt ## One-command full deployment plus infrastructure/telemetry verification
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/site.yml $(SECRETS_ARGS)

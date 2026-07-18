@@ -1,5 +1,6 @@
 inventories/*/inventory.yml
 inventories/*/inventory.yml.bak*
+inventories/*/inventory.yml.tmp
 inventories/*/hosts.yml
 inventories/**/host_vars/*
 !inventories/**/host_vars/.gitkeep

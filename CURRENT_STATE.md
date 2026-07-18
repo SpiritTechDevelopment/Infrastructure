@@ -65,6 +65,9 @@ Everything else is **overlay-only** (reachable only as a `wg0` peer):
   operator workstation key. See [OPERATIONS.md](OPERATIONS.md) §3.
 - **`.local-secrets/`** now holds only out-of-band break-glass material
   (`vault-init.json` = Vault unseal keys + root token; per-node WireGuard keys).
+- **Inventory:** `inventory.sops.yml` (whole-file/binary SOPS, committed — host IPs
+  hidden) → materialized to the gitignored `inventory.yml` by `make decrypt`; a
+  clean clone can reproduce the topology. Edit via `sops inventory.sops.yml`.
 - **CI:** `.github/workflows/ci.yml` (lint, hosted, no secrets) + `deploy.yml`
   (interim hosted-runner). Deploys currently run from the workstation. Workflow
   Actions **pinned to commit SHAs**; `CODEOWNERS` = `@xvpaul @RomanRyabinkin`.

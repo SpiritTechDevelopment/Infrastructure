@@ -77,11 +77,14 @@ make deploy                   # full deploy + verify  (see the discipline below)
 
 ## Secrets
 
-Deploy secrets (Grafana password, TLS cert/key, `entry_service_uuid`) live
-**SOPS-encrypted in the repo** (`inventories/prod/secrets.sops.yml`) and are
-materialized by `make decrypt` (→ gitignored `secrets.plain.yml`, passed to
-Ansible as extra-vars). Private keys, Vault unseal keys, and `.local-secrets/`
-never enter Git. Full model + onboarding in [OPERATIONS.md](OPERATIONS.md) §3.
+Deploy secrets (Grafana password, TLS cert/key, `entry_service_uuid`, Telegram bot
+token) live **SOPS-encrypted in the repo** (`inventories/prod/secrets.sops.yml`) and
+are materialized by `make decrypt` (→ gitignored `secrets.plain.yml`, passed to
+Ansible as extra-vars). The **inventory** is likewise committed encrypted
+(`inventory.sops.yml`, whole-file — host IPs hidden) and materialized to the
+gitignored `inventory.yml` by `make decrypt`, so a clean clone reproduces the
+topology. Private keys, Vault unseal keys, and `.local-secrets/` never enter Git.
+Full model + onboarding in [OPERATIONS.md](OPERATIONS.md) §3.
 
 ## Backend / customer operations
 

@@ -55,16 +55,16 @@ The Vault root token configured the CA (file shredded, value still in `vault-ini
   laptop)? **Recommendation:** rotate if you want a clean bill; low risk if the machines
   are trusted. **NEXT_STEPS #2.**
 
-## 6. Inventory reproducibility
+## 6. Inventory reproducibility — RESOLVED (2026-07-18)
 
-`inventories/prod/inventory.yml` (host definitions, groups, the `management_network`
-group) is **gitignored**, so a fresh clone can't reproduce the inventory — only the
-roles/playbooks/committed group_vars.
-- **Options:** (a) accept (inventory is operator-local, secrets in SOPS); (b) commit a
-  SOPS-encrypted `inventory.sops.yml` and generate `inventory.yml` via `make decrypt`
-  (comment-preservation caveat).
-- **Recommendation:** revisit if more than one operator needs to deploy from a clean
-  clone. Not blocking today.
+Was: `inventory.yml` was gitignored, so a clean clone couldn't reproduce the topology.
+
+**Resolved** by committing `inventory.sops.yml` — **whole-file (binary) SOPS**
+encryption (chosen over field-level so the host IPs are hidden in *comments* too,
+per the operator requirement), materialized to the gitignored `inventory.yml` by
+`make decrypt`. The comment-preservation caveat is avoided (binary round-trips
+verbatim). Source of truth is now `inventory.sops.yml` (edit via `sops`); direct
+edits to `inventory.yml` are backed up before overwrite. See OPERATIONS.md §3.
 
 ## 7. Standing decisions to confirm (already acted on, flag if you disagree)
 

@@ -59,6 +59,19 @@ make deploy         # depends on decrypt; passes the secrets as --extra-vars
 sops inventories/prod/secrets.sops.yml   # edit/add a secret (re-encrypts on save)
 ```
 
+**The inventory is encrypted too.** `inventory.sops.yml` (committed, **whole-file /
+binary** SOPS — the host IPs appear in comments as well as values, so field-level
+encryption would leak them) materializes to the gitignored `inventory.yml` via
+`make decrypt`. So a clean clone can reproduce the fleet topology. **Edit the
+topology through SOPS**, then re-materialize:
+```bash
+sops inventories/prod/inventory.sops.yml   # opens the decrypted inventory in $EDITOR; re-encrypts on save
+make decrypt                               # regenerate inventory.yml for Ansible
+```
+`make decrypt` backs up a locally-modified `inventory.yml` (to `inventory.yml.bak.<ts>`)
+before overwriting, so direct edits are never silently lost — but `inventory.sops.yml`
+is the source of truth.
+
 What lives where — the important split:
 
 | Material | Home | In Git? |
@@ -79,8 +92,9 @@ What lives where — the important split:
 ```bash
 sudo apt install -y age sops
 age-keygen -o ~/.config/sops/age/keys.txt      # prints your age PUBLIC key: age1...
-# add your (and each operator's) age PUBLIC key to .sops.yaml, then re-wrap:
+# add your (and each operator's) age PUBLIC key to .sops.yaml, then re-wrap BOTH:
 sops updatekeys inventories/prod/secrets.sops.yml
+sops updatekeys inventories/prod/inventory.sops.yml
 ```
 
 Back up your age **private** key (`~/.config/sops/age/keys.txt`) out of band — if
