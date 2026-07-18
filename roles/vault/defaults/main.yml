@@ -9,3 +9,12 @@ vault_api_addr: "{{ ('https' if vault_tls_enabled | bool else 'http') }}://127.0
 vault_cluster_addr: "{{ ('https' if vault_tls_enabled | bool else 'http') }}://127.0.0.1:{{ vault_cluster_port }}"
 vault_tls_certificate: ""
 vault_tls_private_key: ""
+
+# Seal-state monitoring: a systemd timer probes /v1/sys/health on the host and
+# writes a node-exporter textfile metric (vault_sealed / vault_up) so a silent
+# re-seal fires the "VaultSealed" alert. See OPERATIONS.md §9.
+vault_seal_metric_enabled: true
+# Host path node-exporter reads via its textfile collector. MUST match
+# roles/observability (node_exporter_textfile_dir there); node-exporter mounts
+# `/:/host:ro`, so it reads this as /host<path>.
+node_exporter_textfile_dir: /var/lib/node_exporter/textfile-collector

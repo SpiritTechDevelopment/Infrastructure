@@ -159,6 +159,13 @@ Join the overlay (`wg-quick up wg0`), then:
 
 Monitoring needs only an **overlay peer + a Grafana account** — no repo access.
 
+**Vault seal alert:** a host-side timer on control-1 exports `vault_sealed` /
+`vault_up` as a node-exporter textfile metric; the `VaultSealed` /
+`VaultUnreachable` / `VaultSealMetricMissing` rules fire on a silent re-seal or a
+down health endpoint (§9). Note these only *page* once `alertmanager_webhook_url`
+is set — until then they show in Prometheus/Alertmanager but no notification is
+sent.
+
 ## 7. CI/CD notes
 
 - `ci.yml` = lint, hosted runner, no secrets. Enable now.

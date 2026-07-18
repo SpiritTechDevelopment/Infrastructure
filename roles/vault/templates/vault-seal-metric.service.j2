@@ -1,0 +1,8 @@
+[Unit]
+Description=Export Vault seal state as a node-exporter textfile metric
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vault-seal-metric.sh

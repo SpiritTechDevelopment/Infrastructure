@@ -75,3 +75,51 @@
     or ('Started' in (_vault_apply.stdout ~ _vault_apply.stderr))
     or ('Recreated' in (_vault_apply.stdout ~ _vault_apply.stderr))
     or ('Pulled' in (_vault_apply.stdout ~ _vault_apply.stderr))
+
+# Seal-state monitoring (OPERATIONS.md §9). Loopback-only Vault re-seals on every
+# restart; this exports vault_sealed/vault_up as a node-exporter textfile metric
+# so a silent reseal fires the "VaultSealed" alert instead of a later CA failure.
+- name: Vault seal-metric — create node-exporter textfile dir
+  ansible.builtin.file:
+    path: "{{ node_exporter_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: vault_seal_metric_enabled | bool
+
+- name: Vault seal-metric — install exporter script
+  ansible.builtin.template:
+    src: vault-seal-metric.sh.j2
+    dest: /usr/local/bin/vault-seal-metric.sh
+    owner: root
+    group: root
+    mode: "0755"
+  when: vault_seal_metric_enabled | bool
+
+- name: Vault seal-metric — install systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - vault-seal-metric.service
+    - vault-seal-metric.timer
+  when: vault_seal_metric_enabled | bool
+
+- name: Vault seal-metric — enable + start timer
+  ansible.builtin.systemd_service:
+    name: vault-seal-metric.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: vault_seal_metric_enabled | bool
+
+- name: Vault seal-metric — prime the metric once so it exists immediately
+  ansible.builtin.systemd_service:
+    name: vault-seal-metric.service
+    state: started
+  when: vault_seal_metric_enabled | bool
+  changed_when: false

@@ -54,7 +54,10 @@ services:
     image: {{ node_exporter_image }}
     restart: unless-stopped
     pid: host
-    command: ["--path.rootfs=/host"]
+    command:
+      - "--path.rootfs=/host"
+      # Reads host-local textfile metrics (e.g. the vault seal-state metric).
+      - "--collector.textfile.directory=/host{{ node_exporter_textfile_dir }}"
     volumes:
       - /:/host:ro,rslave
 

@@ -13,6 +13,10 @@ grafana_image: grafana/grafana:12.0.2
 blackbox_image: prom/blackbox-exporter:v0.27.0
 alloy_image: grafana/alloy:v1.17.1
 node_exporter_image: quay.io/prometheus/node-exporter:v1.9.1
+# Host dir node-exporter reads via its textfile collector (mounted at /host<dir>).
+# The vault role's seal-metric timer writes vault.prom here; keep in sync with
+# roles/vault (node_exporter_textfile_dir).
+node_exporter_textfile_dir: /var/lib/node_exporter/textfile-collector
 retention_ops: 720h
 retention_activity: 168h
 alertmanager_webhook_url: ""
