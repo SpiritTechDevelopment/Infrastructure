@@ -38,6 +38,10 @@ top of `authorized_keys`. Operators are a roster in
 
 ## Quickstart
 
+**Just cloned it and want to run + monitor the fleet? Follow
+[docs/deploy/GETTING_STARTED.md](docs/deploy/GETTING_STARTED.md)** — the full
+zero-to-operating path. The short version:
+
 Deploys run from an operator workstation that is a **WireGuard overlay peer** (see
 [OPERATIONS.md](docs/deploy/OPERATIONS.md) for onboarding + how access is granted).
 
@@ -67,6 +71,7 @@ Full docs live in **[docs/](docs/README.md)**, grouped into `architecture/`,
 
 | Doc | What |
 |---|---|
+| [**Getting started**](docs/deploy/GETTING_STARTED.md) | **Cloned it and want to run + monitor it? Start here** — prerequisites, setup, configure, deploy, monitor |
 | [docs/](docs/README.md) | **The documentation index** — every folder + guide |
 | [what-deploys-what.md](docs/deploy/what-deploys-what.md) | Command → playbook → hosts → roles, and the blast radius of each |
 | [CURRENT_STATE.md](docs/status/CURRENT_STATE.md) | **Where the fleet is now** — the canonical point-in-time snapshot |

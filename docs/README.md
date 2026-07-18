@@ -17,6 +17,8 @@ guide (README) describing what's inside.
 
 ## Common entry points
 
+- **Just cloned it and want to run + monitor it?**
+  [deploy/GETTING_STARTED.md](deploy/GETTING_STARTED.md) — the full path.
 - **New here?** [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md), then
   [deploy/OPERATIONS.md](deploy/OPERATIONS.md).
 - **Deploying / changing the fleet?** [deploy/what-deploys-what.md](deploy/what-deploys-what.md)
