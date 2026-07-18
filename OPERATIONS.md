@@ -206,3 +206,53 @@ can't be self-served from GitHub alone — that's the security property, not a g
 What may safely live in GitHub for recovery: the **public-key roster**, the
 **SOPS-encrypted secrets** (ciphertext), and this runbook. Nothing whose mere
 possession (without a separate key) grants access.
+
+## 9. Vault: seal state & manual unseal
+
+Vault on control-1 runs as the `vault` container, **loopback-only** (`127.0.0.1:8200`),
+**Shamir 3-of-5**, and has **no auto-unseal** — so it **re-seals on every restart**
+(container/host reboot, image bump, `docker compose up` that recreates it). While
+sealed, the **SSH certificate authority cannot sign** ([VAULT_SSH_CA.md](VAULT_SSH_CA.md)),
+so operators fall back to their static `authorized_keys` (still valid — certs are
+additive). The data plane is unaffected; Vault holds no data-plane secret.
+
+**Check seal state** (on control-1, over the overlay — `-e ansible_host=10.20.0.1`):
+
+```bash
+docker exec vault vault status        # look for: Sealed  false
+# or, without the CLI:
+curl -s http://127.0.0.1:8200/v1/sys/seal-status | grep -o '"sealed":[a-z]*'
+```
+
+`/v1/sys/health` HTTP status is the machine-readable signal: **200** = unsealed +
+active, **429** = unsealed + standby, **501** = not initialised, **503** = sealed.
+The "Vault sealed" alert (§6) probes exactly this.
+
+**Unseal (3 of the 5 Shamir shares).** The shares live **out-of-band** in
+`vault-init.json` (the copy that left `.local-secrets/` for your password manager /
+safe — see §8; the in-repo `.local-secrets/` copy is break-glass only, never in Git).
+Three different key-holders (or one operator holding ≥3 shares in a break-glass
+scenario) each run:
+
+```bash
+docker exec -it vault vault operator unseal   # paste one share; repeat until Sealed=false
+```
+
+Each successful `unseal` advances `Unseal Progress` (`1/3`, `2/3`, `3/3`); the third
+flips `Sealed` to `false`. **Never** pass a share as a shell argument (it lands in
+history) — let the command prompt for it.
+
+**Verify after unsealing:**
+
+```bash
+docker exec vault vault status                       # Sealed=false, HA/active as expected
+# CA is signing again — from an overlay host, a throwaway-key cert login should work:
+#   (full procedure in VAULT_SSH_CA.md "prove it end-to-end")
+```
+
+**If it keeps re-sealing** you restarted the container — that's expected, not a fault.
+The durable fixes are the two deferred items: **auto-unseal** (transit/OpenBao or
+cloud KMS) so restarts self-unseal, and **expose-on-overlay** for remote signing —
+both in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) #1/#2. Until then this manual runbook
+is the accepted posture, paired with the **"Vault sealed" alert** so a silent reseal
+pages you instead of surfacing as a signing failure hours later.
