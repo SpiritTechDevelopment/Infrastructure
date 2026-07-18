@@ -34,10 +34,14 @@
     - {src: platform-alloy.alloy.j2, dest: alloy/config.alloy, mode: '0600'}
   no_log: true
   diff: false
-  # scrape_configs/rules changes need a Prometheus restart to load. The file_sd
-  # targets file is auto-reloaded and does not, but restarting on any config
-  # change here is cheap and keeps Prometheus in sync with rendered config.
-  notify: Restart Prometheus
+  # Bind-mounted configs are not reloaded by `docker compose up`, so restart the
+  # affected services on any rendered-config change. Cheap and keeps the running
+  # services in sync with the rendered config (Prometheus for scrape/rules,
+  # Alertmanager for receivers/routes, Grafana for provisioned datasources).
+  notify:
+    - Restart Prometheus
+    - Restart Alertmanager
+    - Restart Grafana
 
 - name: Provision Grafana dashboards (P2-01)
   ansible.builtin.copy:

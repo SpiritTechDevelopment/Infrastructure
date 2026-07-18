@@ -15,6 +15,9 @@ receivers:
     telegram_configs:
       - bot_token: "{{ alertmanager_telegram_bot_token }}"
         chat_id: {{ alertmanager_telegram_chat_id }}
+{% if alertmanager_telegram_message_thread_id | default('') | string | length > 0 %}
+        message_thread_id: {{ alertmanager_telegram_message_thread_id }}
+{% endif %}
         parse_mode: ''
         send_resolved: true
         message: "{% raw %}{{ range .Alerts }}{{ .Status | toUpper }}: {{ .Labels.alertname }}{{ if .Labels.node }} ({{ .Labels.node }}){{ end }} — {{ .Annotations.summary }}\n{{ end }}{% endraw %}"

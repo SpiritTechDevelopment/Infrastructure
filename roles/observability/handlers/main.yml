@@ -12,3 +12,28 @@
       - restart
       - prometheus
   changed_when: true
+
+# Alertmanager + Grafana also bind-mount their config, so `docker compose up` does
+# not reload them on a config-only change. Restart them when their rendered config
+# changes (e.g. a new receiver or provisioned datasource).
+- name: Restart Alertmanager
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ obs_dir }}/compose.yml"
+      - restart
+      - alertmanager
+  changed_when: true
+
+- name: Restart Grafana
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ obs_dir }}/compose.yml"
+      - restart
+      - grafana
+  changed_when: true

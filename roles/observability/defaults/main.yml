@@ -25,6 +25,8 @@ alertmanager_webhook_url: ""
 # The receiver activates only when BOTH are set. See OPERATIONS.md §6.
 alertmanager_telegram_bot_token: ""
 alertmanager_telegram_chat_id: ""
+# Optional forum-supergroup topic/thread to post into (leave empty for the General topic).
+alertmanager_telegram_message_thread_id: ""
 
 # Per-user usage exporter: reads Xray StatsService per-user byte counters from
 # each entry node and re-exposes them as Prometheus metrics for the top-talkers

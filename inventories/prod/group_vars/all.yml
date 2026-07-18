@@ -66,6 +66,12 @@ telemetry_hub_host: "10.20.0.1"
 loki_ops_endpoint: "http://{{ telemetry_hub_host }}:3100/loki/api/v1/push"
 prometheus_remote_write: "http://{{ telemetry_hub_host }}:9090/api/v1/write"
 
+# Telegram alert notifications. chat_id is not sensitive; the bot token is a SOPS
+# secret (alertmanager_telegram_bot_token). Both must be set for the receiver to
+# activate. See OPERATIONS.md §6.
+alertmanager_telegram_chat_id: -1003544840208
+alertmanager_telegram_message_thread_id: 13
+
 # Node lifecycle. Disabled hosts stay declared but are excluded from deployment,
 # wiring, verification, and observability target generation.
 node_enabled: true
