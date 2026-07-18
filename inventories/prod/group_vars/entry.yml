@@ -10,3 +10,7 @@ xray_sniffing_route_only: true
 # smoke tests. This makes a normal unique backend user work immediately.
 entry_default_exit_tag: fr-exit
 xray_entry_block_unmatched: false
+
+# Self-heal runtime users after an Xray restart (add-only; no-op without a
+# backend-written snapshot at xray_reconcile_snapshot). See BACKEND_INTEGRATION.md.
+xray_auto_reconcile_enabled: true

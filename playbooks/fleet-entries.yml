@@ -14,6 +14,9 @@
       loop: "{{ groups['entry'] | default([]) }}"
       when: hostvars[item].node_enabled | default(true) | bool
       changed_when: false
+      # Always build the group so tag/limit-scoped runs (e.g. -t reconcile) still
+      # resolve `active_entry_deploy` instead of finding it empty.
+      tags: [always]
 
 - name: Deploy entry nodes after exit wiring
   hosts: active_entry_deploy

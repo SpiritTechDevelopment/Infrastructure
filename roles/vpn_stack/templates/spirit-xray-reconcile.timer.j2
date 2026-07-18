@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically self-heal Xray runtime users (spirit-xray-reconcile.service)
+
+[Timer]
+OnBootSec={{ xray_reconcile_interval }}s
+OnUnitActiveSec={{ xray_reconcile_interval }}s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

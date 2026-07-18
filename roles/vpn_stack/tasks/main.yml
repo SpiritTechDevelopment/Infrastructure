@@ -47,3 +47,71 @@
     or ('Started' in _vpn_stack_apply.stderr)
     or ('Recreated' in _vpn_stack_apply.stderr)
     or ('Pulled' in _vpn_stack_apply.stderr)
+
+# Node-local auto-reconcile (self-heal runtime users after an Xray restart).
+# Add-only; no-op without a backend snapshot. See BACKEND_INTEGRATION.md.
+- name: Auto-reconcile — create script lib dir
+  ansible.builtin.file:
+    path: "{{ xray_reconcile_libdir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: xray_auto_reconcile_enabled | bool
+  tags: [reconcile]
+
+- name: Auto-reconcile — install helper scripts
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../../scripts/{{ item }}"
+    dest: "{{ xray_reconcile_libdir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - xray-api.sh
+    - xray-reconcile.sh
+    - xray-users.py
+  when: xray_auto_reconcile_enabled | bool
+  tags: [reconcile]
+
+- name: Auto-reconcile — install wrapper
+  ansible.builtin.template:
+    src: auto-reconcile.sh.j2
+    dest: "{{ xray_reconcile_libdir }}/auto-reconcile.sh"
+    owner: root
+    group: root
+    mode: "0755"
+  when: xray_auto_reconcile_enabled | bool
+  tags: [reconcile]
+
+- name: Auto-reconcile — ensure snapshot directory exists
+  ansible.builtin.file:
+    path: "{{ xray_reconcile_snapshot | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: xray_auto_reconcile_enabled | bool
+  tags: [reconcile]
+
+- name: Auto-reconcile — install systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - spirit-xray-reconcile.service
+    - spirit-xray-reconcile.timer
+  when: xray_auto_reconcile_enabled | bool
+  tags: [reconcile]
+
+- name: Auto-reconcile — enable + start the timer
+  ansible.builtin.systemd_service:
+    name: spirit-xray-reconcile.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: xray_auto_reconcile_enabled | bool
+  tags: [reconcile]

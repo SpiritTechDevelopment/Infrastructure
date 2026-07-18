@@ -78,6 +78,32 @@ make reconcile NODE=entry-1 STATE=/secure/path/desired-users.json PRUNE=1
 
 Use `REPLACE=1` only when the UUID behind an existing accounting identifier must be replaced.
 
+### Node-local auto-reconcile snapshot (self-heal on restart)
+
+Each entry runs a systemd timer (`spirit-xray-reconcile.timer`, ~30 s) that re-adds the
+backend's desired users after an Xray restart — so an *unplanned* restart self-heals in
+seconds instead of stranding customers until the backend replays. It reads a per-entry
+**snapshot the backend must write** at `/var/lib/xray/desired-users.json` (same
+`{"users":[…]}` format as above).
+
+Contract for the backend:
+
+- **Write it atomically** — render to a temp file and `rename()` into place; mode `0600`.
+  A half-written file would be read mid-update.
+- **It is a per-entry export of desired state** — write the snapshot for entry *N* with the
+  users that belong on entry *N*.
+- **The node timer is ADD-ONLY** — it never prunes. A stale snapshot can therefore only
+  *add* users, never remove a live one. All removals stay backend-driven (`make reconcile …
+  PRUNE=1`, or a direct `remove`).
+- **Update the snapshot BEFORE enforcing a removal.** When you suspend a user (quota breach,
+  offboarding), drop them from the snapshot *first*, then remove them from Xray — otherwise
+  the add-only timer re-adds the just-removed user within one interval.
+- **Absent or empty snapshot → the timer no-ops** (safe on a fresh node before the backend
+  has written one).
+
+This snapshot does not replace the authoritative backend DB or `make reconcile`; it is a
+restart-recovery cache the node can act on without the backend being reachable.
+
 ## Routing
 
 Ordinary API-created users are routed through `entry_default_exit_tag`. Infrastructure-only

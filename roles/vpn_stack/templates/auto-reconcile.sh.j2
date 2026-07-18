@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Managed by Ansible (roles/vpn_stack). Node-local self-heal for runtime VLESS
+# users: after an Xray restart the in-memory user list is empty, so re-add the
+# backend's desired users from the on-node snapshot.
+#
+# Safety: ADD-ONLY (never passes --prune), so a stale snapshot can only ever add
+# users, never remove a live one. No-op if the snapshot is absent or empty. The
+# backend owns the snapshot and all removals (see BACKEND_INTEGRATION.md).
+set -uo pipefail
+
+SNAPSHOT="{{ xray_reconcile_snapshot }}"
+LIBDIR="{{ xray_reconcile_libdir }}"
+ENDPOINT="127.0.0.1:{{ xray_api_port }}"
+
+export XRAY_IMAGE="{{ xray_image }}"
+export XRAY_INBOUND_TAG="{{ xray_inbound_tag }}"
+
+if [[ ! -f "$SNAPSHOT" ]]; then
+  echo "auto-reconcile: no snapshot at $SNAPSHOT; nothing to do"
+  exit 0
+fi
+
+# Skip cleanly on an empty/malformed snapshot rather than letting reconcile error
+# ("empty desired state is useful only with --prune") and mark the unit failed.
+count="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("users",[])))' "$SNAPSHOT" 2>/dev/null || echo -1)"
+if [[ ! "$count" =~ ^[0-9]+$ ]] || (( count <= 0 )); then
+  echo "auto-reconcile: snapshot $SNAPSHOT is empty or invalid; skipping"
+  exit 0
+fi
+
+exec "$LIBDIR/xray-reconcile.sh" "$ENDPOINT" "$SNAPSHOT"
