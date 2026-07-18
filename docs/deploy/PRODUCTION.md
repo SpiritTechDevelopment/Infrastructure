@@ -4,8 +4,8 @@
 > boundary no longer holds. The fleet is now hardened and overlay-first: firewall
 > codified, SSH key-only, and the Xray API + telemetry are **overlay-only**. Vault
 > stays loopback-only. For the current boundary read
-> [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md), [OPERATIONS.md](OPERATIONS.md),
-> and [ARCHITECTURE.md](ARCHITECTURE.md) §6. The break-glass / backup / reconcile
+> [CONVERGENCE_STATUS.md](../status/CONVERGENCE_STATUS.md), [OPERATIONS.md](OPERATIONS.md),
+> and [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §6. The break-glass / backup / reconcile
 > advice at the bottom still applies.
 
 The active repository is intentionally a functional, no-hardening deployment. It changes

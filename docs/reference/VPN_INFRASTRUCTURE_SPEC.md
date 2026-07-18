@@ -1244,7 +1244,6 @@ Customer users should not be placed there. They are intended to be added through
 ## 52. Xray outbounds
 
 Every node has:
-
 - `direct` using the `freedom` protocol;
 - `block` using the `blackhole` protocol.
 

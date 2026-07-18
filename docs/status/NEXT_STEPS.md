@@ -19,7 +19,7 @@ depends on.
    (`roles/vpn_stack`, `xray_auto_reconcile_enabled`). Closes the "unplanned restart
    strands customers until someone replays" gap. Applied + verified on entry-1.
    **Backend TODO:** write the snapshot (atomically; update before enforcing a
-   removal) — contract in [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md).
+   removal) — contract in [BACKEND_INTEGRATION.md](../integration/BACKEND_INTEGRATION.md).
 
 2. **Revoke / rotate the Vault bootstrap root token.** The root-token *file* on
    control-1 was shredded, but the token value still lives in `.local-secrets/vault-init.json`.
@@ -42,7 +42,7 @@ depends on.
      group_vars; Grafana Alertmanager datasource for viewing/silences. Verified
      end-to-end (test alerts delivered to thread 13). Also fixed: Alertmanager/
      Grafana now reload on config change (previously only Prometheus did). Steps:
-     [OPERATIONS.md](OPERATIONS.md) §6.
+     [OPERATIONS.md](../deploy/OPERATIONS.md) §6.
 
 ## Medium priority (finish the WireGuard + SSH-CA loops)
 
@@ -50,13 +50,13 @@ depends on.
    The first `make management` rewrites configs to canonical form → restarts `wg-quick@wg0`
    (brief blip; data plane unaffected). Do it **in a maintenance window, over the hosts'
    public SSH, with provider console ready** (managing `wg0` over the overlay drops your
-   own connection). See [WIREGUARD.md](WIREGUARD.md).
+   own connection). See [WIREGUARD.md](../security/WIREGUARD.md).
 
 5. **Make the SSH CA usable by operators from their own machine.** Vault is loopback-only,
    so today you sign by SSHing to control-1. To sign remotely, expose Vault on the
    overlay (needs a Vault redeploy = restart = re-seal — pair with #3), then create a
    `userpass` user per operator mapped to the `ssh-operator` policy. See
-   [VAULT_SSH_CA.md](VAULT_SSH_CA.md) and OPEN_QUESTIONS #2.
+   [VAULT_SSH_CA.md](../security/VAULT_SSH_CA.md) and OPEN_QUESTIONS #2.
 
 6. **Complete the WireGuard peer roster for Roman.** Roman can SSH/deploy but has no
    WireGuard or age key yet — he can't join the overlay or `make decrypt`. When he
@@ -67,7 +67,7 @@ depends on.
 
 7. **Stand up a self-hosted CI runner** (on the overlay, a dedicated box — not control-1)
    to move deploys off the workstation with a `production` Environment + required
-   reviewers, and retire the interim hosted-runner secrets. See [CUTOVER.md](CUTOVER.md).
+   reviewers, and retire the interim hosted-runner secrets. See [CUTOVER.md](../deploy/CUTOVER.md).
 8. **GitHub repo hygiene** — partially done (2026-07-18):
    - ✅ **Action SHAs pinned** — `ci.yml`/`deploy.yml` pin `actions/checkout`
      (v4.3.1) + `actions/setup-python` (v5.6.0) to commit SHAs.

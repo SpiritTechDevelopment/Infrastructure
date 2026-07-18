@@ -4,7 +4,7 @@ The WireGuard overlay (`wg0`, `10.20.0.0/24`, hub `control-1` = `10.20.0.1`) is
 **live and required for the management plane**. After the overlay-first hardening,
 the Xray API (`10085`), telemetry ingest (`9090`/`3100`), and operator access to
 Grafana/Vault are reachable **only** over it — you must be a `wg0` peer to operate
-the fleet. See [ARCHITECTURE.md](ARCHITECTURE.md) §7 and [OPERATIONS.md](OPERATIONS.md).
+the fleet. See [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) §7 and [OPERATIONS.md](../deploy/OPERATIONS.md).
 
 **Codified — but not yet re-applied to the live overlay.** `roles/management_wireguard`
 is un-stubbed and runnable:

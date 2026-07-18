@@ -4,8 +4,8 @@
 > no-hardening* bring-up phase, which is over. The fleet is now hardened and
 > overlay-first: the firewall is codified (managed nftables fleet-wide), SSH is
 > key-only, and the Xray API + telemetry are **overlay-only, not public**. For
-> current state read [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md),
-> [OPERATIONS.md](OPERATIONS.md), and [ARCHITECTURE.md](ARCHITECTURE.md). The text
+> current state read [CONVERGENCE_STATUS.md](../status/CONVERGENCE_STATUS.md),
+> [OPERATIONS.md](../deploy/OPERATIONS.md), and [ARCHITECTURE.md](../architecture/ARCHITECTURE.md). The text
 > below is kept only as a record of that phase.
 
 This is a complete functional mode, not a reduced bootstrap.

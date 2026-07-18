@@ -66,7 +66,7 @@ WireGuard overlay, verify-before-remove, each with a dead-man auto-revert:
   `make management`. Inputs in `group_vars/all.yml` (addresses, hub endpoint,
   external peers). Offline render **proven functionally identical** to the live
   `wg0.conf` on all hosts. **Not yet re-applied live** (first run restarts `wg0`).
-  See [WIREGUARD.md](WIREGUARD.md).
+  See [WIREGUARD.md](../security/WIREGUARD.md).
 
 ## 7. Vault SSH CA (L5 access)
 
@@ -77,7 +77,7 @@ WireGuard overlay, verify-before-remove, each with a dead-man auto-revert:
 - **Proven end-to-end**: cert-only login (throwaway key not in authorized_keys)
   works over the overlay and is `Permission denied` from a public source (overlay
   lock). Codified in `roles/vault` (`vault-ssh-ca.sh`). Bootstrap root-token file
-  shredded. See [VAULT_SSH_CA.md](VAULT_SSH_CA.md).
+  shredded. See [VAULT_SSH_CA.md](../security/VAULT_SSH_CA.md).
 
 ## Locked decisions (do not re-litigate)
 

@@ -36,7 +36,7 @@ Today: hosted runner for lint; deploys from the workstation.
   as a downgrade — avoid).
 - **Recommendation:** move to a **dedicated self-hosted runner** (not control-1) when
   you want audited button-click deploys; endgame is GitHub OIDC → Vault for short-lived
-  creds. See [CUTOVER.md](CUTOVER.md). **Gates NEXT_STEPS #7.**
+  creds. See [CUTOVER.md](../deploy/CUTOVER.md). **Gates NEXT_STEPS #7.**
 
 ## 4. When to apply the WireGuard codification to the live overlay?
 

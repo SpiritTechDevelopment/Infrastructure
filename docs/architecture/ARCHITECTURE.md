@@ -14,8 +14,8 @@ before making any firewall or hardening change.
 > adds a **Vault SSH CA** (24h overlay-locked certs) on top of key auth; the
 > **inventory itself is SOPS-encrypted**; topology (routing/telemetry/quotas/DNS)
 > is **config-driven from inventory labels** ([TOPOLOGY.md](TOPOLOGY.md)); and
-> alerts **page to Telegram**. See [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md)
-> for the full state and [OPERATIONS.md](OPERATIONS.md) for the access/deploy model.
+> alerts **page to Telegram**. See [CONVERGENCE_STATUS.md](../status/CONVERGENCE_STATUS.md)
+> for the full state and [OPERATIONS.md](../deploy/OPERATIONS.md) for the access/deploy model.
 
 ## Table of contents
 
@@ -259,7 +259,7 @@ runnable** (`make management` over the `management_network` group; inputs in
 live `wg0.conf`. It has **not been re-applied to the live overlay yet** — the
 first run rewrites configs to canonical form and restarts `wg-quick@wg0` (brief
 blip), so apply it in a maintenance window over public SSH. See
-[WIREGUARD.md](WIREGUARD.md). `make deploy` still does not manage `wg0`.
+[WIREGUARD.md](../security/WIREGUARD.md). `make deploy` still does not manage `wg0`.
 
 ---
 
@@ -279,7 +279,7 @@ make deps                          # verify prerequisites
 SSH is **key-only fleet-wide** (`SSH_AUTH=auto|key`, `SSH_KEY=…`); password auth is
 disabled on every host. Reach `control-1` over the overlay (`-e ansible_host=10.20.0.1`)
 — its public `:22` banner-hangs from the workstation. Access onboarding + the secrets
-model are in [OPERATIONS.md](OPERATIONS.md).
+model are in [OPERATIONS.md](../deploy/OPERATIONS.md).
 
 Command reference (from `make help`):
 
@@ -393,7 +393,7 @@ Provisioned Grafana dashboards:
 - **VPN Fleet Overview** — reachability, CPU/mem/load, network throughput.
 - **VPN Logs** — Loki log explorer (ops tenant).
 - **VPN Per-User Usage** — top talkers by total bytes and by throughput
-  (fed by `xray-usage-exporter`; see `CHANGELOG_V8.md`). Visibility only —
+  (fed by `xray-usage-exporter`). Visibility only —
   durable quota accounting is the backend's job.
 
 **Alerting.** Prometheus rules → Alertmanager → **Telegram** (native receiver;
@@ -403,7 +403,7 @@ manage silences. Rules include fleet reachability, node/platform telemetry-missi
 and **Vault seal state** (`VaultSealed`/`VaultUnreachable`/`VaultSealMetricMissing`)
 — fed by a host-side timer that exports `vault_sealed`/`vault_up` as a node-exporter
 textfile metric, since Vault is loopback-only and the containerized blackbox can't
-reach it. Vault manual-unseal runbook: [OPERATIONS.md](OPERATIONS.md) §9.
+reach it. Vault manual-unseal runbook: [OPERATIONS.md](../deploy/OPERATIONS.md) §9.
 
 Note: Prometheus/Alertmanager/Grafana read their (bind-mounted) config only at
 start, so the observability role restarts the affected service on a config change
@@ -416,7 +416,7 @@ via `Restart Prometheus` / `Restart Alertmanager` / `Restart Grafana` handlers.
 
 **Read this before any hardening or firewall change.** The overlay-first hardening
 convergence is **done** and codified. Full state/decisions/gotchas live in
-[CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md); the summary:
+[CONVERGENCE_STATUS.md](../status/CONVERGENCE_STATUS.md); the summary:
 
 - **`deploy_mode` gate** (`runtime` | `bootstrap` | `hardened`) replaced the old
   unconditional tripwire. In `runtime` the `common_*` hardening flags must stay
@@ -429,7 +429,7 @@ convergence is **done** and codified. Full state/decisions/gotchas live in
 - **Operator access** is codified: `operators` roster → `authorized_keys` via the
   scoped `playbooks/access.yml`; secrets **and the inventory** are SOPS-encrypted
   (`make decrypt`). A **Vault SSH CA** issues 24h, overlay-source-locked certs on
-  top of key auth (`TrustedUserCAKeys` fleet-wide; see [VAULT_SSH_CA.md](VAULT_SSH_CA.md)).
+  top of key auth (`TrustedUserCAKeys` fleet-wide; see [VAULT_SSH_CA.md](../security/VAULT_SSH_CA.md)).
 - **Vault** is loopback-only + manual 3-of-5 unseal (re-seals on restart); seal
   state is **monitored** (alerts to Telegram) with a manual-unseal runbook
   (OPERATIONS §9). Auto-unseal is deferred until the CA is load-bearing.
@@ -499,7 +499,7 @@ node, Loki has logs from every node, and `make e2e-all` passes end to end.
 ---
 
 *See also: [TOPOLOGY.md](TOPOLOGY.md) (config-driven model: labels →
-routing/telemetry/quotas/DNS), `BACKEND_INTEGRATION.md` (runtime-user + quota
-snapshot contract), `WIREGUARD.md`, `VAULT_SSH_CA.md`, `CHANGELOG_V6…V8.md`
-(recent changes), `INFRASTRUCTURE_SPEC.md` / `VPN_INFRASTRUCTURE_SPEC.md` (design
+routing/telemetry/quotas/DNS), [BACKEND_INTEGRATION.md](../integration/BACKEND_INTEGRATION.md)
+(runtime-user + quota snapshot contract), [WIREGUARD.md](../security/WIREGUARD.md),
+[VAULT_SSH_CA.md](../security/VAULT_SSH_CA.md), and the `docs/reference/` specs (design
 intent).*

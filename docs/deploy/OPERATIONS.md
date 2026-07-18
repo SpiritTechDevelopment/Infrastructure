@@ -249,7 +249,7 @@ possession (without a separate key) grants access.
 Vault on control-1 runs as the `vault` container, **loopback-only** (`127.0.0.1:8200`),
 **Shamir 3-of-5**, and has **no auto-unseal** — so it **re-seals on every restart**
 (container/host reboot, image bump, `docker compose up` that recreates it). While
-sealed, the **SSH certificate authority cannot sign** ([VAULT_SSH_CA.md](VAULT_SSH_CA.md)),
+sealed, the **SSH certificate authority cannot sign** ([VAULT_SSH_CA.md](../security/VAULT_SSH_CA.md)),
 so operators fall back to their static `authorized_keys` (still valid — certs are
 additive). The data plane is unaffected; Vault holds no data-plane secret.
 
@@ -290,6 +290,6 @@ docker exec vault vault status                       # Sealed=false, HA/active a
 **If it keeps re-sealing** you restarted the container — that's expected, not a fault.
 The durable fixes are the two deferred items: **auto-unseal** (transit/OpenBao or
 cloud KMS) so restarts self-unseal, and **expose-on-overlay** for remote signing —
-both in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) #1/#2. Until then this manual runbook
+both in [OPEN_QUESTIONS.md](../status/OPEN_QUESTIONS.md) #1/#2. Until then this manual runbook
 is the accepted posture, paired with the **"Vault sealed" alert** so a silent reseal
 pages you instead of surfacing as a signing failure hours later.

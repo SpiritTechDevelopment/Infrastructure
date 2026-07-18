@@ -40,7 +40,7 @@ Everything else is **overlay-only** (reachable only as a `wg0` peer):
   `authorized_keys` on every host via `playbooks/access.yml`.
 - **Vault SSH CA**: 24h certs, `source-address`-locked to the overlay, signed by
   Vault's `ssh-client-signer`; hosts trust the CA (`TrustedUserCAKeys`) **in
-  addition to** authorized_keys. See [VAULT_SSH_CA.md](VAULT_SSH_CA.md).
+  addition to** authorized_keys. See [VAULT_SSH_CA.md](../security/VAULT_SSH_CA.md).
 - Management (SSH, Xray API, Grafana/telemetry) requires **WireGuard overlay
   membership**. `control-1`'s public `:22` banner-hangs from the workstation — reach
   it over the overlay (`-e ansible_host=10.20.0.1`).
@@ -62,7 +62,7 @@ Everything else is **overlay-only** (reachable only as a `wg0` peer):
 - **Repo:** `git@github.com:SpiritTechDevelopment/Infrastructure.git`, branch `main`.
 - **Secrets:** SOPS-encrypted (`inventories/prod/secrets.sops.yml`: Grafana password,
   TLS cert/key, `entry_service_uuid`); materialized by `make decrypt`. Age recipient:
-  operator workstation key. See [OPERATIONS.md](OPERATIONS.md) §3.
+  operator workstation key. See [OPERATIONS.md](../deploy/OPERATIONS.md) §3.
 - **`.local-secrets/`** now holds only out-of-band break-glass material
   (`vault-init.json` = Vault unseal keys + root token; per-node WireGuard keys).
 - **Inventory:** `inventory.sops.yml` (whole-file/binary SOPS, committed — host IPs
@@ -83,10 +83,10 @@ Everything else is **overlay-only** (reachable only as a `wg0` peer):
   add-only) that re-adds the backend's desired users from an on-node snapshot
   (`/var/lib/xray/desired-users.json`) after an Xray restart — so an unplanned
   restart recovers in seconds instead of stranding customers. No-op until the
-  backend writes the snapshot (contract in [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md)).
+  backend writes the snapshot (contract in [BACKEND_INTEGRATION.md](../integration/BACKEND_INTEGRATION.md)).
 - **Telemetry:** Prometheus/Loki/Grafana fresh over the overlay; both nodes reporting.
 - **WireGuard overlay:** live and healthy (hand-configured; role codified but not
-  re-applied — see [WIREGUARD.md](WIREGUARD.md)).
+  re-applied — see [WIREGUARD.md](../security/WIREGUARD.md)).
 - **Vault:** initialized + **currently unsealed**; **no auto-unseal** (re-seals on
   restart); loopback-only; SSH CA configured. Seal state is now monitored — a
   host-side timer exports `vault_sealed`/`vault_up` to node-exporter and the

@@ -57,5 +57,5 @@ Inspect a cert: `ssh-keygen -L -f ~/.ssh/spirit_ops-cert.pub` (shows the 24h win
 - **Revocation** — SSH has no CRL; expiry (24h) + the source-address lock are the
   controls. A KRL is break-glass only.
 
-See [OPERATIONS.md](OPERATIONS.md) for the access model and
-[CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md) for state.
+See [OPERATIONS.md](../deploy/OPERATIONS.md) for the access model and
+[CONVERGENCE_STATUS.md](../status/CONVERGENCE_STATUS.md) for state.

@@ -8,7 +8,7 @@ is a config edit; nothing is wired by hand.
 
 > The desired state is declarative today; the *automatic apply* (a control-node
 > reconcile loop) is deferred until there's a dedicated runner box on the overlay
-> ([CUTOVER.md](CUTOVER.md) / NEXT_STEPS #7). Until then the trigger is `make deploy`
+> ([CUTOVER.md](../deploy/CUTOVER.md) / NEXT_STEPS #7). Until then the trigger is `make deploy`
 > (node-scoped). The model below holds regardless of the trigger.
 
 ## Everything derives from the inventory
@@ -51,7 +51,7 @@ is data-plane-safe.
 - **Add an entry:** declare it in the encrypted inventory (`entry` +
   `management_network` groups, its own `xray_api_overlay_host`) + a
   `host_vars/<h>/firewall.yml`; bootstrap trust once (a brand-new machine must first
-  trust the control side — see [ONBOARDING_AND_HARDENING.md](ONBOARDING_AND_HARDENING.md)
+  trust the control side — see [ONBOARDING_AND_HARDENING.md](../deploy/ONBOARDING_AND_HARDENING.md)
   §4); deploy node-scoped; add a DNS record.
 - **Replace (drop-in):** point the DNS record at the new node and give the new node
   the old REALITY identity (pin `reality_private_key`, keep `reality_short_ids` /
