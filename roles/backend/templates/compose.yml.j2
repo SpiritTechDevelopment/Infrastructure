@@ -1,0 +1,54 @@
+name: {{ backend_compose_project }}
+
+services:
+  postgres:
+    image: {{ backend_postgres_image }}
+    restart: unless-stopped
+    env_file:
+      - backend.env
+    volumes:
+      - {{ backend_postgres_volume }}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ backend_postgres_user }} -d {{ backend_postgres_database }}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - backend
+
+  api:
+    image: {{ backend_image }}
+    restart: unless-stopped
+    env_file:
+      - backend.env
+    ports:
+      - "{{ backend_bind_address }}:{{ backend_port }}:8080"
+    volumes:
+      - ./client-endpoints.json:/run/spiritvpn/client-endpoints.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 512m
+    cpus: 1.0
+    networks:
+      - backend
+
+volumes:
+  {{ backend_postgres_volume }}:
+
+networks:
+  backend:
+    driver: bridge

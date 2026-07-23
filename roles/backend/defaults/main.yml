@@ -1,0 +1,27 @@
+---
+backend_stack_dir: /opt/spiritvpn-staging
+backend_compose_project: spiritvpn-staging
+backend_image: ""
+backend_bind_address: 10.20.0.1
+backend_port: 18080
+backend_node_name: entry-1
+backend_inbound_tag: vless-in
+backend_manifest_source: "{{ playbook_dir }}/../generated/client-endpoints.json"
+backend_manifest_path: "{{ backend_stack_dir }}/client-endpoints.json"
+
+backend_postgres_image: postgres:14-alpine
+backend_postgres_user: spiritdb
+backend_postgres_database: spiritdb
+backend_postgres_volume: postgres-data
+
+backend_api_mode: production
+backend_test_access_ttl: 24h
+backend_log_level: info
+
+# Секреты обязательны и должны приходить из SOPS/Vault или временного
+# untracked extra-vars файла. Значения по умолчанию намеренно отсутствуют.
+backend_db_password: ""
+backend_internal_api_token: ""
+# Leave both empty when the host has already been authenticated out-of-band.
+backend_ghcr_username: ""
+backend_ghcr_token: ""

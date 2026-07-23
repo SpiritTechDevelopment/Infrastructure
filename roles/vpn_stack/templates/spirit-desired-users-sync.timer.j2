@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically refresh authoritative SpiritVPN desired users
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec={{ xray_desired_users_sync_interval }}s
+RandomizedDelaySec=3s
+Unit=spirit-desired-users-sync.service
+
+[Install]
+WantedBy=timers.target

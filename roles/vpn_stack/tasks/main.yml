@@ -115,3 +115,71 @@
     daemon_reload: true
   when: xray_auto_reconcile_enabled | bool
   tags: [reconcile]
+
+- name: Desired-user sync — validate backend contract
+  ansible.builtin.assert:
+    that:
+      - xray_auto_reconcile_enabled | bool
+      - xray_desired_users_url is match('^https?://')
+      - xray_desired_users_token | length >= 32
+      - xray_desired_users_sync_interval | int >= 10
+    fail_msg: >-
+      Desired-user synchronization requires auto-reconcile, a backend URL,
+      a service token and an interval of at least 10 seconds.
+  when: xray_desired_users_sync_enabled | bool
+  no_log: true
+  tags: [reconcile]
+
+- name: Desired-user sync — create secret directory
+  ansible.builtin.file:
+    path: "{{ xray_desired_users_token_file | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: xray_desired_users_sync_enabled | bool
+  tags: [reconcile]
+
+- name: Desired-user sync — install backend token
+  ansible.builtin.copy:
+    content: "{{ xray_desired_users_token }}\n"
+    dest: "{{ xray_desired_users_token_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: xray_desired_users_sync_enabled | bool
+  no_log: true
+  diff: false
+  tags: [reconcile]
+
+- name: Desired-user sync — install fetch helper
+  ansible.builtin.template:
+    src: fetch-desired-users.sh.j2
+    dest: "{{ xray_reconcile_libdir }}/fetch-desired-users.sh"
+    owner: root
+    group: root
+    mode: "0755"
+  when: xray_desired_users_sync_enabled | bool
+  tags: [reconcile]
+
+- name: Desired-user sync — install systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - spirit-desired-users-sync.service
+    - spirit-desired-users-sync.timer
+  when: xray_desired_users_sync_enabled | bool
+  tags: [reconcile]
+
+- name: Desired-user sync — enable + start timer
+  ansible.builtin.systemd_service:
+    name: spirit-desired-users-sync.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: xray_desired_users_sync_enabled | bool
+  tags: [reconcile]

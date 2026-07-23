@@ -104,6 +104,11 @@ Contract for the backend:
 This snapshot does not replace the authoritative backend DB or `make reconcile`; it is a
 restart-recovery cache the node can act on without the backend being reachable.
 
+The production entry role can refresh this file from the authenticated backend endpoint
+`GET /internal/v1/vpn/desired-users`. The fetch is overlay-only, validates the complete
+schema and writes the snapshot atomically before the existing add-only reconcile timer
+uses it. `backend_internal_api_token` must be supplied through encrypted deploy secrets.
+
 ## Routing
 
 Ordinary API-created users are routed through `entry_default_exit_tag`. Infrastructure-only

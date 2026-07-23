@@ -1,0 +1,7 @@
+---
+- name: Deploy SpiritVPN backend staging on the platform host
+  hosts: platform
+  become: true
+  any_errors_fatal: true
+  roles:
+    - {role: backend, tags: [backend, staging]}

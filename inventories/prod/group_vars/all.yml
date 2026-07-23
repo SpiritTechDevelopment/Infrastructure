@@ -114,8 +114,8 @@ operators:
 # keys — it never regenerates when wg0.key already exists).
 management_wireguard_addresses:
   control-1: "10.20.0.1/24"      # hub
-  entry-1:   "10.20.0.11/32"
-  exit-fr:   "10.20.0.21/32"
+  entry-1: "10.20.0.11/32"
+  exit-fr: "10.20.0.21/32"
 management_wireguard_address: "{{ management_wireguard_addresses[inventory_hostname] | default('') }}"
 # Hub's reachable WireGuard endpoint (spokes dial this). Only the hub value is used.
 management_wireguard_public_endpoint: "{{ (control_plane_host ~ ':' ~ management_wireguard_port) if inventory_hostname == management_wireguard_hub_host else '' }}"

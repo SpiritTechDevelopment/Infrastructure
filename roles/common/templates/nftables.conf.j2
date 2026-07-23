@@ -74,12 +74,13 @@ table inet filter {
 {% if common_restricted_tcp_rules | length > 0 %}
 {% for rule in common_restricted_tcp_rules %}
 {% if rule.ports | length > 0 and rule.cidrs | length > 0 %}
+{% set forward_ports = rule.forward_ports | default(rule.ports) %}
 {% for cidr in rule.cidrs %}
 {% set rule_interface = rule.interface | default(common_restricted_interface) %}
 {% if ':' in cidr %}
-    {% if rule_interface | length > 0 %}iifname "{{ rule_interface }}" {% endif %}ip6 saddr {{ cidr }} ct status dnat tcp dport { {{ rule.ports | join(', ') }} } accept
+    {% if rule_interface | length > 0 %}iifname "{{ rule_interface }}" {% endif %}ip6 saddr {{ cidr }} ct status dnat tcp dport { {{ forward_ports | join(', ') }} } accept
 {% else %}
-    {% if rule_interface | length > 0 %}iifname "{{ rule_interface }}" {% endif %}ip saddr {{ cidr }} ct status dnat tcp dport { {{ rule.ports | join(', ') }} } accept
+    {% if rule_interface | length > 0 %}iifname "{{ rule_interface }}" {% endif %}ip saddr {{ cidr }} ct status dnat tcp dport { {{ forward_ports | join(', ') }} } accept
 {% endif %}
 {% endfor %}
 {% endif %}

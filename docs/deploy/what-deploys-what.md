@@ -11,6 +11,7 @@ blast radius before you run anything. Source of truth is the encrypted inventory
 | `make deploy` | `site.yml` | whole fleet | preflight → platform → exits → wire → entries → client-metadata → verify (idempotent; only changed nodes recreate) |
 | `make deploy-e2e` | + static checks + E2E | whole fleet | `make deploy` bracketed by `make check` and `make e2e-all` |
 | `make platform` | `platform.yml` | `control-1` | Vault + observability (no data-plane impact) |
+| `make backend-staging EXTRA_VARS=/secure/backend.yml` | `backend-staging.yml` | `control-1` | Immutable SpiritVPN backend image + isolated PostgreSQL staging stack |
 | `make apply-node LIMIT=<h>` | `fleet-infra.yml` (limited) | one node | redeploy a single data-plane node (must be wired) |
 | `make wire` | `wire-fleet.yml` | localhost | rebuild entries' `entry_exits` from deployed exits' REALITY material |
 | `make management` | `management-network.yml` | `management_network` (all) | WireGuard overlay (`wg0`) — **restarts wg0**, do in a window |

@@ -24,3 +24,12 @@ xray_reconcile_libdir: /usr/local/lib/spirit-xray
 xray_reconcile_snapshot: /var/lib/xray/desired-users.json
 xray_reconcile_interval: 30
 xray_inbound_tag: vless-in
+
+# Optional pull-based desired-state synchronization. The entry fetches the
+# authoritative snapshot from the backend over the WireGuard overlay and writes
+# it atomically for the existing add-only reconcile timer.
+xray_desired_users_sync_enabled: false
+xray_desired_users_url: ""
+xray_desired_users_token: ""
+xray_desired_users_token_file: /etc/spiritvpn/backend-snapshot.token
+xray_desired_users_sync_interval: 20
