@@ -22,5 +22,6 @@ backend_log_level: info
 # untracked extra-vars файла. Значения по умолчанию намеренно отсутствуют.
 backend_db_password: ""
 backend_internal_api_token: ""
+# Leave both empty when the host has already been authenticated out-of-band.
 backend_ghcr_username: ""
 backend_ghcr_token: ""

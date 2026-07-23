@@ -9,8 +9,7 @@
       - backend_node_name | length > 0
       - backend_db_password | length >= 20
       - backend_internal_api_token | length >= 32
-      - backend_ghcr_username | length > 0
-      - backend_ghcr_token | length > 0
+      - (backend_ghcr_token | length == 0) or (backend_ghcr_username | length > 0)
       - backend_manifest_source is file
     fail_msg: >-
       Backend deployment requires an immutable SHA image, generated endpoint
@@ -68,6 +67,7 @@
     stdin: "{{ backend_ghcr_token }}"
   changed_when: false
   no_log: true
+  when: backend_ghcr_token | length > 0
 
 - name: Apply backend staging stack
   ansible.builtin.command:

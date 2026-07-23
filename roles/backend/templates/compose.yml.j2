@@ -4,10 +4,8 @@ services:
   postgres:
     image: {{ backend_postgres_image }}
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: {{ backend_postgres_user }}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-      POSTGRES_DB: {{ backend_postgres_database }}
+    env_file:
+      - backend.env
     volumes:
       - {{ backend_postgres_volume }}:/var/lib/postgresql/data
     healthcheck:
