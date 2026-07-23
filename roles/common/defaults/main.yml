@@ -32,7 +32,9 @@ ssh_port: "{{ ansible_port | default(22) }}"
 ssh_allowed_cidrs: []                      # [] = allow SSH from anywhere (fallback)
 common_public_tcp_ports: []                # ports open to the internet (input chain)
 common_public_udp_ports: []
-common_restricted_tcp_rules: []            # [{ports, cidrs, interface}] source-scoped
+# Source-scoped rules. `forward_ports` optionally describes the post-DNAT
+# container port when it differs from the host-facing `ports`.
+common_restricted_tcp_rules: []            # [{ports, forward_ports?, cidrs, interface}]
 common_restricted_tcp_ports: []            # legacy flat form (used if _rules empty)
 common_restricted_cidrs: []
 common_restricted_interface: ""

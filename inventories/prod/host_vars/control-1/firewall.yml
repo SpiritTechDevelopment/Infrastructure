@@ -32,11 +32,14 @@ common_public_tcp_ports: []
 common_public_udp_ports: [51820]
 # Platform ports, overlay-only. Fleet-wide telemetry ingest (Loki/Prometheus) is
 # open to the whole /24; operator-only dashboards/secrets are scoped to the
-# workstation. Mirrors the current live wg0-scoped input rules, now enforced on
-# the forward (DNAT) path too so public reach is actually closed.
+# workstation. The backend internal API is reachable only from entry-1, which
+# pulls the authoritative Xray desired-user snapshot. Mirrors the current live
+# wg0-scoped input rules, now enforced on the forward (DNAT) path too so public
+# reach is actually closed.
 common_restricted_tcp_rules:
   - { ports: [3100, 9090], cidrs: ['10.20.0.0/24'], interface: wg0 }
   - { ports: [8200, 3000, 9093], cidrs: ['10.20.0.2/32'], interface: wg0 }
+  - { ports: [18080], forward_ports: [8080], cidrs: ['10.20.0.11/32'], interface: wg0 }
 # Bridge host: containers must be able to egress (Prometheus scrape, blackbox).
 common_docker_bridge_forwarding: true
 # Hub: forward traffic between overlay spokes (wg0 <-> wg0).
