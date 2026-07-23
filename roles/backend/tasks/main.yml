@@ -1,0 +1,123 @@
+---
+- name: Validate backend deployment contract
+  ansible.builtin.assert:
+    that:
+      - backend_image is match('^ghcr\.io/spirittechdevelopment/spiritvpn-backend:sha-[0-9a-f]{40}$')
+      - backend_bind_address | length > 0
+      - backend_port | int > 0
+      - backend_port | int < 65536
+      - backend_node_name | length > 0
+      - backend_db_password | length >= 20
+      - backend_internal_api_token | length >= 32
+      - backend_ghcr_username | length > 0
+      - backend_ghcr_token | length > 0
+      - backend_manifest_source is file
+    fail_msg: >-
+      Backend deployment requires an immutable SHA image, generated endpoint
+      manifest and secrets supplied through an encrypted or untracked vars file.
+  no_log: true
+
+- name: Create backend stack directory
+  ansible.builtin.file:
+    path: "{{ backend_stack_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install backend endpoint manifest
+  ansible.builtin.copy:
+    src: "{{ backend_manifest_source }}"
+    dest: "{{ backend_manifest_path }}"
+    owner: root
+    group: "10001"
+    mode: "0440"
+  register: _backend_manifest
+  no_log: true
+  diff: false
+
+- name: Render backend environment
+  ansible.builtin.template:
+    src: backend.env.j2
+    dest: "{{ backend_stack_dir }}/backend.env"
+    owner: root
+    group: root
+    mode: "0600"
+  register: _backend_env
+  no_log: true
+  diff: false
+
+- name: Render backend Compose definition
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ backend_stack_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  register: _backend_compose
+
+- name: Authenticate Docker to private GHCR
+  ansible.builtin.command:
+    argv:
+      - docker
+      - login
+      - ghcr.io
+      - --username
+      - "{{ backend_ghcr_username }}"
+      - --password-stdin
+    stdin: "{{ backend_ghcr_token }}"
+  changed_when: false
+  no_log: true
+
+- name: Apply backend staging stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --project-name
+      - "{{ backend_compose_project }}"
+      - --file
+      - "{{ backend_stack_dir }}/compose.yml"
+      - up
+      - --detach
+      - --remove-orphans
+      - --wait
+      - --wait-timeout
+      - "120"
+      - --pull
+      - always
+  register: _backend_apply
+  changed_when: >-
+    (_backend_manifest.changed | default(false))
+    or (_backend_env.changed | default(false))
+    or (_backend_compose.changed | default(false))
+    or ('Created' in (_backend_apply.stdout ~ _backend_apply.stderr))
+    or ('Started' in (_backend_apply.stdout ~ _backend_apply.stderr))
+    or ('Recreated' in (_backend_apply.stdout ~ _backend_apply.stderr))
+    or ('Pulled' in (_backend_apply.stdout ~ _backend_apply.stderr))
+
+- name: Verify backend liveness
+  ansible.builtin.uri:
+    url: "http://{{ backend_bind_address }}:{{ backend_port }}/health"
+    method: GET
+    status_code: 200
+    return_content: true
+  register: _backend_health
+  retries: 12
+  delay: 5
+  until:
+    - _backend_health.status == 200
+    - (_backend_health.json.status | default('')) == 'ok'
+
+- name: Verify backend database readiness
+  ansible.builtin.uri:
+    url: "http://{{ backend_bind_address }}:{{ backend_port }}/health/advanced"
+    method: GET
+    status_code: 200
+    return_content: true
+  register: _backend_readiness
+  retries: 6
+  delay: 5
+  until:
+    - _backend_readiness.status == 200
+    - (_backend_readiness.json.checks.database | default('')) == 'ok'
