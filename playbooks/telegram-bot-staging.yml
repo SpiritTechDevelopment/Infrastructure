@@ -1,0 +1,7 @@
+---
+- name: Deploy SpiritVPN Telegram bot staging on the platform host
+  hosts: platform
+  become: true
+  any_errors_fatal: true
+  roles:
+    - {role: telegram_bot, tags: [telegram_bot, staging]}
