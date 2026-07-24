@@ -68,6 +68,7 @@ syntax: ## Syntax-check the full site and standalone utility playbooks
 		playbooks/site.yml \
 		playbooks/fleet-infra.yml \
 		playbooks/backend-staging.yml \
+		playbooks/telegram-bot-staging.yml \
 		playbooks/acme.yml \
 		playbooks/management-network.yml; do \
 		ANSIBLE_INVENTORY="$(STATIC_INVENTORY)" ansible-playbook "$$playbook" --syntax-check || exit $$?; \
@@ -126,6 +127,9 @@ platform: decrypt ## Deploy only Vault and observability
 
 backend-staging: decrypt ## Deploy the immutable SpiritVPN backend image on control-1
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/backend-staging.yml $(SECRETS_ARGS) $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)
+
+telegram-bot-staging: decrypt ## Deploy the immutable SpiritVPN Telegram bot image on control-1
+	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/telegram-bot-staging.yml $(SECRETS_ARGS) $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)
 
 wire: ## Rebuild entry outbounds from deployed exit REALITY client passwords
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/wire-fleet.yml
@@ -187,6 +191,6 @@ dns: decrypt ## Reconcile Cloudflare DNS from the inventory (plan; APPLY=1 to ap
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
 
 .PHONY: help deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
-	backend-staging \
+	backend-staging telegram-bot-staging \
 	platform wire apply-node check-node api-ping api-list api-emails api-has api-add api-remove api-stats \
 	gen-client smoke-via reconcile management certs dns
