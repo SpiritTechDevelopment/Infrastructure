@@ -31,6 +31,8 @@ PLATFORM_INVENTORY ?= inventories/bootstrap/platform.yml
 PLATFORM_KNOWN_HOSTS ?= inventories/bootstrap/known_hosts
 PLATFORM_VARS ?=
 RESUME ?= 0
+REVISION ?=
+ALLOW_DESTRUCTIVE ?= 0
 
 # SOPS-encrypted deploy secrets (committed) and their decrypted form (gitignored).
 # `make legacy-decrypt ALLOW_LEGACY=1` materializes the plaintext; legacy deploy
@@ -68,6 +70,10 @@ fleet-render: ## Render local artifacts; ENVIRONMENT=develop by default
 
 fleet-plan: ## Plan SOURCE=HEAD against deployment ref; INITIAL=1 only for first deploy
 	python3 -m fleetctl.cli plan --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(BASELINE),--baseline "$(BASELINE)",$(if $(filter 1 yes true,$(INITIAL)),--initial,)) --output "build/$(or $(ENVIRONMENT),develop)"
+
+fleet-manifest: fleet-render ## Render backend manifest offline; requires explicit REVISION
+	@test -n "$(REVISION)" || (echo 'REVISION is required' >&2; exit 2)
+	python3 -m fleetctl.cli manifest --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" --revision "$(REVISION)" $(if $(BASELINE),--baseline "$(BASELINE)",$(if $(filter 1 yes true,$(INITIAL)),--initial,)) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) --output "build/$(or $(ENVIRONMENT),develop)"
 
 fleet-ansible-check: ## Validate compiled inventory/node plans locally; never connects
 	python3 -m fleetctl.cli ansible-check --environment "$(or $(ENVIRONMENT),develop)" --build-dir "build/$(or $(ENVIRONMENT),develop)"

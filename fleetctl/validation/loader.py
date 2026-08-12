@@ -175,8 +175,14 @@ def load_fleet_ids(path: Path) -> tuple[dict[str, int], list[ValidationIssue]]:
     for key, value in document.items():
         if not isinstance(key, str) or not key:
             issues.append(ValidationIssue.at(path, "FLEET_ID_KEY", "fleet ID registry keys must be non-empty strings"))
-        elif not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-            issues.append(ValidationIssue.at(path, "FLEET_ID_VALUE", f"{key!r} must map to a positive integer"))
+        elif not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 2**63 - 1:
+            issues.append(
+                ValidationIssue.at(
+                    path,
+                    "FLEET_ID_VALUE",
+                    f"{key!r} must map to a positive signed int64",
+                )
+            )
         else:
             result[key] = value
     return result, issues

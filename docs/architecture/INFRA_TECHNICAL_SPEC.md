@@ -279,10 +279,18 @@ PROVISIONING → CANDIDATE → SERVING → DRAINING → RETIRED
 Переключение `agent.endpoint` является передачей **control plane**, а не
 продвижением в `serving`. Его ОБЯЗАНО выполнять после применения
 инфраструктурной конфигурации и синтетической проверки пути к candidate. После
-смены endpoint бэкенд ОБЯЗАН выполнить полный `ReconcileUsers` на новом агенте,
-а координатор — дождаться подтверждения сходимости через `GetManifestStatus`.
-Только после этого data plane МОЖЕТ быть переключён публикацией в DNS и/или
-сменой адреса exit-аутбаунда.
+смены endpoint бэкенд асинхронно выполняет полный `ReconcileUsers` на новом
+агенте. Контракт manifest v1 не предоставляет status RPC: `APPLIED` подтверждает
+только атомарную запись snapshot и постановку materialization job.
+
+Поэтому автоматическое переключение data plane при замене инстанса НЕ входит в
+границу manifest deployment. До появления отдельного надёжного сигнала оно
+выполняется отдельной операцией только после того, как backend-метрики и
+agent-метрики подтвердили отсутствие materialization lag, pending/fatal
+operations и расхождения desired/applied revision. Новая логическая нода не
+нуждается в таком переключении: её DNS, Xray и агент ОБЯЗАНЫ быть готовы до
+`ApplyFleetManifest`, поскольку backend после `APPLIED` уже может выдавать её
+доступы.
 
 В промежутке между передачей control plane и переключением data plane старый
 инстанс продолжает обслуживать последнее применённое клиентское состояние, но
@@ -524,6 +532,7 @@ canonical digest.
 fleetctl validate --environment <env>
 fleetctl render   --environment <env> --output build/<env>
 fleetctl plan     --environment <env>
+fleetctl manifest --environment <env> --revision <n>
 fleetctl deploy   --environment <env>
 fleetctl status   --environment <env>
 ```
@@ -533,7 +542,7 @@ fleetctl status   --environment <env>
 ```text
 build/<environment>/
 ├── ansible-inventory.json
-├── backend-manifest.yaml
+├── backend-manifest.json
 ├── node-plans/<instance_id>.json
 ├── dns-plan.json
 ├── monitoring-targets.json
@@ -686,7 +695,7 @@ fleets:
 Git: desired/                      источник, открытым текстом, вечно
    │  fleetctl render
    ▼
-build/<env>/backend-manifest.yaml  эфемерный, .gitignore, один прогон
+build/<env>/backend-manifest.json  эфемерный, .gitignore, один прогон
    │  gRPC + mTLS (manifest-writer)
    ▼
 PostgreSQL бэкенда                 durable-копия и проекция
@@ -695,7 +704,7 @@ PostgreSQL бэкенда                 durable-копия и проекция
 | Место | Что лежит | Срок |
 |---|---|---|
 | `desired/` в Git | источник | вечно, с историей |
-| `build/<env>/` | скомпилированный YAML | один прогон |
+| `build/<env>/` | скомпилированный JSON/protobuf projection | один прогон |
 | артефакт CI | несекретный рендер и план для ревью | по retention |
 | PostgreSQL бэкенда | `canonical_payload` и проекция | вечно |
 | диск бэкенда | **ничего** | §6 документа бэкенда запрещает |
@@ -714,24 +723,33 @@ manifest_revisions     → revision, digest (бэкенд)
 
 ```text
 защищённый раннер
-  1. ValidateManifest(snapshot)                     dry-run, гейт в CI
-  2. ApplyFleetManifest(snapshot, revision, flag)   атомарно, проекция, job
-  3. при новом или изменённом agent endpoint бэкенд выполняет полный
-     ReconcileUsers на этом endpoint
-  4. GetManifestStatus()                            опрос до сходимости
-  5. только затем — переключение data plane и candidate → serving
+  1. локальная schema/semantic/impact validation
+  2. provisioning → configure → infrastructure readiness
+  3. ApplyFleetManifest(snapshot, revision, flag)   атомарно, проекция, job
+  4. APPLIED либо IDEMPOTENT                        deployment boundary
+  5. асинхронные materialization/reconcile          мониторинг и алерты
 ```
 
-Для замены инстанса инфраструктурная конфигурация и синтетические проверки
-candidate выполняются до шага 2. Применение манифеста переключает только control
-plane; DNS и адреса exit-аутбаундов до успешного шага 4 остаются прежними.
+`APPLIED` и `IDEMPOTENT` считаются одинаково успешной границей deployment.
+Первый результат означает, что backend принял новый snapshot и поставил durable
+materialization job; второй — что тот же snapshot под той же revision был принят
+ранее. Они НЕ доказывают доставку agent operations. Materialization lag,
+возраст/количество операций по status, последний успешный agent RPC, fatal
+ошибки и расхождение desired/applied revision ОБЯЗАНЫ контролироваться
+метриками и алертами backend (§15 его нормативного контракта).
+
+Для новой ноды инфраструктурная конфигурация, DNS, Xray, node-agent и
+синтетические проверки выполняются до шага 3. Для замены инстанса применение
+манифеста переключает только control plane; data-plane promotion остаётся
+отдельной операцией с правилами §4.
 
 Манифест не превышает 4 MiB, поэтому это унарный вызов; стриминг не требуется.
 
-Идемпотентность даёт полезное свойство при сбоях: если шаг 2 прошёл, а
-последующий упал, `refs/deployments/<env>` не двигается, и повторный прогон
-отправит тот же снимок с той же revision — бэкенд ответит идемпотентным OK и
-работа продолжится. Отдельный механизм возобновления не нужен.
+Если ответ потерян после commit, resume ОБЯЗАН отправить те же snapshot и
+revision. `IDEMPOTENT` завершает deployment без повторных side effects. Новая
+revision для такого resume запрещена. После успешного ответа deployment record
+может быть завершён и deployment ref — перемещён отдельной compare-and-swap
+операцией; асинхронная сходимость остаётся наблюдаемым эксплуатационным SLO.
 
 ---
 
@@ -1398,7 +1416,6 @@ rollout:
 
 ```text
 компиляция и валидация
-  → ValidateManifest на бэкенде
   → провижионинг машины (§16.6)
   → хардненинг хоста и подключение к оверлею
   → выпуск идентичности агента (§12.6)
@@ -1406,12 +1423,11 @@ rollout:
   → регистрация как candidate
   → применение зависимой инфраструктурной конфигурации
   → синтетические прямые и сквозные проверки без клиентского трафика
-  → ApplyFleetManifest переключает control plane на candidate
-  → бэкенд выполняет полный ReconcileUsers на новом endpoint
-  → GetManifestStatus подтверждает сходимость нового агента
-  → переключение DNS и всех затронутых адресов exit-аутбаундов
-  → открытие клиентского data plane и продвижение candidate → serving
-  → запись развёртывания и перемещение refs/deployments/<env>
+  → для новой ноды: DNS и data plane готовы до публикации манифеста
+  → ApplyFleetManifest атомарно принимает полный snapshot
+  → APPLIED/IDEMPOTENT завершает manifest deployment
+  → запись развёртывания и guarded перемещение refs/deployments/<env>
+  → materialization/reconcile наблюдаются метриками и алертами
 ```
 
 Для новой логической ноды применение манифеста одновременно создаёт её access и
@@ -1709,8 +1725,8 @@ client_uuid и любые приватные ключи
 согласование дельты §24 с владельцем бэкенда.
 
 *Приёмка:* авторы бэкенда, инфраструктуры и агента реализуют одну модель
-идентичности и жизненного цикла без догадок. Схема манифеста при этом остаётся
-нормативной v1 — правки касаются только API и прото (§24).
+идентичности и жизненного цикла без догадок. Схема и единственный
+`ApplyFleetManifest` RPC остаются нормативной v1 (§24).
 
 ### Фаза 1 — желаемое состояние и чистый компилятор
 
@@ -1724,7 +1740,7 @@ client_uuid и любые приватные ключи
 
 ### Фаза 2 — контрактный стенд
 
-Фейковый бэкенд с `ValidateManifest`/`ApplyFleetManifest`/`GetManifestStatus`;
+Фейковый бэкенд с `ApplyFleetManifest` и асинхронными materialization metrics;
 фейковый агент с обоими сервисами; прогон сценариев С-01…С-23; проверки
 совместимости protobuf.
 
@@ -1804,32 +1820,22 @@ Ansible ЗАПРЕЩЕНО.
 изменения: у логической ноды один агент, ровно как предполагает нормативная v1.
 Модель PostgreSQL и жизненный цикл agent operations также остаются как есть.
 
-Остаются четыре пункта, и все они аддитивные.
+Остаются три аддитивных пункта. Расширение manifest RPC больше не требуется.
 
-### 24.1. Два новых RPC
+### 24.1. Граница manifest deployment
 
-```text
-ValidateManifest    dry-run без мутации
-GetManifestStatus   текущая revision, canonical digest,
-                    состояние материализации и reconcile нового endpoint
-```
+Зафиксированный `spiritvpn.manifest.v1.ManifestService` предоставляет только
+`ApplyFleetManifest`. Инфраструктура считает `APPLIED` и `IDEMPOTENT` успешной
+границей deployment. Локальный CI выполняет schema, semantic и impact validation
+до вызова; backend повторяет собственную формальную и state-relative validation
+атомарно внутри Apply.
 
-`ValidateManifest` нужен как гейт в CI: pull request должен уметь спросить
-«этот снимок примут?» без применения и без доступа к секретам.
-
-`GetManifestStatus` нужен планировщику инфраструктуры как база сравнения и как
-условие продвижения: пока клиентское состояние не сошлось на новом сервере, его
-ЗАПРЕЩЕНО публиковать в DNS (И-3). Без этого вызова инвариант нечем проверить.
-
-Добавление ноды либо изменение её `agent.endpoint`, `tls_server_name` или
-`certificate_identity` ОБЯЗАНО принудительно запускать полный `ReconcileUsers`
-на новом endpoint, даже если клиентский desired state не изменился.
-`GetManifestStatus` считает такую ноду сошедшейся только после успешного
-reconcile на endpoint с ожидаемой certificate identity. Ошибка candidate не
-переводит уже применённое состояние старого serving-инстанса в неприменённое.
-
-В §2 документа бэкенда перечислены `ApplyFleetManifest` и
-`MaterializeManifestRevision`; этих двух нет.
+Materialization customer access и доставка agent operations асинхронны и не
+блокируют deployment. Их сходимость является эксплуатационным SLO backend и
+контролируется обязательными метриками/алертами §15 нормативного backend
+контракта. Автоматический data-plane promotion при замене машины не должен
+выводиться из одного `APPLIED`; до появления отдельного машинного сигнала это
+самостоятельная защищённая операция.
 
 ### 24.2. Правки в `node_agent.proto`
 
@@ -1843,9 +1849,9 @@ reconcile на endpoint с ожидаемой certificate identity. Ошибка
    утверждают, что поле требует добавления в прото, — оно там уже есть,
    `User` field 4. Документ и прото правились в одну сессию, текст не обновили.
 
-**Завендорить прото в репозиторий бэкенда** как замороженный baseline.
-Преамбула требует этого до старта реализации; файлов `.proto` в репозитории
-бэкенда нет.
+Manifest proto уже опубликован backend commit
+`91326dad33678e30344904c75e7cff17621bc455` и вендорится инфраструктурой
+байт-в-байт. Его package и field numbers являются замороженным baseline v1.
 
 ### 24.3. Проверка окружения по идентичности вызывающего
 

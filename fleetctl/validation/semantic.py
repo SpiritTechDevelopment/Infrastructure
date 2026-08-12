@@ -311,8 +311,8 @@ def _validate_fleets(state: DesiredState, issues: list[ValidationIssue]) -> None
 
     for node in state.nodes:
         count = membership[node.object_id]
-        if count != 1:
-            issues.append(ValidationIssue.at(node.source, "NODE_MEMBERSHIP", f"logical node must belong to exactly one fleet, found {count}"))
+        if count > 1:
+            issues.append(ValidationIssue.at(node.source, "NODE_MEMBERSHIP", f"logical node may belong to at most one fleet, found {count}"))
 
 
 def _validate_secrets_and_public_identity(state: DesiredState, issues: list[ValidationIssue]) -> None:

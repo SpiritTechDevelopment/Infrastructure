@@ -47,6 +47,31 @@ class DesiredStateValidationTests(unittest.TestCase):
         profile = state.common.limits.bandwidth_profiles["vps-1g"]
         self.assertEqual(profile.egress_limit_mbps, 900)
 
+    def test_node_without_fleet_membership_is_valid_for_decommission(self) -> None:
+        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(source, desired_root)
+            fleet_path = desired_root / "environments" / "develop" / "fleets" / "develop-fleet-eu.yml"
+            fleet = yaml.safe_load(fleet_path.read_text(encoding="utf-8"))
+            fleet["spec"]["entries"] = []
+            fleet["spec"]["bridges"] = []
+            fleet_path.write_text(yaml.safe_dump(fleet, sort_keys=False), encoding="utf-8")
+
+            state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+
+        self.assertEqual(len(state.nodes), 2)
+        self.assertEqual(state.fleets[0].entries, ())
+
+    def test_fleet_id_must_fit_positive_signed_int64(self) -> None:
+        for value in (0, -1, 2**63):
+            with self.subTest(value=value):
+                def mutate(document: dict[str, object], fleet_id: int = value) -> None:
+                    document["develop-fleet-eu"] = fleet_id
+
+                codes = self.validate_mutated_fixture("fleet-ids.yml", mutate)
+                self.assertIn("FLEET_ID_VALUE", codes)
+
     def test_common_overrides_follow_common_environment_node_precedence(self) -> None:
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
         with tempfile.TemporaryDirectory() as temporary_directory:

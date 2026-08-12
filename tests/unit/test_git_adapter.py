@@ -82,6 +82,22 @@ class GitDeploymentBaselineTests(unittest.TestCase):
             )
         return exit_code, stdout.getvalue(), stderr.getvalue()
 
+    def run_manifest(self, root: Path, *arguments: str) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "--root",
+                    str(root),
+                    "manifest",
+                    "--environment",
+                    "develop",
+                    *arguments,
+                ]
+            )
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
     def test_missing_baseline_is_fail_closed_unless_initial_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = self.make_repository(Path(temporary))
@@ -99,6 +115,23 @@ class GitDeploymentBaselineTests(unittest.TestCase):
         self.assertIsNone(plan["baseline_git_sha"])
         self.assertEqual(plan["source_git_sha"], source)
         self.assertIn("INSTANCE_ADDED", {change["type"] for change in plan["changes"]})
+
+    def test_manifest_cli_renders_full_initial_snapshot_without_rpc(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.make_repository(Path(temporary))
+            exit_code, stdout, stderr = self.run_manifest(
+                repository.root,
+                "--initial",
+                "--revision",
+                "42",
+            )
+            manifest = json.loads(stdout)
+
+        self.assertEqual((exit_code, stderr), (0, ""))
+        self.assertEqual(manifest["revision"], 42)
+        self.assertFalse(manifest["allow_destructive"])
+        self.assertEqual(len(manifest["nodes"]), 2)
+        self.assertEqual(len(manifest["fleets"]), 1)
 
     def test_plan_reads_both_commits_and_never_moves_deployment_ref(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

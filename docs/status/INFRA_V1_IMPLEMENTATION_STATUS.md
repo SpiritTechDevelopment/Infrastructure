@@ -18,6 +18,12 @@ machine PKI, readiness gates и resume-safe coordinator. Опасные опер
 останавливается в `WAITING_FOR_BACKEND`; backend apply, DNS/data-plane promotion
 и перемещение deployment ref не изображаются выполненными.
 
+Точный `spiritvpn.manifest.v1` protobuf-контракт завендорен из backend commit
+`91326dad33678e30344904c75e7cff17621bc455`. Реализован чистый compiler полного
+manifest snapshot с deployment-scoped revision, строгим destructive guard,
+локальным payload digest и лимитом 4 MiB. Он пока не подключён к coordinator и
+не выполняет gRPC-вызов.
+
 Начат отдельный v1 management-foundation контур. Единственный разрешённый
 ручной bootstrap inventory описывает один management VPS. Операторский playbook
 может установить Vault с immutable image digest и сгенерировать транспортный
@@ -74,6 +80,8 @@ merge. No-op override не меняет canonical digest и не создаёт 
 - построение типизированной модели;
 - разрешение ссылок между fleet, node и instance;
 - проверку ролей, членства и bridge-связей;
+- разрешение временной ноды без fleet membership для безопасного двухфазного
+  decommission; членство более чем в одном fleet запрещено;
 - проверку изоляции окружений и secret references;
 - проверку единственного `serving`-инстанса логической ноды;
 - проверку management slots и вычисляемых management-адресов;
@@ -203,13 +211,35 @@ lock, атомарный deployment record и явный resume. Dry-run явл�
 `WAITING_FOR_BACKEND`, не применяет DNS/backend/data plane и не двигает
 deployment ref.
 
+### 2.11. Backend manifest contract и compiler
+
+Зафиксирован точный wire-контракт `ManifestService.ApplyFleetManifest`.
+Компилятор строит полный детерминированный request из verified desired state и
+того же impact plan: ноды используют единственный serving instance, management
+endpoint и machine identity; fleets получают append-only `vpn_fleet_id`, полный
+`node_ids` и стабильные bridge `egress_tag`. Secret references и приватные
+значения в manifest не попадают.
+
+`revision` проверяется как положительный `uint64`. Destructive request требует
+одновременно обнаруженного destructive impact и отдельного явного
+`allow_destructive=true`; избыточное разрешение для non-destructive plan также
+отклоняется. Plan digest обязан совпадать с рендеримым desired state, поэтому
+подмена состояния после review закрывается fail-closed.
+
+Официальная граница deployment — ответы `APPLIED` и `IDEMPOTENT`.
+Materialization и доставка agent operations асинхронны и должны наблюдаться
+backend-метриками и алертами; manifest v1 не содержит Validate/Status RPC.
+
 ## 3. Что пока отсутствует
 
 Следующие части целевой системы ещё не реализованы:
 
-- backend fleet manifest и проверка его размера до 4 MiB;
-- адаптеры `ValidateManifest`, `ApplyFleetManifest` и `GetManifestStatus`;
+- allocator и durable resume-хранение backend manifest revision;
+- protobuf/gRPC mTLS adapter для `ApplyFleetManifest` и его интеграция с
+  coordinator;
 - `infraagent.v1` и реальный node agent;
+- применение materialization/agent-operation dashboards и alerts из
+  нормативного backend observability contract;
 - фактическое применение DNS plan и monitoring targets внешними адаптерами;
 - продвижение `candidate → serving`, drain и retire;
 - защищённый deployment runner;
@@ -220,20 +250,22 @@ deployment ref.
 - продвижение одинаковых component digests в staging и prod.
 
 Подготовлена отдельная явная операция атомарного `update-ref` с compare-and-swap
-guard, но coordinator намеренно её не вызывает: ref нельзя двигать до backend,
-DNS и data-plane convergence.
+guard, но coordinator намеренно её не вызывает. В целевом контуре ref можно
+двигать после `APPLIED`/`IDEMPOTENT`; data-plane promotion замены остаётся
+отдельной защищённой операцией и не выводится из одного backend ответа.
 
-Нормативное инфраструктурное ТЗ, вендоренный backend agreement и baseline
-`nodeagent.v1` зафиксированы вместе с этим срезом. Контрактную поверхность пока
-нельзя считать полной: отсутствуют `infraagent.v1`, точные backend manifest RPC,
-authorization matrix и status/idempotency contracts.
+Нормативное инфраструктурное ТЗ, backend agreement, точный `manifest.v1` и
+baseline `nodeagent.v1` зафиксированы вместе с этим срезом. Для исполняемого
+контрактного стенда всё ещё отсутствуют `infraagent.v1`, manifest gRPC adapter,
+authorization wiring и реальный node-agent runtime.
 
 ## 4. Известные ограничения текущего инкремента
 
 1. `fleetctl plan` по умолчанию использует `refs/deployments/<environment>`;
    `--baseline <desired-directory>` сохранён только как явный тестовый режим.
-2. Рендер пока не создаёт `backend-manifest.yaml`; следовательно, часть
-   инвариантов, зависящих от манифеста и его размера, ещё не проверяется.
+2. `fleetctl manifest` создаёт deployment-scoped `backend-manifest.json` только
+   с явно переданной revision. Coordinator пока не выделяет и не сохраняет её
+   автоматически и потому manifest не рендерит.
 3. Репозиторные environment-файлы пустые с точки зрения флота. Успешная команда
    `fleetctl validate` сейчас подтверждает корректность каркаса, а не готовность
    реальной среды.
@@ -258,14 +290,14 @@ authorization matrix и status/idempotency contracts.
    develop desired state; staging/prod не заполнять догадками.
 3. Провести отдельно разрешённый bootstrap develop VPS, зарегистрировать
    WireGuard peer, подписать CSR и повторить идемпотентный прогон.
-4. Дофиксировать backend manifest RPC, `infraagent.v1`, authorization matrix,
-   revision/idempotency и status contracts относительно уже вендоренных
-   backend agreement и `nodeagent.v1`.
-5. После завершения контрактной поверхности реализовать backend manifest,
-   fake backend/agent и контрактный стенд.
-6. Только после backend convergence добавить DNS/data-plane promotion,
-   drain/retire/rollback и вызов guarded deployment-ref update.
-7. Провести failure/load/reboot tests и затем продвигать те же component
+4. Реализовать node-agent runtime и его readiness до публикации ноды backend.
+5. Добавить durable revision allocator, protobuf/gRPC mTLS adapter, fake backend
+   и контрактный стенд только для `ApplyFleetManifest`.
+6. Завершать deployment и guarded deployment-ref update по
+   `APPLIED`/`IDEMPOTENT`; отдельно реализовать backend materialization alerts.
+7. Добавить защищённый DNS/data-plane promotion замены, drain/retire/rollback;
+   до машинного сигнала reconcile эта операция остаётся ручной.
+8. Провести failure/load/reboot tests и затем продвигать те же component
    digests в staging/prod.
 
 ## 6. Данные для первого запуска develop

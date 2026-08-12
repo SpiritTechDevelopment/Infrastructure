@@ -16,9 +16,15 @@ from fleetctl.adapters import (
     write_rendered_files,
     validate_ansible_artifacts,
 )
-from fleetctl.compiler import render_files
+from fleetctl.compiler import (
+    BackendManifestError,
+    backend_manifest_bytes,
+    compile_backend_manifest,
+    render_files,
+)
 from fleetctl.deployment import DeploymentCoordinator, DeploymentError, DeploymentOptions
-from fleetctl.planning import PlanningError, build_impact_plan, build_initial_baseline
+from fleetctl.model import DesiredState
+from fleetctl.planning import ImpactPlan, PlanningError, build_impact_plan, build_initial_baseline
 from fleetctl.provisioning import ManualProvisioningAdapter
 from fleetctl.validation import DesiredStateInvalid, validate_environment
 
@@ -43,6 +49,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--source", default="HEAD", help="source commit or ref (default: HEAD)")
     plan.add_argument("--output", type=Path, help="fleetctl-managed build directory; JSON is printed when omitted")
+    manifest = commands.add_parser(
+        "manifest",
+        help="render a deployment-scoped backend manifest without making an RPC",
+    )
+    manifest.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    manifest_baseline = manifest.add_mutually_exclusive_group()
+    manifest_baseline.add_argument("--baseline", type=Path, help="explicit baseline desired/ directory (tests only)")
+    manifest_baseline.add_argument(
+        "--initial",
+        action="store_true",
+        help="explicitly render a first deployment; fails if the deployment ref exists",
+    )
+    manifest.add_argument("--source", default="HEAD", help="source commit or ref (default: HEAD)")
+    manifest.add_argument("--revision", required=True, type=int)
+    manifest.add_argument("--allow-destructive", action="store_true")
+    manifest.add_argument("--output", type=Path, help="fleetctl-managed build directory; JSON is printed when omitted")
     update_ref = commands.add_parser(
         "update-deployment-ref",
         help="atomically record a separately verified successful deployment",
@@ -111,48 +133,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "plan":
         try:
-            if args.baseline is not None:
-                if args.source != "HEAD":
-                    raise GitAdapterError("--source cannot be combined with the explicit --baseline test mode")
-                current = validate_environment(args.root, args.environment)
-                baseline = validate_environment(args.root, args.environment, desired_root=args.baseline)
-                impact_plan = build_impact_plan(current, baseline)
-            else:
-                repository = GitRepository(args.root)
-                source_git_sha = repository.resolve_commit(args.source)
-                repository.assert_desired_matches_commit(source_git_sha)
-                baseline_git_sha = repository.resolve_deployment_baseline(args.environment)
-                if baseline_git_sha is None and not args.initial:
-                    raise GitAdapterError(
-                        f"deployment baseline {repository.deployment_ref(args.environment)} is missing; "
-                        "use --initial only for an intentional first deployment"
-                    )
-                if baseline_git_sha is not None and args.initial:
-                    raise GitAdapterError(
-                        f"--initial refused: deployment baseline already exists at {baseline_git_sha}"
-                    )
-                with repository.materialize_desired(source_git_sha) as source_desired:
-                    current = validate_environment(
-                        args.root,
-                        args.environment,
-                        desired_root=source_desired,
-                    )
-                if baseline_git_sha is None:
-                    baseline = build_initial_baseline(current)
-                else:
-                    with repository.materialize_desired(baseline_git_sha) as baseline_desired:
-                        baseline = validate_environment(
-                            args.root,
-                            args.environment,
-                            desired_root=baseline_desired,
-                        )
-                impact_plan = build_impact_plan(
-                    current,
-                    baseline,
-                    source_git_sha=source_git_sha,
-                    baseline_git_sha=baseline_git_sha,
-                    initial_deployment=baseline_git_sha is None,
-                )
+            _, impact_plan = _prepare_plan(
+                args.root,
+                args.environment,
+                source=args.source,
+                baseline_path=args.baseline,
+                initial=args.initial,
+            )
             payload = impact_plan.to_json_bytes()
             if args.output is None:
                 print(payload.decode("utf-8"), end="")
@@ -166,6 +153,36 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{args.environment}: invalid ({len(exc.issues)} error(s))", file=sys.stderr)
             return 1
         except (GitAdapterError, PlanningError, OutputDirectoryError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    if args.command == "manifest":
+        try:
+            current, impact_plan = _prepare_plan(
+                args.root,
+                args.environment,
+                source=args.source,
+                baseline_path=args.baseline,
+                initial=args.initial,
+            )
+            request = compile_backend_manifest(
+                current,
+                impact_plan,
+                revision=args.revision,
+                allow_destructive=args.allow_destructive,
+            )
+            payload = backend_manifest_bytes(request)
+            if args.output is None:
+                print(payload.decode("utf-8"), end="")
+            else:
+                target = write_generated_artifact(args.output, "backend-manifest.json", payload)
+                print(f"{args.environment}: backend manifest revision {args.revision} rendered to {target}")
+            return 0
+        except DesiredStateInvalid as exc:
+            for issue in exc.issues:
+                print(issue.render(), file=sys.stderr)
+            print(f"{args.environment}: invalid ({len(exc.issues)} error(s))", file=sys.stderr)
+            return 1
+        except (BackendManifestError, GitAdapterError, PlanningError, OutputDirectoryError) as exc:
             print(str(exc), file=sys.stderr)
             return 2
     if args.command == "update-deployment-ref":
@@ -235,6 +252,51 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     raise AssertionError(f"unreachable command: {args.command}")
+
+
+def _prepare_plan(
+    root: Path,
+    environment: str,
+    *,
+    source: str,
+    baseline_path: Path | None,
+    initial: bool,
+) -> tuple[DesiredState, ImpactPlan]:
+    if baseline_path is not None:
+        if source != "HEAD":
+            raise GitAdapterError("--source cannot be combined with the explicit --baseline test mode")
+        current = validate_environment(root, environment)
+        baseline = validate_environment(root, environment, desired_root=baseline_path)
+        return current, build_impact_plan(current, baseline)
+
+    repository = GitRepository(root)
+    source_git_sha = repository.resolve_commit(source)
+    repository.assert_desired_matches_commit(source_git_sha)
+    baseline_git_sha = repository.resolve_deployment_baseline(environment)
+    if baseline_git_sha is None and not initial:
+        raise GitAdapterError(
+            f"deployment baseline {repository.deployment_ref(environment)} is missing; "
+            "use --initial only for an intentional first deployment"
+        )
+    if baseline_git_sha is not None and initial:
+        raise GitAdapterError(
+            f"--initial refused: deployment baseline already exists at {baseline_git_sha}"
+        )
+    with repository.materialize_desired(source_git_sha) as source_desired:
+        current = validate_environment(root, environment, desired_root=source_desired)
+    if baseline_git_sha is None:
+        baseline = build_initial_baseline(current)
+    else:
+        with repository.materialize_desired(baseline_git_sha) as baseline_desired:
+            baseline = validate_environment(root, environment, desired_root=baseline_desired)
+    plan = build_impact_plan(
+        current,
+        baseline,
+        source_git_sha=source_git_sha,
+        baseline_git_sha=baseline_git_sha,
+        initial_deployment=baseline_git_sha is None,
+    )
+    return current, plan
 
 
 if __name__ == "__main__":

@@ -65,9 +65,26 @@ never reported as complete. `update-deployment-ref` exists as a separate atomic
 compare-and-swap primitive for a future fully verified deployment flow; current
 deployment code does not call it.
 
-Node plans are infrastructure topology projections, not backend manifests or
-`infraagent.v1` requests. They contain secret references, never resolved secret
-values.
+The pinned `spiritvpn.manifest.v1` contract and a pure full-snapshot compiler now
+exist. The compiler requires a matching impact plan, a positive uint64 revision,
+and exact destructive permission; it emits no secret references and performs no
+RPC. `APPLIED` and `IDEMPOTENT` are the future successful deployment boundary.
+Backend materialization remains asynchronous and must be monitored through its
+operation/materialization metrics and alerts.
+
+An offline review artifact can be rendered without backend access. Revision is
+deliberately explicit until the durable allocator is integrated:
+
+```bash
+make fleet-manifest ENVIRONMENT=develop SOURCE=HEAD INITIAL=1 REVISION=1
+```
+
+For a destructive impact plan, `ALLOW_DESTRUCTIVE=1` is additionally required;
+the same flag is refused when the plan is non-destructive.
+
+Node plans are separate infrastructure topology projections, not backend
+manifests or `infraagent.v1` requests. They contain secret references, never
+resolved secret values.
 
 ## Manual platform bootstrap
 

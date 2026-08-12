@@ -5,6 +5,7 @@ repository.
 
 | Contract | Purpose |
 |---|---|
+| [`manifest/v1/manifest.proto`](manifest/v1/manifest.proto) | Infrastructure-to-backend full fleet manifest apply contract |
 | [`nodeagent/v1/node_agent.proto`](nodeagent/v1/node_agent.proto) | Backend-to-entry-agent control, inventory, health, usage, and privacy-reduced activity delivery |
 
 Compatibility rules:
