@@ -93,6 +93,39 @@ class RenderingTests(unittest.TestCase):
         self.assertTrue(all(not target["slo_eligible"] for target in candidate_targets))
         self.assertTrue(all(target["readiness_expected"] for target in candidate_targets))
 
+    def test_unassigned_decommission_node_remains_monitored_but_not_slo_eligible(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(VALID_DESIRED, desired_root)
+            fleet_path = (
+                desired_root
+                / "environments"
+                / "develop"
+                / "fleets"
+                / "develop-fleet-eu.yml"
+            )
+            fleet = yaml.safe_load(fleet_path.read_text(encoding="utf-8"))
+            fleet["spec"]["entries"] = []
+            fleet["spec"]["bridges"] = []
+            fleet_path.write_text(yaml.safe_dump(fleet, sort_keys=False), encoding="utf-8")
+            state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+            files = render_files(state)
+            monitoring = json.loads(files["monitoring-targets.json"])
+            node_plan = json.loads(files["node-plans/develop-entry-nl-01.json"])
+
+        entry_targets = [
+            target
+            for target in monitoring["targets"]
+            if target["labels"]["logical_node"] == "develop-entry-nl"
+        ]
+        self.assertEqual(len(entry_targets), 4)
+        self.assertTrue(all(target["labels"]["fleet"] == "unassigned" for target in entry_targets))
+        self.assertTrue(all(not target["slo_eligible"] for target in entry_targets))
+        self.assertTrue(all(target["readiness_expected"] for target in entry_targets))
+        self.assertEqual(node_plan["fleet"], {"id": None, "vpn_fleet_id": None})
+        self.assertEqual(node_plan["routing"]["bridges_as_entry"], [])
+        self.assertEqual(node_plan["routing"]["bridges_as_exit"], [])
+
     def test_inventory_contains_derived_management_addresses(self) -> None:
         inventory = json.loads(render_files(self.state)["ansible-inventory.json"])
         groups = inventory["all"]["children"]["spiritvpn_fleet"]["children"]

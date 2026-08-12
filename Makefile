@@ -27,6 +27,7 @@ ALLOW_LEGACY ?= 0
 COMPILED_SECRETS ?=
 BOOTSTRAP_VARS ?=
 READINESS_VARS ?=
+FLEET_STATE_DIR ?=
 PLATFORM_INVENTORY ?= inventories/bootstrap/platform.yml
 PLATFORM_KNOWN_HOSTS ?= inventories/bootstrap/known_hosts
 PLATFORM_VARS ?=
@@ -108,7 +109,7 @@ fleet-bootstrap: fleet-ansible-check ## Bootstrap clean hosts; requires APPLY=1 
 	ansible-playbook -i "build/$(or $(ENVIRONMENT),develop)/bootstrap-inventory.json" playbooks/bootstrap/bootstrap.yml --extra-vars "@$(BOOTSTRAP_VARS)"
 
 fleet-deploy: ## Infrastructure coordinator; dry-run by default, APPLY=1 enables SSH
-	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",)
+	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) $(if $(FLEET_STATE_DIR),--state-dir "$(FLEET_STATE_DIR)",) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",)
 
 fleet-platform-check: ## Validate the minimal bootstrap inventory; never connects
 	python3 scripts/platform-bootstrap-check.py --inventory "$(PLATFORM_INVENTORY)" --known-hosts "$(PLATFORM_KNOWN_HOSTS)"

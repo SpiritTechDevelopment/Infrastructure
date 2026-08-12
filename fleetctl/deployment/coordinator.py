@@ -3,19 +3,29 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from fleetctl.adapters import GitRepository, validate_ansible_artifacts, write_rendered_files
-from fleetctl.compiler import render_files
-from fleetctl.planning import build_impact_plan, build_initial_baseline
+from fleetctl.compiler import (
+    backend_manifest_bytes,
+    backend_manifest_payload_digest,
+    compile_backend_manifest,
+    render_files,
+)
+from fleetctl.model import DesiredState
+from fleetctl.planning import ImpactPlan, build_impact_plan, build_initial_baseline
 from fleetctl.provisioning import ManualProvisioningAdapter
 from fleetctl.validation import validate_environment
+
+from .revisions import ManifestRevisionAllocator
 
 
 class DeploymentError(Exception):
@@ -29,7 +39,9 @@ class DeploymentOptions:
     initial: bool = False
     apply: bool = False
     resume: bool = False
+    allow_destructive: bool = False
     build_directory: Path | None = None
+    state_directory: Path | None = None
     bootstrap_vars: Path | None = None
     compiled_secrets: Path | None = None
     readiness_vars: Path | None = None
@@ -46,8 +58,12 @@ class DeploymentCoordinator:
         build_directory = (
             options.build_directory or self.root / "build" / options.environment
         ).resolve()
-        record_directory = build_directory.parent / "deployment-records"
-        record_directory.mkdir(parents=True, exist_ok=True)
+        state_directory = options.state_directory or self.root / ".fleetctl-state"
+        if not state_directory.is_absolute():
+            state_directory = self.root / state_directory
+        record_directory, revision_directory = self._prepare_state_directories(
+            state_directory
+        )
         deployment_id = f"{options.environment}-{source_git_sha[:12]}"
         record_path = record_directory / f"{deployment_id}.json"
         lock_path = record_directory / f"{options.environment}.lock"
@@ -65,6 +81,9 @@ class DeploymentCoordinator:
                 deployment_id=deployment_id,
                 build_directory=build_directory,
                 record_path=record_path,
+                revision_state_path=(
+                    revision_directory / f"{options.environment}.json"
+                ),
             )
 
     def _run_locked(
@@ -75,6 +94,7 @@ class DeploymentCoordinator:
         deployment_id: str,
         build_directory: Path,
         record_path: Path,
+        revision_state_path: Path,
     ) -> dict[str, Any]:
         existing = self._load_record(record_path)
         if existing is not None and not options.resume:
@@ -153,7 +173,19 @@ class DeploymentCoordinator:
             record["provisioning"] = [report.to_dict() for report in reports]
             self._complete_step(record, record_path, "manual_provisioning_preflight", "passed")
 
+            manifest_payload = self._prepare_backend_manifest(
+                current=current,
+                plan=plan,
+                options=options,
+                deployment_id=deployment_id,
+                source_git_sha=source_git_sha,
+                record=record,
+                record_path=record_path,
+                revision_state_path=revision_state_path,
+            )
+
             files = render_files(current)
+            files["backend-manifest.json"] = manifest_payload
             write_rendered_files(build_directory, files)
             validate_ansible_artifacts(build_directory, options.environment)
             impact_path = build_directory / "impact-plan.json"
@@ -191,6 +223,7 @@ class DeploymentCoordinator:
             record["status"] = "WAITING_FOR_BACKEND"
             record["diagnostic"] = (
                 "Infrastructure-only workflow reached the backend/agent contract boundary. "
+                "The backend manifest revision is durably allocated and rendered, but no RPC was sent. "
                 "Backend apply, DNS/data-plane promotion, and deployment-ref update were not performed."
             )
             record["updated_at"] = _timestamp()
@@ -204,6 +237,98 @@ class DeploymentCoordinator:
             if isinstance(exc, DeploymentError):
                 raise
             raise DeploymentError(str(exc)) from exc
+
+    def _prepare_backend_manifest(
+        self,
+        *,
+        current: DesiredState,
+        plan: ImpactPlan,
+        options: DeploymentOptions,
+        deployment_id: str,
+        source_git_sha: str,
+        record: dict[str, Any],
+        record_path: Path,
+        revision_state_path: Path,
+    ) -> bytes:
+        provisional = compile_backend_manifest(
+            current,
+            plan,
+            revision=1,
+            allow_destructive=options.allow_destructive,
+        )
+        payload_digest = backend_manifest_payload_digest(provisional)
+        pinned = record.get("backend_manifest")
+        if pinned is not None and not isinstance(pinned, dict):
+            raise DeploymentError("deployment record contains malformed backend manifest metadata")
+        allocation = ManifestRevisionAllocator(
+            revision_state_path,
+            options.environment,
+        ).allocate(
+            deployment_id=deployment_id,
+            source_git_sha=source_git_sha,
+            payload_digest=payload_digest,
+            allow_destructive=options.allow_destructive,
+            require_existing_allocation=pinned is not None,
+        )
+        request = compile_backend_manifest(
+            current,
+            plan,
+            revision=allocation.revision,
+            allow_destructive=options.allow_destructive,
+        )
+        rendered = backend_manifest_bytes(request)
+        metadata = {
+            "schema_version": 1,
+            "artifact": "backend-manifest.json",
+            "revision": allocation.revision,
+            "allow_destructive": options.allow_destructive,
+            "payload_digest": payload_digest,
+            "rendered_sha256": f"sha256:{hashlib.sha256(rendered).hexdigest()}",
+            "size_bytes": len(rendered),
+        }
+        if pinned is not None and pinned != metadata:
+            raise DeploymentError(
+                "resume backend manifest differs from the revision pinned in the deployment record"
+            )
+        record["backend_manifest"] = metadata
+        backend_apply = {
+            "status": "NOT_SENT",
+            "applied_revision": None,
+            "result": None,
+        }
+        if record.get("backend_apply", backend_apply) != backend_apply:
+            raise DeploymentError(
+                "deployment record contains backend apply state unsupported by the offline coordinator"
+            )
+        record["backend_apply"] = backend_apply
+        self._write_record(record_path, record)
+        self._complete_step(
+            record,
+            record_path,
+            "allocate_backend_manifest_revision",
+            f"revision {allocation.revision}; no backend RPC",
+        )
+        return rendered
+
+    @staticmethod
+    def _prepare_state_directories(state_directory: Path) -> tuple[Path, Path]:
+        if state_directory.is_symlink():
+            raise DeploymentError(f"refusing symlink deployment state root: {state_directory}")
+        state_directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(state_directory, 0o700)
+        record_directory = state_directory / "deployment-records"
+        revision_directory = state_directory / "manifest-revisions"
+        if record_directory.is_symlink():
+            raise DeploymentError(f"refusing symlink deployment record directory: {record_directory}")
+        if revision_directory.is_symlink():
+            raise DeploymentError(
+                f"refusing symlink manifest revision directory: {revision_directory}"
+            )
+        record_directory.mkdir(parents=True, exist_ok=True)
+        revision_directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(record_directory, 0o700)
+        os.chmod(revision_directory, 0o700)
+        return record_directory, revision_directory
 
     @staticmethod
     def _require_apply_inputs(options: DeploymentOptions) -> None:
@@ -258,6 +383,8 @@ class DeploymentCoordinator:
 
     @staticmethod
     def _load_record(path: Path) -> dict[str, Any] | None:
+        if path.is_symlink():
+            raise DeploymentError(f"refusing symlink deployment record: {path}")
         if not path.exists():
             return None
         try:
@@ -270,12 +397,32 @@ class DeploymentCoordinator:
 
     @staticmethod
     def _write_record(path: Path, record: dict[str, Any]) -> None:
-        temporary = path.with_suffix(f".tmp-{os.getpid()}")
-        temporary.write_text(
-            json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+        payload = (json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
+            "utf-8"
         )
-        temporary.replace(path)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        temporary = Path(temporary_name)
+        try:
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(path)
+            os.chmod(path, 0o600)
+            directory_descriptor = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_descriptor)
+            finally:
+                os.close(directory_descriptor)
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            if temporary.exists():
+                temporary.unlink()
+            raise
 
 
 def _timestamp() -> str:

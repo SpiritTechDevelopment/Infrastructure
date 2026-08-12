@@ -44,7 +44,8 @@ infrastructure stages are:
 
 ```text
 validate → resolve Git baseline → impact plan → manual provisioning preflight
-         → render/Ansible input validation → bootstrap → configure → readiness
+         → allocate/pin manifest revision → render/Ansible input validation
+         → bootstrap → configure → readiness
 ```
 
 In dry-run mode, bootstrap, configure, and readiness are recorded as
@@ -65,6 +66,17 @@ never reported as complete. `update-deployment-ref` exists as a separate atomic
 compare-and-swap primitive for a future fully verified deployment flow; current
 deployment code does not call it.
 
+The coordinator now keeps environment-scoped revision allocations and records
+under `.fleetctl-state/` by default. A deployment receives one
+revision, and resume must reproduce the same payload digest, rendered-byte hash,
+size, and destructive flag. Lost or conflicting state fails closed. The rendered
+`backend-manifest.json` is still ephemeral; the durable record stores only its
+identity and hashes. Dry-runs allocate revisions too, so gaps are normal and
+safe. On the management executor, pass
+`--state-dir /var/lib/spiritvpn/fleetctl` (or `FLEET_STATE_DIR` through Make) and
+include that root-owned directory in backup before a real backend adapter is
+enabled. It never belongs on the GitHub-hosted runner.
+
 The pinned `spiritvpn.manifest.v1` contract and a pure full-snapshot compiler now
 exist. The compiler requires a matching impact plan, a positive uint64 revision,
 and exact destructive permission; it emits no secret references and performs no
@@ -72,8 +84,8 @@ RPC. `APPLIED` and `IDEMPOTENT` are the future successful deployment boundary.
 Backend materialization remains asynchronous and must be monitored through its
 operation/materialization metrics and alerts.
 
-An offline review artifact can be rendered without backend access. Revision is
-deliberately explicit until the durable allocator is integrated:
+An independent offline review artifact can also be rendered with an explicit
+revision, without changing coordinator allocation state or accessing backend:
 
 ```bash
 make fleet-manifest ENVIRONMENT=develop SOURCE=HEAD INITIAL=1 REVISION=1

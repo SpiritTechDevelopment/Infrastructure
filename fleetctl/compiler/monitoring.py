@@ -23,9 +23,10 @@ def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
         node = nodes[instance.logical_node]
         common = state.common_for_node(node.object_id)
         address = management_address(state.environment, node, instance)
+        fleet_id = fleets_by_node.get(node.object_id)
         labels = {
             "environment": state.environment.object_id,
-            "fleet": fleets_by_node[node.object_id],
+            "fleet": fleet_id or "unassigned",
             "logical_node": node.object_id,
             "instance": instance.object_id,
             "role": node.role,
@@ -33,7 +34,7 @@ def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
             "lifecycle": instance.target_state,
         }
         target_state = {
-            "slo_eligible": instance.target_state == "serving",
+            "slo_eligible": instance.target_state == "serving" and fleet_id is not None,
             "readiness_expected": instance.target_state in {"candidate", "serving", "draining"},
         }
         targets.extend(

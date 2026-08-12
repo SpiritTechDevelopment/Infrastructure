@@ -94,7 +94,17 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--initial", action="store_true")
     deploy.add_argument("--apply", action="store_true", help="explicitly allow Ansible SSH/mutation")
     deploy.add_argument("--resume", action="store_true")
+    deploy.add_argument(
+        "--allow-destructive",
+        action="store_true",
+        help="allow a manifest that removes nodes, fleet membership, or bridges",
+    )
     deploy.add_argument("--build-dir", type=Path)
+    deploy.add_argument(
+        "--state-dir",
+        type=Path,
+        help="durable local coordinator state (default: <root>/.fleetctl-state)",
+    )
     deploy.add_argument("--bootstrap-vars", type=Path)
     deploy.add_argument("--compiled-secrets", type=Path)
     deploy.add_argument("--readiness-vars", type=Path)
@@ -240,7 +250,9 @@ def main(argv: list[str] | None = None) -> int:
                     initial=args.initial,
                     apply=args.apply,
                     resume=args.resume,
+                    allow_destructive=args.allow_destructive,
                     build_directory=args.build_dir,
+                    state_directory=args.state_dir,
                     bootstrap_vars=args.bootstrap_vars,
                     compiled_secrets=args.compiled_secrets,
                     readiness_vars=args.readiness_vars,

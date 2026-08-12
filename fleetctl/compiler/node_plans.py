@@ -26,7 +26,7 @@ def compile_node_plans(state: DesiredState) -> dict[str, dict[str, Any]]:
     for instance in sorted(state.instances, key=lambda item: item.object_id):
         node = nodes[instance.logical_node]
         common = state.common_for_node(node.object_id)
-        fleet = fleets_by_node[node.object_id]
+        fleet = fleets_by_node.get(node.object_id)
         bandwidth = common.limits.bandwidth_profiles[instance.bandwidth_profile]
         address = management_address(state.environment, node, instance)
         plans[instance.object_id] = {
@@ -35,8 +35,8 @@ def compile_node_plans(state: DesiredState) -> dict[str, dict[str, Any]]:
             "environment": state.environment.object_id,
             "infrastructure": common_values(common),
             "fleet": {
-                "id": fleet.object_id,
-                "vpn_fleet_id": state.fleet_ids[fleet.object_id],
+                "id": fleet.object_id if fleet is not None else None,
+                "vpn_fleet_id": state.fleet_ids[fleet.object_id] if fleet is not None else None,
             },
             "logical_node": {
                 "id": node.object_id,
@@ -114,7 +114,7 @@ def _fleets_by_node(state: DesiredState) -> dict[str, Fleet]:
 
 
 def _routing_projection(
-    fleet: Fleet,
+    fleet: Fleet | None,
     node: LogicalNode,
     nodes: dict[str, LogicalNode],
     serving_instances: dict[str, Instance],
@@ -123,6 +123,12 @@ def _routing_projection(
     as_entry: list[dict[str, Any]] = []
     as_exit: list[dict[str, Any]] = []
     egress_table: dict[str, str] = {"": xray.direct_outbound_tag}
+    if fleet is None:
+        return {
+            "egress_table": egress_table,
+            "bridges_as_entry": as_entry,
+            "bridges_as_exit": as_exit,
+        }
     for bridge in sorted(fleet.bridges, key=lambda item: item.routing_key):
         if bridge.entry == node.object_id:
             exit_node = nodes[bridge.exit]

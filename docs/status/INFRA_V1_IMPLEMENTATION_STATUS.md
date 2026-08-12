@@ -21,8 +21,8 @@ machine PKI, readiness gates и resume-safe coordinator. Опасные опер
 Точный `spiritvpn.manifest.v1` protobuf-контракт завендорен из backend commit
 `91326dad33678e30344904c75e7cff17621bc455`. Реализован чистый compiler полного
 manifest snapshot с deployment-scoped revision, строгим destructive guard,
-локальным payload digest и лимитом 4 MiB. Он пока не подключён к coordinator и
-не выполняет gRPC-вызов.
+локальным payload digest и лимитом 4 MiB. Coordinator уже выделяет и pin'ит
+revision и manifest identity, но намеренно не выполняет gRPC-вызов.
 
 Начат отдельный v1 management-foundation контур. Единственный разрешённый
 ручной bootstrap inventory описывает один management VPS. Операторский playbook
@@ -142,7 +142,7 @@ Canonical representation и digest зависят от effective-значени�
 
 На дату обновления проходят:
 
-- 95 unit-тестов;
+- 116 unit-тестов;
 - валидация `develop`, `staging` и `prod`;
 - Python bytecode compilation;
 - проверка JSON Schema;
@@ -209,7 +209,9 @@ smoke и entry-to-exit smoke interface.
 lock, атомарный deployment record и явный resume. Dry-run является default и не
 вызывает Ansible. Даже после успешного apply coordinator возвращает
 `WAITING_FOR_BACKEND`, не применяет DNS/backend/data plane и не двигает
-deployment ref.
+deployment ref. Перед рендером coordinator атомарно выделяет environment-scoped
+manifest revision, фиксирует identity точных rendered bytes в record и при
+resume требует полного совпадения.
 
 ### 2.11. Backend manifest contract и compiler
 
@@ -226,6 +228,16 @@ endpoint и machine identity; fleets получают append-only `vpn_fleet_id`
 отклоняется. Plan digest обязан совпадать с рендеримым desired state, поэтому
 подмена состояния после review закрывается fail-closed.
 
+Allocator хранит отдельную монотонную последовательность каждого окружения в
+`.fleetctl-state/manifest-revisions/` по умолчанию. На management executor
+задаётся root-owned `--state-dir /var/lib/spiritvpn/fleetctl`. Allocation привязан
+к deployment ID, source Git SHA, local payload digest и destructive-флагу.
+Deployment record фиксирует revision, payload digest, SHA-256 и размер
+`backend-manifest.json`; сам эфемерный manifest воспроизводится из Git. Потеря
+state после pin, повреждение record или несовпадение повторного рендера
+останавливают resume. Dry-run также резервирует revision; пропуски разрешены
+backend-контрактом.
+
 Официальная граница deployment — ответы `APPLIED` и `IDEMPOTENT`.
 Materialization и доставка agent operations асинхронны и должны наблюдаться
 backend-метриками и алертами; manifest v1 не содержит Validate/Status RPC.
@@ -234,7 +246,6 @@ backend-метриками и алертами; manifest v1 не содержи�
 
 Следующие части целевой системы ещё не реализованы:
 
-- allocator и durable resume-хранение backend manifest revision;
 - protobuf/gRPC mTLS adapter для `ApplyFleetManifest` и его интеграция с
   coordinator;
 - `infraagent.v1` и реальный node agent;
@@ -263,9 +274,8 @@ authorization wiring и реальный node-agent runtime.
 
 1. `fleetctl plan` по умолчанию использует `refs/deployments/<environment>`;
    `--baseline <desired-directory>` сохранён только как явный тестовый режим.
-2. `fleetctl manifest` создаёт deployment-scoped `backend-manifest.json` только
-   с явно переданной revision. Coordinator пока не выделяет и не сохраняет её
-   автоматически и потому manifest не рендерит.
+2. Coordinator уже выделяет revision и рендерит `backend-manifest.json`, но
+   `backend_apply.status` остаётся `NOT_SENT`: сетевого adapter ещё нет.
 3. Репозиторные environment-файлы пустые с точки зрения флота. Успешная команда
    `fleetctl validate` сейчас подтверждает корректность каркаса, а не готовность
    реальной среды.
@@ -281,6 +291,10 @@ authorization wiring и реальный node-agent runtime.
 8. Platform bootstrap пока только устанавливает неинициализированный Vault и
    restricted GitHub readiness command. Recovery ceremony выполняется
    оператором; GitHub не получает Vault token и не запускает mutating deploy.
+9. Revision state локален management executor и требует резервного копирования.
+   До первого реального Apply к уже существующему backend понадобится отдельная
+   проверенная процедура seed/recovery от последней принятой backend revision;
+   молчаливый старт с `1` для непустого backend запрещён.
 
 ## 5. Следующий порядок работ
 
@@ -291,8 +305,9 @@ authorization wiring и реальный node-agent runtime.
 3. Провести отдельно разрешённый bootstrap develop VPS, зарегистрировать
    WireGuard peer, подписать CSR и повторить идемпотентный прогон.
 4. Реализовать node-agent runtime и его readiness до публикации ноды backend.
-5. Добавить durable revision allocator, protobuf/gRPC mTLS adapter, fake backend
-   и контрактный стенд только для `ApplyFleetManifest`.
+5. Добавить protobuf/gRPC mTLS adapter, fake backend и контрактный стенд только
+   для `ApplyFleetManifest`; до live apply определить seed/recovery revision
+   state для непустого backend.
 6. Завершать deployment и guarded deployment-ref update по
    `APPLIED`/`IDEMPOTENT`; отдельно реализовать backend materialization alerts.
 7. Добавить защищённый DNS/data-plane promotion замены, drain/retire/rollback;
