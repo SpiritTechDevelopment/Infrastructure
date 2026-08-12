@@ -48,6 +48,7 @@
       no_log: true
   roles:
     - {role: common, tags: [common, runtime]}
+    - {role: node_limits, tags: [limits, cake, runtime]}
     - {role: docker, tags: [docker, runtime]}
     - {role: xray, tags: [xray, vpn, api]}
     - {role: nginx_mask, tags: [nginx, mask]}

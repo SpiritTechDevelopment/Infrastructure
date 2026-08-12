@@ -1,0 +1,89 @@
+---
+- name: Configure traffic-node egress shaping
+  when: node_limits_egress_enabled | bool
+  block:
+    - name: Resolve public egress interface
+      ansible.builtin.set_fact:
+        node_limits_resolved_egress_interface: >-
+          {{ node_limits_egress_interface
+             if (node_limits_egress_interface | length > 0)
+             else (ansible_default_ipv4.interface | default('')) }}
+
+    - name: Validate compiled CAKE policy
+      ansible.builtin.assert:
+        that:
+          - node_limits_bandwidth_profile | length > 0
+          - node_limits_resolved_egress_interface | length > 0
+          - node_limits_resolved_egress_interface is match('^[a-zA-Z0-9_.-]{1,15}$')
+          - node_limits_port_capacity_mbps | int > 0
+          - node_limits_egress_limit_mbps | int > 0
+          - node_limits_egress_limit_mbps | int <= node_limits_port_capacity_mbps | int
+          - node_limits_qdisc_kind == 'cake'
+          - node_limits_diffserv == 'besteffort'
+          - node_limits_flow_isolation in ['dual-dsthost', 'flows']
+          - not (node_limits_nat | bool)
+          - node_limits_rtt == 'internet'
+        fail_msg: >-
+          Refusing to configure egress: the compiled bandwidth profile is incomplete
+          or does not match the accepted CAKE policy.
+
+    - name: Install traffic-control userspace
+      ansible.builtin.package:
+        name: "{{ node_limits_packages }}"
+        state: present
+
+    - name: Require CAKE kernel support
+      ansible.builtin.command:
+        argv: [modprobe, sch_cake]
+      changed_when: false
+
+    - name: Install idempotent CAKE reconciler
+      ansible.builtin.template:
+        src: apply-egress-qdisc.sh.j2
+        dest: "{{ node_limits_script_path }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Persist CAKE policy across reboot
+      ansible.builtin.template:
+        src: spiritvpn-egress-qdisc.service.j2
+        dest: "/etc/systemd/system/{{ node_limits_systemd_unit }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: node_limits_unit_template
+
+    - name: Enable boot-time CAKE reconciliation
+      ansible.builtin.systemd:
+        name: "{{ node_limits_systemd_unit }}"
+        enabled: true
+        daemon_reload: "{{ node_limits_unit_template.changed }}"
+
+    - name: Reconcile CAKE policy now
+      ansible.builtin.command:
+        argv: ["{{ node_limits_script_path }}"]
+      register: node_limits_apply
+      changed_when: "'changed' in node_limits_apply.stdout_lines"
+      when: not ansible_check_mode
+
+    - name: Read back active root qdisc
+      ansible.builtin.command:
+        argv: [tc, qdisc, show, dev, "{{ node_limits_resolved_egress_interface }}", root]
+      register: node_limits_qdisc_readback
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Require the active qdisc to match desired CAKE policy
+      ansible.builtin.assert:
+        that:
+          - "'qdisc cake ' in node_limits_qdisc_readback.stdout"
+          - "('bandwidth ' ~ (node_limits_egress_limit_mbps | string) ~ 'Mbit') in node_limits_qdisc_readback.stdout"
+          - node_limits_diffserv in node_limits_qdisc_readback.stdout
+          - node_limits_flow_isolation in node_limits_qdisc_readback.stdout
+          - "'nonat' in node_limits_qdisc_readback.stdout"
+          - "'rtt 100.0ms' in node_limits_qdisc_readback.stdout"
+        fail_msg: >-
+          CAKE read-back does not match profile {{ node_limits_bandwidth_profile }}:
+          {{ node_limits_qdisc_readback.stdout }}
+      when: not ansible_check_mode

@@ -18,7 +18,7 @@
 - name: Verify every VPN node and its public endpoints
   hosts: active_fleet_verify
   become: true
-  gather_facts: false
+  gather_facts: true
   any_errors_fatal: true
   tasks:
     - name: Read running VPN Compose services
@@ -43,6 +43,101 @@
           - "'node-exporter' in _vpn_services.stdout_lines"
           - "'alloy' in _vpn_services.stdout_lines"
         fail_msg: "One or more /opt/vpn services are not running on {{ inventory_hostname }}."
+
+    - name: Resolve the public egress interface for diagnostics
+      ansible.builtin.set_fact:
+        _node_limits_verify_interface: >-
+          {{ node_limits_egress_interface
+             if (node_limits_egress_interface | default('') | length > 0)
+             else (ansible_default_ipv4.interface | default('unavailable')) }}
+
+    - name: Read active CAKE statistics
+      ansible.builtin.command:
+        argv: [tc, -s, qdisc, show, dev, "{{ _node_limits_verify_interface }}", root]
+      register: _node_limits_qdisc
+      changed_when: false
+      when: node_limits_egress_enabled | default(false) | bool
+
+    - name: Require active CAKE to match the compiled profile
+      ansible.builtin.assert:
+        that:
+          - "'qdisc cake ' in _node_limits_qdisc.stdout"
+          - "('bandwidth ' ~ (node_limits_egress_limit_mbps | string) ~ 'Mbit') in _node_limits_qdisc.stdout"
+          - node_limits_diffserv in _node_limits_qdisc.stdout
+          - node_limits_flow_isolation in _node_limits_qdisc.stdout
+        fail_msg: >-
+          Active qdisc on {{ _node_limits_verify_interface }} does not match
+          bandwidth profile {{ node_limits_bandwidth_profile }}.
+      when: node_limits_egress_enabled | default(false) | bool
+
+    - name: Read current conntrack occupancy
+      ansible.builtin.command:
+        argv: [cat, /proc/sys/net/netfilter/nf_conntrack_count]
+      register: _node_limits_conntrack_count
+      changed_when: false
+      failed_when: false
+
+    - name: Read current conntrack capacity
+      ansible.builtin.command:
+        argv: [cat, /proc/sys/net/netfilter/nf_conntrack_max]
+      register: _node_limits_conntrack_max
+      changed_when: false
+      failed_when: false
+
+    - name: Resolve the running Xray container
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/vpn/compose.yml, ps, -q, xray]
+      register: _node_limits_xray_container
+      changed_when: false
+
+    - name: Resolve the host PID of the running Xray container
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{{ '{{' }}.State.Pid{{ '}}' }}"
+          - "{{ _node_limits_xray_container.stdout }}"
+      register: _node_limits_xray_pid_result
+      changed_when: false
+
+    - name: Record the host PID of Xray
+      ansible.builtin.set_fact:
+        _node_limits_xray_pid: "{{ _node_limits_xray_pid_result.stdout | int }}"
+
+    - name: Count open Xray file descriptors
+      ansible.builtin.command:
+        argv: [ls, -1, "/proc/{{ _node_limits_xray_pid }}/fd"]
+      register: _node_limits_xray_fds
+      changed_when: false
+
+    - name: Read Xray process limits
+      ansible.builtin.command:
+        argv: [cat, "/proc/{{ _node_limits_xray_pid }}/limits"]
+      register: _node_limits_xray_limits
+      changed_when: false
+
+    - name: Read Xray CPU and thread snapshot
+      ansible.builtin.command:
+        argv: [ps, -p, "{{ _node_limits_xray_pid }}", -o, "%cpu=", -o, "%mem=", -o, "nlwp="]
+      register: _node_limits_xray_process
+      changed_when: false
+
+    - name: Report read-only node capacity diagnostics
+      ansible.builtin.debug:
+        msg:
+          - >-
+            CAKE: {{ _node_limits_qdisc.stdout
+              if (node_limits_egress_enabled | default(false) | bool)
+              else 'not managed by desired state' }}
+          - >-
+            conntrack: {{ _node_limits_conntrack_count.stdout | default('unavailable', true) }} /
+            {{ _node_limits_conntrack_max.stdout | default('unavailable', true) }}
+          - "Xray open file descriptors: {{ _node_limits_xray_fds.stdout_lines | length }}"
+          - >-
+            Xray {{ _node_limits_xray_limits.stdout_lines
+              | select('match', '^Max open files') | first | default('Max open files unavailable') }}
+          - "Xray process snapshot (%CPU %MEM threads): {{ _node_limits_xray_process.stdout | trim }}"
 
     - name: Exercise the local Xray gRPC API
       ansible.builtin.command:

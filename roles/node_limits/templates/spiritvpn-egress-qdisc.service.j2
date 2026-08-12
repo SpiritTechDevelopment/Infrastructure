@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply SpiritVPN CAKE egress policy
+After=network-online.target
+Wants=network-online.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart={{ node_limits_script_path }}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
