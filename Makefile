@@ -1,4 +1,5 @@
-INVENTORY ?= inventories/prod/inventory.yml
+# Legacy contour only. fleet-* targets use generated build/<env> inventories.
+LEGACY_INVENTORY ?= inventories/prod/inventory.yml
 STATIC_INVENTORY ?= examples/static-check-inventory.yml
 TARGET = entry:exit
 LIMIT ?=
@@ -22,21 +23,22 @@ SOURCE ?= HEAD
 INITIAL ?= 0
 CONNECT ?= 0
 APPLY ?= 0
+ALLOW_LEGACY ?= 0
 COMPILED_SECRETS ?=
 BOOTSTRAP_VARS ?=
 READINESS_VARS ?=
 RESUME ?= 0
 
 # SOPS-encrypted deploy secrets (committed) and their decrypted form (gitignored).
-# `make decrypt` materializes the plaintext; deploy targets depend on it and pass
-# it to Ansible as extra-vars. Replaces the old hand-placed .local-secrets files.
+# `make legacy-decrypt ALLOW_LEGACY=1` materializes the plaintext; legacy deploy
+# targets depend on it and pass it to Ansible as extra-vars.
 SECRETS_SOPS  ?= inventories/prod/secrets.sops.yml
 SECRETS_PLAIN ?= inventories/prod/secrets.plain.yml
 SECRETS_ARGS  = --extra-vars @$(SECRETS_PLAIN)
 
 # SOPS-encrypted inventory (committed, whole-file/binary) and its decrypted form
-# ($(INVENTORY), gitignored). `make decrypt` materializes it so a clean clone can
-# reproduce the fleet topology. Edit the topology via `sops $(INVENTORY_SOPS)`.
+# ($(LEGACY_INVENTORY), gitignored). The guarded legacy decrypt target
+# materializes it. Edit the old topology via `sops $(INVENTORY_SOPS)`.
 INVENTORY_SOPS ?= inventories/prod/inventory.sops.yml
 
 # SSH_AUTH modes:
@@ -99,7 +101,13 @@ fleet-bootstrap: fleet-ansible-check ## Bootstrap clean hosts; requires APPLY=1 
 fleet-deploy: ## Infrastructure coordinator; dry-run by default, APPLY=1 enables SSH
 	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",)
 
-deps: ## Check local controller prerequisites (no external collections required)
+legacy-guard:
+	@test "$(ALLOW_LEGACY)" = 1 || { \
+	  echo 'legacy production operations are disabled; use fleet-* targets (ALLOW_LEGACY=1 is an explicit break-glass override)' >&2; \
+	  exit 2; \
+	}
+
+legacy-deps: legacy-guard ## [LEGACY] Check old controller prerequisites; requires ALLOW_LEGACY=1
 	@python3 -c 'import ansible,sys; parts=tuple(int(x) for x in ansible.__version__.split(".")[:2]); sys.exit("ansible-core >=2.18,<2.19 required; found " + ansible.__version__) if parts != (2,18) else print("ansible-core", ansible.__version__, "OK")'
 	@for cmd in ansible-playbook ansible-inventory python3 curl openssl timeout; do command -v "$$cmd" >/dev/null || { echo "$$cmd is required" >&2; exit 2; }; done
 	@command -v docker >/dev/null || command -v xray >/dev/null || (echo 'Docker or local Xray is required for E2E' >&2; exit 2)
@@ -108,11 +116,11 @@ deps: ## Check local controller prerequisites (no external collections required)
 	@if [ "$(SSH_AUTH)" = key ] && [ ! -r "$(SSH_KEY)" ]; then echo 'SSH_KEY is not readable: $(SSH_KEY)' >&2; exit 2; fi
 	@case "$(SSH_AUTH)" in auto|key|password) ;; *) echo 'SSH_AUTH must be auto, key, or password' >&2; exit 2;; esac
 
-inventory: ## Show parsed inventory graph
-	ansible-inventory -i "$(INVENTORY)" --graph
+legacy-inventory: legacy-guard ## [LEGACY] Show the manual inventory graph; requires ALLOW_LEGACY=1
+	ansible-inventory -i "$(LEGACY_INVENTORY)" --graph
 
-ping: ## Test SSH and Python; LIMIT is optional
-	$(ADHOC) -i "$(INVENTORY)" all -m ping $(if $(LIMIT),--limit "$(LIMIT)",)
+legacy-ping: legacy-guard ## [LEGACY] Test SSH and Python; requires ALLOW_LEGACY=1
+	$(ADHOC) -i "$(LEGACY_INVENTORY)" all -m ping $(if $(LIMIT),--limit "$(LIMIT)",)
 
 lint: ## Run YAML and Ansible lint
 	yamllint .
@@ -135,14 +143,14 @@ check: ## Run all local static, parser, dashboard, syntax, and render checks
 	@for script in scripts/*.sh; do bash -n "$$script" || exit $$?; done
 	@python3 -m py_compile scripts/*.py
 	@for dashboard in roles/observability/files/dashboards/*.json; do python3 -m json.tool "$$dashboard" >/dev/null || exit $$?; done
-	ANSIBLE_INVENTORY="$(STATIC_INVENTORY)" ansible-playbook playbooks/reality-key-parser-test.yml
+	ANSIBLE_INVENTORY="$(STATIC_INVENTORY)" ansible-playbook playbooks/tests/reality-key-parser-test.yml
 	$(MAKE) syntax STATIC_INVENTORY="$(STATIC_INVENTORY)"
 	$(MAKE) render STATIC_INVENTORY="$(STATIC_INVENTORY)" TARGET="$(TARGET)"
 
 test-api-wrapper: ## Offline test of add/list/stats/remove wrapper semantics
 	./scripts/test-api-wrapper.sh
 
-decrypt: ## Materialize SOPS-encrypted deploy secrets + inventory (gitignored)
+legacy-decrypt: legacy-guard ## [LEGACY] Materialize old SOPS secrets/inventory; requires ALLOW_LEGACY=1
 	@if [ -f "$(SECRETS_SOPS)" ]; then \
 	  command -v sops >/dev/null || { echo "sops is required (see OPERATIONS.md)" >&2; exit 2; }; \
 	  sops -d "$(SECRETS_SOPS)" > "$(SECRETS_PLAIN)" && chmod 600 "$(SECRETS_PLAIN)" && \
@@ -150,98 +158,98 @@ decrypt: ## Materialize SOPS-encrypted deploy secrets + inventory (gitignored)
 	else echo "no $(SECRETS_SOPS); nothing to decrypt"; fi
 	@if [ -f "$(INVENTORY_SOPS)" ]; then \
 	  command -v sops >/dev/null || { echo "sops is required (see OPERATIONS.md)" >&2; exit 2; }; \
-	  sops -d --input-type yaml --output-type binary "$(INVENTORY_SOPS)" > "$(INVENTORY).tmp"; \
-	  if [ -f "$(INVENTORY)" ] && ! cmp -s "$(INVENTORY).tmp" "$(INVENTORY)"; then \
-	    cp -a "$(INVENTORY)" "$(INVENTORY).bak.$$(date +%Y%m%d-%H%M%S)"; \
-	    echo "note: local $(INVENTORY) differed from $(INVENTORY_SOPS); backed it up before overwriting (edit via 'sops $(INVENTORY_SOPS)')"; \
+	  sops -d --input-type yaml --output-type binary "$(INVENTORY_SOPS)" > "$(LEGACY_INVENTORY).tmp"; \
+	  if [ -f "$(LEGACY_INVENTORY)" ] && ! cmp -s "$(LEGACY_INVENTORY).tmp" "$(LEGACY_INVENTORY)"; then \
+	    cp -a "$(LEGACY_INVENTORY)" "$(LEGACY_INVENTORY).bak.$$(date +%Y%m%d-%H%M%S)"; \
+	    echo "note: local $(LEGACY_INVENTORY) differed from $(INVENTORY_SOPS); backed it up before overwriting (edit via 'sops $(INVENTORY_SOPS)')"; \
 	  fi; \
-	  mv "$(INVENTORY).tmp" "$(INVENTORY)" && echo "materialized -> $(INVENTORY)"; \
+	  mv "$(LEGACY_INVENTORY).tmp" "$(LEGACY_INVENTORY)" && echo "materialized -> $(LEGACY_INVENTORY)"; \
 	fi
 
-deploy: decrypt ## One-command full deployment plus infrastructure/telemetry verification
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/site.yml $(SECRETS_ARGS)
+legacy-deploy: legacy-decrypt ## [LEGACY] Old full deployment; requires ALLOW_LEGACY=1
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/site.yml $(SECRETS_ARGS)
 
-verify: ## Re-run runtime, API, dashboards, logs, and metrics verification
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/verify.yml
+legacy-verify: legacy-guard ## [LEGACY] Old live verification; requires ALLOW_LEGACY=1
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/verify.yml
 
-e2e: ## Backend contract E2E through default or selected exit
-	./scripts/smoke-backend.sh --inventory "$(INVENTORY)" --entry "$(ENTRY)" $(if $(EXIT),--exit "$(EXIT)",)
+legacy-e2e: legacy-guard ## [LEGACY] Old backend E2E; requires ALLOW_LEGACY=1
+	./scripts/smoke-backend.sh --inventory "$(LEGACY_INVENTORY)" --entry "$(ENTRY)" $(if $(EXIT),--exit "$(EXIT)",)
 
-e2e-all: ## Run API/customer E2E through every enabled exit
-	./scripts/smoke-all-exits.sh --inventory "$(INVENTORY)" --entry "$(ENTRY)"
+legacy-e2e-all: legacy-guard ## [LEGACY] Old all-exit E2E; requires ALLOW_LEGACY=1
+	./scripts/smoke-all-exits.sh --inventory "$(LEGACY_INVENTORY)" --entry "$(ENTRY)"
 
-deploy-e2e: ## Static checks, full deployment, infrastructure verification, and backend/customer E2E
-	$(MAKE) deps
+legacy-deploy-e2e: legacy-guard ## [LEGACY] Old deploy and E2E; requires ALLOW_LEGACY=1
+	$(MAKE) legacy-deps
 	$(MAKE) check
-	$(MAKE) deploy INVENTORY="$(INVENTORY)"
-	$(if $(EXIT),$(MAKE) e2e INVENTORY="$(INVENTORY)" ENTRY="$(ENTRY)" EXIT="$(EXIT)",$(MAKE) e2e-all INVENTORY="$(INVENTORY)" ENTRY="$(ENTRY)")
+	$(MAKE) legacy-deploy LEGACY_INVENTORY="$(LEGACY_INVENTORY)"
+	$(if $(EXIT),$(MAKE) legacy-e2e LEGACY_INVENTORY="$(LEGACY_INVENTORY)" ENTRY="$(ENTRY)" EXIT="$(EXIT)",$(MAKE) legacy-e2e-all LEGACY_INVENTORY="$(LEGACY_INVENTORY)" ENTRY="$(ENTRY)")
 
-platform: decrypt ## Deploy only Vault and observability
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/platform.yml $(SECRETS_ARGS) $(if $(LIMIT),--limit "$(LIMIT)",)
+legacy-platform: legacy-decrypt ## [LEGACY] Deploy old Vault/observability; requires ALLOW_LEGACY=1
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/platform.yml $(SECRETS_ARGS) $(if $(LIMIT),--limit "$(LIMIT)",)
 
-backend-staging: decrypt ## Deploy the immutable SpiritVPN backend image on control-1
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/backend-staging.yml $(SECRETS_ARGS) $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)
+legacy-backend-staging: legacy-decrypt ## [LEGACY] Deploy old backend; requires ALLOW_LEGACY=1
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/backend-staging.yml $(SECRETS_ARGS) $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)
 
-wire: ## Rebuild entry outbounds from deployed exit REALITY client passwords
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/wire-fleet.yml
+legacy-wire: legacy-guard ## [LEGACY] Rebuild old entry outbounds; requires ALLOW_LEGACY=1
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/wire-fleet.yml
 
-apply-node: decrypt ## Manual selected-node redeploy; LIMIT is mandatory and entries must be wired
+legacy-apply-node: legacy-decrypt ## [LEGACY] Redeploy an old selected node; requires ALLOW_LEGACY=1
 	@test -n "$(LIMIT)" || (echo 'LIMIT is required' >&2; exit 2)
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/fleet-infra.yml $(SECRETS_ARGS) --limit "localhost,$(LIMIT)"
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/fleet-infra.yml $(SECRETS_ARGS) --limit "localhost,$(LIMIT)"
 
-check-node: decrypt ## Dry-run selected-node redeploy; LIMIT is mandatory
+legacy-check-node: legacy-decrypt ## [LEGACY] Check an old selected node; requires ALLOW_LEGACY=1
 	@test -n "$(LIMIT)" || (echo 'LIMIT is required' >&2; exit 2)
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/fleet-infra.yml $(SECRETS_ARGS) --check --diff --limit "localhost,$(LIMIT)"
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/fleet-infra.yml $(SECRETS_ARGS) --check --diff --limit "localhost,$(LIMIT)"
 
-api-ping: ## Test Xray API; NODE=entry-1 or ENDPOINT=host:10085
-	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" ping
+legacy-api-ping: legacy-guard ## [LEGACY] Test old Xray API; requires ALLOW_LEGACY=1
+	XRAY_INVENTORY="$(LEGACY_INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" ping
 
-api-list: ## List runtime Xray users
-	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" list
+legacy-api-list: legacy-guard ## [LEGACY] List old runtime users; requires ALLOW_LEGACY=1
+	XRAY_INVENTORY="$(LEGACY_INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" list
 
 
-api-emails: ## List exact runtime user identifiers, one per line
-	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" emails
+legacy-api-emails: legacy-guard ## [LEGACY] List old runtime identifiers; requires ALLOW_LEGACY=1
+	XRAY_INVENTORY="$(LEGACY_INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" emails
 
-api-has: ## Check exact runtime user presence; EMAIL=... [NODE=entry-1]
+legacy-api-has: legacy-guard ## [LEGACY] Check an old runtime user; requires ALLOW_LEGACY=1
 	@test -n "$(EMAIL)" || (echo 'EMAIL is required' >&2; exit 2)
-	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" has "$(EMAIL)"
+	XRAY_INVENTORY="$(LEGACY_INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" has "$(EMAIL)"
 
-api-add: ## Add runtime user; UUID=... EMAIL=... [NODE=entry-1]
+legacy-api-add: legacy-guard ## [LEGACY] Add an old runtime user; requires ALLOW_LEGACY=1
 	@test -n "$(UUID)" || (echo 'UUID is required' >&2; exit 2)
 	@test -n "$(EMAIL)" || (echo 'EMAIL is required' >&2; exit 2)
-	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" add "$(UUID)" "$(EMAIL)"
+	XRAY_INVENTORY="$(LEGACY_INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" add "$(UUID)" "$(EMAIL)"
 
-api-remove: ## Remove runtime user; EMAIL=... [NODE=entry-1]
+legacy-api-remove: legacy-guard ## [LEGACY] Remove an old runtime user; requires ALLOW_LEGACY=1
 	@test -n "$(EMAIL)" || (echo 'EMAIL is required' >&2; exit 2)
-	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" remove "$(EMAIL)"
+	XRAY_INVENTORY="$(LEGACY_INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" remove "$(EMAIL)"
 
-api-stats: ## Show Xray stats; optional PATTERN=email
-	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" stats $(PATTERN)
+legacy-api-stats: legacy-guard ## [LEGACY] Show old Xray stats; requires ALLOW_LEGACY=1
+	XRAY_INVENTORY="$(LEGACY_INVENTORY)" ./scripts/xray-api.sh "$(API_TARGET)" stats $(PATTERN)
 
-gen-client: ## Generate profile for an API user; UUID=... EMAIL=... [NODE=entry-1] [OUT=client.json]
+legacy-gen-client: legacy-guard ## [LEGACY] Generate an old API profile; requires ALLOW_LEGACY=1
 	@test -n "$(UUID)" || (echo 'UUID is required' >&2; exit 2)
 	@test -n "$(EMAIL)" || (echo 'EMAIL is required' >&2; exit 2)
-	./scripts/gen-client.sh --node "$(NODE)" --inventory "$(INVENTORY)" --uuid "$(UUID)" --email "$(EMAIL)" --api "$(API_TARGET)" $(if $(OUT),--out "$(OUT)",)
+	./scripts/gen-client.sh --node "$(NODE)" --inventory "$(LEGACY_INVENTORY)" --uuid "$(UUID)" --email "$(EMAIL)" --api "$(API_TARGET)" $(if $(OUT),--out "$(OUT)",)
 
-smoke-via: ## Force a specific exit using operator selector; ENTRY=... EXIT=exit-fr
+legacy-smoke-via: legacy-guard ## [LEGACY] Smoke-test an old exit; requires ALLOW_LEGACY=1
 	@test -n "$(EXIT)" || (echo 'EXIT is required (e.g. exit-fr)' >&2; exit 2)
-	./scripts/smoke-via.sh --inventory "$(INVENTORY)" --entry "$(ENTRY)" --exit "$(EXIT)"
+	./scripts/smoke-via.sh --inventory "$(LEGACY_INVENTORY)" --entry "$(ENTRY)" --exit "$(EXIT)"
 
-reconcile: ## Replay desired users; STATE=path [PRUNE=1] [REPLACE=1]
+legacy-reconcile: legacy-guard ## [LEGACY] Replay old desired users; requires ALLOW_LEGACY=1
 	@test -n "$(STATE)" || (echo 'STATE is required' >&2; exit 2)
-	XRAY_INVENTORY="$(INVENTORY)" ./scripts/xray-reconcile.sh "$(API_TARGET)" "$(STATE)" $(if $(filter 1 yes true,$(PRUNE)),--prune,) $(if $(filter 1 yes true,$(REPLACE)),--replace-existing,)
+	XRAY_INVENTORY="$(LEGACY_INVENTORY)" ./scripts/xray-reconcile.sh "$(API_TARGET)" "$(STATE)" $(if $(filter 1 yes true,$(PRUNE)),--prune,) $(if $(filter 1 yes true,$(REPLACE)),--replace-existing,)
 
-management: decrypt ## Deploy/reconcile the WireGuard management overlay (all active hosts; no --limit)
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/management-network.yml $(SECRETS_ARGS)
+legacy-management: legacy-decrypt ## [LEGACY] Deploy old management overlay; requires ALLOW_LEGACY=1
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/management-network.yml $(SECRETS_ARGS)
 
-certs: ## Obtain/renew certificates; LIMIT defaults to control-1
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/acme.yml --limit "$(or $(LIMIT),control-1)" $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)
+legacy-certs: legacy-guard ## [LEGACY] Obtain old certificates; requires ALLOW_LEGACY=1
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/acme.yml --limit "$(or $(LIMIT),control-1)" $(if $(EXTRA_VARS),--extra-vars "@$(EXTRA_VARS)",)
 
-dns: decrypt ## Reconcile Cloudflare DNS from the inventory (plan; APPLY=1 to apply)
-	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
+legacy-dns: legacy-decrypt ## [LEGACY] Reconcile old Cloudflare DNS; requires ALLOW_LEGACY=1
+	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
 
-.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check fleet-bootstrap-check fleet-bootstrap fleet-deploy deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
-	backend-staging \
-	platform wire apply-node check-node api-ping api-list api-emails api-has api-add api-remove api-stats \
-	gen-client smoke-via reconcile management certs dns
+.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check fleet-bootstrap-check fleet-bootstrap fleet-deploy lint syntax render check test-api-wrapper \
+	legacy-guard legacy-deps legacy-inventory legacy-ping legacy-decrypt legacy-deploy legacy-verify legacy-e2e legacy-e2e-all legacy-deploy-e2e \
+	legacy-backend-staging legacy-platform legacy-wire legacy-apply-node legacy-check-node legacy-api-ping legacy-api-list legacy-api-emails legacy-api-has legacy-api-add legacy-api-remove legacy-api-stats \
+	legacy-gen-client legacy-smoke-via legacy-reconcile legacy-management legacy-certs legacy-dns
