@@ -4,7 +4,7 @@ env: prod
 # Steady-state deploys authenticate as the named `deploy` user and escalate via
 # sudo (NOPASSWD), instead of logging in as root. Remote plays set `become: true`;
 # localhost plays set `become: false` (this global default is overridden there).
-# Root remains key-only break-glass. See OPERATIONS.md.
+# Root remains key-only break-glass in this isolated legacy inventory.
 ansible_user: deploy
 ansible_become: true
 
@@ -68,7 +68,7 @@ prometheus_remote_write: "http://{{ telemetry_hub_host }}:9090/api/v1/write"
 
 # Telegram alert notifications. chat_id is not sensitive; the bot token is a SOPS
 # secret (alertmanager_telegram_bot_token). Both must be set for the receiver to
-# activate. See OPERATIONS.md §6.
+# activate in the retained legacy observability stack.
 alertmanager_telegram_chat_id: -1003544840208
 alertmanager_telegram_message_thread_id: 13
 
@@ -76,7 +76,7 @@ alertmanager_telegram_message_thread_id: 13
 # node label and resolves to that node's public IP, so DNS follows the topology —
 # a replacement is just changing which node a record points at. proxied stays false
 # (REALITY :443 must be DNS-only). Token = cloudflare_api_token (SOPS, shared with
-# the acme role). Leave cloudflare_zone empty to disable. See TOPOLOGY.md.
+# the acme role). Leave cloudflare_zone empty to disable the legacy DNS adapter.
 cloudflare_zone: "vmshare.ru"
 cloudflare_dns_records:
   - { name: "ru.vmshare.ru", node: exit-ru }   # A -> exit-ru public IP, DNS-only (grey cloud)

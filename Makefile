@@ -152,12 +152,12 @@ test-api-wrapper: ## Offline test of add/list/stats/remove wrapper semantics
 
 legacy-decrypt: legacy-guard ## [LEGACY] Materialize old SOPS secrets/inventory; requires ALLOW_LEGACY=1
 	@if [ -f "$(SECRETS_SOPS)" ]; then \
-	  command -v sops >/dev/null || { echo "sops is required (see OPERATIONS.md)" >&2; exit 2; }; \
+	  command -v sops >/dev/null || { echo "sops is required for guarded legacy decrypt" >&2; exit 2; }; \
 	  sops -d "$(SECRETS_SOPS)" > "$(SECRETS_PLAIN)" && chmod 600 "$(SECRETS_PLAIN)" && \
 	    echo "decrypted -> $(SECRETS_PLAIN)"; \
 	else echo "no $(SECRETS_SOPS); nothing to decrypt"; fi
 	@if [ -f "$(INVENTORY_SOPS)" ]; then \
-	  command -v sops >/dev/null || { echo "sops is required (see OPERATIONS.md)" >&2; exit 2; }; \
+	  command -v sops >/dev/null || { echo "sops is required for guarded legacy decrypt" >&2; exit 2; }; \
 	  sops -d --input-type yaml --output-type binary "$(INVENTORY_SOPS)" > "$(LEGACY_INVENTORY).tmp"; \
 	  if [ -f "$(LEGACY_INVENTORY)" ] && ! cmp -s "$(LEGACY_INVENTORY).tmp" "$(LEGACY_INVENTORY)"; then \
 	    cp -a "$(LEGACY_INVENTORY)" "$(LEGACY_INVENTORY).bak.$$(date +%Y%m%d-%H%M%S)"; \

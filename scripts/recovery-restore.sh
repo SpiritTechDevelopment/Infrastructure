@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Restore a passphrase-encrypted recovery bundle (created by recovery-bundle.sh)
-# onto a fresh machine after a laptop loss. See RECOVERY.md.
+# onto a fresh machine after a laptop loss. This is an isolated legacy helper.
 #
 # Usage: recovery-restore.sh recovery/<name>-recovery.age [DEST]
 #   DEST defaults to /  (files restore to their original absolute paths).

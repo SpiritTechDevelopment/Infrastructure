@@ -16,7 +16,7 @@ entry_default_exit_tag: nl-exit
 xray_entry_block_unmatched: false
 
 # Self-heal runtime users after an Xray restart (add-only; no-op without a
-# backend-written snapshot at xray_reconcile_snapshot). See BACKEND_INTEGRATION.md.
+# backend-written snapshot at xray_reconcile_snapshot). Legacy contour only.
 xray_auto_reconcile_enabled: true
 # Enable after backend_internal_api_token is added to SOPS deploy secrets.
 xray_desired_users_sync_enabled: false

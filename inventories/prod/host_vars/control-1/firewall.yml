@@ -14,7 +14,7 @@
 # GOAL of this profile (C2): remove the public stopgap openings of 3000/3100/9090
 # and make all platform ports OVERLAY-ONLY, while codifying the firewall.
 #
-# EFFECTIVE ACCESS after apply (compare to captured-state/control-1/etc-nftables.conf):
+# EFFECTIVE ACCESS for the retained legacy host profile:
 #   - SSH (:22) open to anyone with a valid key (no source whitelist; key-only
 #     auth is enforced fleet-wide). Empty ssh_allowed_cidrs -> `tcp dport 22
 #     accept` (matches both IPv4 and IPv6 in this inet table).

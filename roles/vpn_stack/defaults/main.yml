@@ -18,7 +18,7 @@ node_exporter_port: 9100
 # Node-local auto-reconcile: a systemd timer re-adds the backend's desired runtime
 # users after an Xray restart (add-only — never prunes — so a stale snapshot cannot
 # remove a live user). Off by default; enabled for the entry group. The snapshot is
-# written by the backend (see BACKEND_INTEGRATION.md); if absent, the timer no-ops.
+# written by the legacy compatibility backend; if absent, the timer no-ops.
 xray_auto_reconcile_enabled: false
 xray_reconcile_libdir: /usr/local/lib/spirit-xray
 xray_reconcile_snapshot: /var/lib/xray/desired-users.json

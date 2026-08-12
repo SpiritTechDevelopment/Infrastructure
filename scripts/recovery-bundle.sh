@@ -3,7 +3,7 @@
 # so a lost or dead laptop is survivable. The output
 # recovery/<name>-recovery.age is SAFE TO COMMIT — it is encrypted under a
 # passphrase you memorize (age's scrypt). The passphrase lives ONLY in your head;
-# never write it into the repo. See RECOVERY.md.
+# never write it into the repo. This script belongs to the isolated legacy contour.
 set -Eeuo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

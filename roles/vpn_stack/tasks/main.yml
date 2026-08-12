@@ -49,7 +49,7 @@
     or ('Pulled' in _vpn_stack_apply.stderr)
 
 # Node-local auto-reconcile (self-heal runtime users after an Xray restart).
-# Add-only; no-op without a backend snapshot. See BACKEND_INTEGRATION.md.
+# Add-only; no-op without a legacy compatibility backend snapshot.
 - name: Auto-reconcile — create script lib dir
   ansible.builtin.file:
     path: "{{ xray_reconcile_libdir }}"

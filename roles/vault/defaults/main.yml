@@ -12,7 +12,7 @@ vault_tls_private_key: ""
 
 # Seal-state monitoring: a systemd timer probes /v1/sys/health on the host and
 # writes a node-exporter textfile metric (vault_sealed / vault_up) so a silent
-# re-seal fires the "VaultSealed" alert. See OPERATIONS.md §9.
+# re-seal fires the legacy "VaultSealed" alert.
 vault_seal_metric_enabled: true
 # Host path node-exporter reads via its textfile collector. MUST match
 # roles/observability (node_exporter_textfile_dir there); node-exporter mounts

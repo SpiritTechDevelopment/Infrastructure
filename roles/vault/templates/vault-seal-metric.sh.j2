@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Managed by Ansible (roles/vault). Writes Vault seal state as a node-exporter
 # textfile metric so a silent re-seal pages via the "VaultSealed" alert instead
-# of surfacing later as an SSH-CA signing failure. See OPERATIONS.md §9.
+# of surfacing later as an SSH-CA signing failure in the legacy platform stack.
 #
 # Vault is loopback-only ({{ vault_api_addr }}); the blackbox exporter runs in a
 # container and cannot reach host loopback, so we probe here on the host and hand

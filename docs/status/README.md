@@ -1,14 +1,8 @@
 # Status
 
-The living state of the project — updated as work lands.
+[`INFRA_V1_IMPLEMENTATION_STATUS.md`](INFRA_V1_IMPLEMENTATION_STATUS.md) is the
+current implementation snapshot and ordered handoff for further work.
 
-| Doc | What |
-|---|---|
-| [CURRENT_STATE.md](CURRENT_STATE.md) | **Canonical point-in-time snapshot** — fleet, exposure, access, hardening, secrets, live component status |
-| [NEXT_STEPS.md](NEXT_STEPS.md) | Prioritized remaining work |
-| [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) | Pending decisions + recommendations |
-| [RECAP.md](RECAP.md) | Change history of the hardening convergence |
-| [CONVERGENCE_STATUS.md](CONVERGENCE_STATUS.md) | Resume guide: state, locked decisions, working discipline, hard-won gotchas |
-
-Start with **CURRENT_STATE** for "where are we now," **NEXT_STEPS/OPEN_QUESTIONS** for
-"what's left."
+Legacy live-fleet snapshots, hardening convergence notes, open-question lists,
+recaps, and workstation deployment reminders were removed. They described the
+manual production contour rather than infrastructure v1.

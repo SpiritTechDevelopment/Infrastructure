@@ -76,7 +76,7 @@
     or ('Recreated' in (_vault_apply.stdout ~ _vault_apply.stderr))
     or ('Pulled' in (_vault_apply.stdout ~ _vault_apply.stderr))
 
-# Seal-state monitoring (OPERATIONS.md §9). Loopback-only Vault re-seals on every
+# Legacy seal-state monitoring. Loopback-only Vault re-seals on every
 # restart; this exports vault_sealed/vault_up as a node-exporter textfile metric
 # so a silent reseal fires the "VaultSealed" alert instead of a later CA failure.
 - name: Vault seal-metric — create node-exporter textfile dir

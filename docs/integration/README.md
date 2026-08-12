@@ -1,15 +1,15 @@
-# Integration
+# Integration contracts
 
-The contract between this infrastructure and the **backend** that manages customers.
+Integration behavior is defined by the owning contracts rather than a second
+descriptive compatibility document:
 
-| Doc | What |
+| Contract | Authority |
 |---|---|
-| [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md) | The runtime-user lifecycle, the desired-state reconcile contract, the node-local auto-reconcile snapshot, and (design) the quota accounting model |
-| [API_TESTING.md](API_TESTING.md) | Exercising the Xray gRPC API (add/remove/list/stats) |
+| [Backend domain agreement](../../contracts/backend/BACKEND_DOMAIN_AGREEMENTS.md) | Backend-owned domain model, manifest semantics, access, accounting, and agent operations |
+| [node_agent.proto](../../contracts/nodeagent/v1/node_agent.proto) | Backend-to-node-agent wire API |
+| [Infrastructure specification](../architecture/INFRA_TECHNICAL_SPEC.md) | Infrastructure-owned topology, rollout, PKI, readiness, and required backend delta |
+| [Desired-state schemas](../../contracts/desired-state/README.md) | Structural input contract consumed by `fleetctl` |
 
-**Key facts the backend must honor:**
-- Runtime users are **in-memory** at the entry; the backend owns the authoritative
-  list and replays it (`make reconcile` / the on-node snapshot).
-- User identity + quota accounting are **entry-scoped** — exit topology is invisible
-  to the backend (see [../architecture/TOPOLOGY.md](../architecture/TOPOLOGY.md)).
-- The API is **overlay-only** (`:10085`) — the backend must be a `wg0` peer.
+The old direct-Xray API and add-only snapshot documentation was removed. It
+described the isolated legacy runtime and is not a supported v1 integration
+surface.

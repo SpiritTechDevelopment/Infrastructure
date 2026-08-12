@@ -18,7 +18,7 @@
 #   One host: ... --limit entry-1
 #
 # Reach hosts however you normally do (public SSH is open key-only; or override
-# ansible_host to an overlay IP). See OPERATIONS.md.
+# ansible_host to an overlay IP). Retained legacy break-glass operation only.
 - name: Manage operator SSH access
   hosts: "{{ access_target | default('all') }}"
   become: true

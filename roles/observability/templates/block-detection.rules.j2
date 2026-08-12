@@ -31,7 +31,7 @@ groups:
     rules:
       # Vault has no auto-unseal and re-seals on every restart; while sealed the
       # SSH CA cannot sign. Source metric: the vault-seal-metric timer's textfile
-      # (roles/vault). Unseal procedure: OPERATIONS.md §9.
+      # (roles/vault). This alert belongs to the retained legacy platform stack.
       - alert: VaultSealed
         expr: vault_sealed == 1
         for: 2m

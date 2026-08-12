@@ -1,7 +1,7 @@
 ---
 # Reconcile Cloudflare DNS from the inventory (label-driven). Runs locally — it is
 # a set of Cloudflare API calls, not a host operation. Plan by default; apply with
-# `make dns APPLY=1`. See TOPOLOGY.md and OPERATIONS.md.
+# Guarded legacy operation: `make legacy-dns ALLOW_LEGACY=1 APPLY=1`.
 - name: Reconcile Cloudflare DNS from the inventory
   hosts: localhost
   connection: local
