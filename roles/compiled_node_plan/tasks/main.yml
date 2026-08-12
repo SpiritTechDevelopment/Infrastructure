@@ -19,7 +19,12 @@
       - spiritvpn_node_plan.schema_version | int == 1
       - spiritvpn_node_plan.environment in ['develop', 'staging', 'prod']
       - spiritvpn_node_plan.instance.id == inventory_hostname
-      - spiritvpn_node_plan.instance.management_address == ansible_host
+      - >-
+        ansible_host == (
+          spiritvpn_node_plan.instance.public_address
+          if (spiritvpn_connection_phase | default('configure')) == 'bootstrap'
+          else spiritvpn_node_plan.instance.management_address
+        )
       - spiritvpn_node_plan.logical_node.role in ['entry', 'exit']
       - spiritvpn_node_plan.instance.target_state in ['provisioning', 'candidate', 'serving', 'draining', 'retired']
       - spiritvpn_node_plan.infrastructure.components.xray.digest is match('^sha256:[0-9a-f]{64}$')
@@ -57,8 +62,9 @@
   ansible.builtin.set_fact:
     node_role: "{{ spiritvpn_node_plan.logical_node.role }}"
     country: "{{ spiritvpn_node_plan.logical_node.region }}"
-    deploy_mode: hardened
-    common_manage_deploy_user: false
+    deploy_mode: "{{ spiritvpn_deploy_mode }}"
+    common_manage_deploy_user: "{{ spiritvpn_manage_deploy_user }}"
+    common_authorized_keys: "{{ spiritvpn_operator_ssh_public_keys }}"
     common_manage_sshd: true
     common_manage_firewall: true
     common_enable_fail2ban: true

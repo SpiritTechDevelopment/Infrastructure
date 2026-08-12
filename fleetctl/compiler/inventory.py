@@ -19,13 +19,15 @@ def compile_ansible_inventory(state: DesiredState) -> dict[str, Any]:
 
     for instance in sorted(state.instances, key=lambda item: item.object_id):
         node = nodes[instance.logical_node]
+        lifecycle_hosts[instance.target_state][instance.object_id] = {}
+        if instance.target_state == "retired":
+            continue
         address = management_address(state.environment, node, instance)
         hostvars = {
             "ansible_host": address,
             "spiritvpn_node_plan_file": f"node-plans/{instance.object_id}.json",
         }
         role_hosts[node.role][instance.object_id] = hostvars
-        lifecycle_hosts[instance.target_state][instance.object_id] = {}
 
     children: dict[str, Any] = {
         "spiritvpn_fleet": {

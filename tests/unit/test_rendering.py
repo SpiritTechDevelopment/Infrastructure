@@ -29,6 +29,7 @@ class RenderingTests(unittest.TestCase):
         files = render_files(self.state)
         self.assertIn("dns-plan.json", files)
         self.assertIn("monitoring-targets.json", files)
+        self.assertIn("bootstrap-inventory.json", files)
 
     def test_dns_plan_publishes_only_serving_entries(self) -> None:
         plan = json.loads(render_files(self.state)["dns-plan.json"])
@@ -109,6 +110,15 @@ class RenderingTests(unittest.TestCase):
             set(entry_hosts["develop-entry-nl-01"]),
             {"ansible_host", "spiritvpn_node_plan_file"},
         )
+
+    def test_bootstrap_inventory_uses_public_address_and_same_node_plan(self) -> None:
+        inventory = json.loads(render_files(self.state)["bootstrap-inventory.json"])
+        hosts = inventory["all"]["children"]["spiritvpn_bootstrap"]["hosts"]
+        entry = hosts["develop-entry-nl-01"]
+        self.assertEqual(entry["ansible_host"], "192.0.2.10")
+        self.assertEqual(entry["ansible_user"], "root")
+        self.assertEqual(entry["spiritvpn_connection_phase"], "bootstrap")
+        self.assertEqual(entry["spiritvpn_node_plan_file"], "node-plans/develop-entry-nl-01.json")
 
     def test_entry_plan_contains_stable_logical_exit_projection(self) -> None:
         files = render_files(self.state)

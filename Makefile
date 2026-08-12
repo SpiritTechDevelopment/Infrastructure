@@ -23,6 +23,7 @@ INITIAL ?= 0
 CONNECT ?= 0
 APPLY ?= 0
 COMPILED_SECRETS ?=
+BOOTSTRAP_VARS ?=
 
 # SOPS-encrypted deploy secrets (committed) and their decrypted form (gitignored).
 # `make decrypt` materializes the plaintext; deploy targets depend on it and pass
@@ -63,7 +64,10 @@ fleet-plan: ## Plan SOURCE=HEAD against deployment ref; INITIAL=1 only for first
 
 fleet-ansible-check: ## Validate compiled inventory/node plans locally; never connects
 	python3 -m fleetctl.cli ansible-check --environment "$(or $(ENVIRONMENT),develop)" --build-dir "build/$(or $(ENVIRONMENT),develop)"
-	@if command -v ansible-inventory >/dev/null; then ansible-inventory -i "build/$(or $(ENVIRONMENT),develop)/ansible-inventory.json" --list >/dev/null; else echo 'ansible-inventory unavailable; parser check skipped' >&2; fi
+	@if command -v ansible-inventory >/dev/null; then \
+	  ansible-inventory -i "build/$(or $(ENVIRONMENT),develop)/ansible-inventory.json" --list >/dev/null && \
+	  ansible-inventory -i "build/$(or $(ENVIRONMENT),develop)/bootstrap-inventory.json" --list >/dev/null; \
+	else echo 'ansible-inventory unavailable; parser check skipped' >&2; fi
 
 fleet-configure-check: fleet-ansible-check ## Local check by default; CONNECT=1 enables SSH --check
 	@if [ "$(CONNECT)" = 1 ]; then \
@@ -78,6 +82,17 @@ fleet-configure: fleet-ansible-check ## Apply compiled configure; requires APPLY
 
 fleet-provisioning-check: ## Validate manual VPS declarations; never calls provider APIs
 	python3 -m fleetctl.cli provisioning-check --environment "$(or $(ENVIRONMENT),develop)"
+
+fleet-bootstrap-check: fleet-ansible-check ## Local check by default; CONNECT=1 enables bootstrap SSH --check
+	@if [ "$(CONNECT)" = 1 ]; then \
+	  command -v ansible-playbook >/dev/null || { echo 'ansible-playbook is required for CONNECT=1' >&2; exit 2; }; \
+	  ansible-playbook -i "build/$(or $(ENVIRONMENT),develop)/bootstrap-inventory.json" playbooks/bootstrap/bootstrap.yml --check --diff $(if $(BOOTSTRAP_VARS),--extra-vars "@$(BOOTSTRAP_VARS)",); \
+	else echo 'local bootstrap artifacts valid; no SSH attempted (set CONNECT=1 explicitly)'; fi
+
+fleet-bootstrap: fleet-ansible-check ## Bootstrap clean hosts; requires APPLY=1 and BOOTSTRAP_VARS=file
+	@test "$(APPLY)" = 1 || (echo 'refusing bootstrap SSH/mutation: set APPLY=1 explicitly' >&2; exit 2)
+	@test -n "$(BOOTSTRAP_VARS)" || (echo 'BOOTSTRAP_VARS is required' >&2; exit 2)
+	ansible-playbook -i "build/$(or $(ENVIRONMENT),develop)/bootstrap-inventory.json" playbooks/bootstrap/bootstrap.yml --extra-vars "@$(BOOTSTRAP_VARS)"
 
 deps: ## Check local controller prerequisites (no external collections required)
 	@python3 -c 'import ansible,sys; parts=tuple(int(x) for x in ansible.__version__.split(".")[:2]); sys.exit("ansible-core >=2.18,<2.19 required; found " + ansible.__version__) if parts != (2,18) else print("ansible-core", ansible.__version__, "OK")'
@@ -221,7 +236,7 @@ certs: ## Obtain/renew certificates; LIMIT defaults to control-1
 dns: decrypt ## Reconcile Cloudflare DNS from the inventory (plan; APPLY=1 to apply)
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
 
-.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
+.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check fleet-bootstrap-check fleet-bootstrap deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
 	backend-staging \
 	platform wire apply-node check-node api-ping api-list api-emails api-has api-add api-remove api-stats \
 	gen-client smoke-via reconcile management certs dns

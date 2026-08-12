@@ -70,3 +70,4 @@ common_unattended_auto_reboot: false
 # this is verified.
 common_deploy_user: deploy
 common_deploy_groups: [sudo, docker]
+common_authorized_keys: []

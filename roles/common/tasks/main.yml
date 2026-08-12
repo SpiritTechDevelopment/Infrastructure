@@ -60,6 +60,13 @@
 # Named, auditable non-root deploy account (docker + sudo, key-only). Additive —
 # root stays as break-glass; ansible_user is migrated to deploy separately once
 # this is proven. authorized_keys = the operator roster (operators log in AS deploy).
+- name: Require an operator key before creating the deployment account
+  ansible.builtin.assert:
+    that:
+      - (common_authorized_keys | length > 0) or (operators | default([]) | length > 0)
+    fail_msg: "At least one reviewed operator SSH public key is required for the deployment user."
+  when: common_manage_deploy_user | bool
+
 - name: Create deploy user
   ansible.builtin.user:
     name: "{{ common_deploy_user }}"
@@ -130,6 +137,15 @@
 # nftables firewall. Uses add+delete (not `flush ruleset`) so Docker's ip nat
 # table survives — no `docker restart` needed after a reload. `validate` parses
 # the candidate with `nft -c` before it is placed.
+- name: Install nftables firewall tooling
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+    update_cache: true
+  when:
+    - common_manage_firewall | bool
+    - common_firewall_engine == 'nftables'
+
 - name: Render nftables firewall
   ansible.builtin.template:
     src: nftables.conf.j2

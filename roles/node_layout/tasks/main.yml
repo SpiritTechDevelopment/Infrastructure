@@ -1,0 +1,29 @@
+---
+- name: Create protected SpiritVPN directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ spiritvpn_config_dir }}", mode: "0750"}
+    - {path: "{{ spiritvpn_state_dir }}", mode: "0750"}
+    - {path: "{{ spiritvpn_log_dir }}", mode: "0750"}
+
+- name: Create component directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ spiritvpn_component_dirs }}"
+
+- name: Install the non-secret compiled node plan
+  ansible.builtin.copy:
+    content: "{{ spiritvpn_node_plan | to_nice_json }}\n"
+    dest: "{{ spiritvpn_config_dir }}/node-plan.json"
+    owner: root
+    group: root
+    mode: "0640"

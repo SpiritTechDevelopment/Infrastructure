@@ -1,0 +1,26 @@
+---
+- name: Bootstrap clean SpiritVPN VPS hosts from compiled plans
+  hosts: spiritvpn_bootstrap
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    spiritvpn_deploy_mode: bootstrap
+    spiritvpn_manage_deploy_user: true
+    spiritvpn_require_runtime_secrets: false
+    pki_agent_require_certificate: true
+  pre_tasks:
+    - name: Load and validate the compiled bootstrap node plan
+      ansible.builtin.include_role:
+        name: compiled_node_plan
+  roles:
+    - role: docker
+    - role: common
+    - role: node_layout
+    - role: bootstrap_wireguard
+    - role: node_limits
+    - role: pki_agent
+
+- name: Run read-only bootstrap readiness checks
+  ansible.builtin.import_playbook: readiness.yml
