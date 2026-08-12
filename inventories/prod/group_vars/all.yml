@@ -77,10 +77,10 @@ alertmanager_telegram_message_thread_id: 13
 # a replacement is just changing which node a record points at. proxied stays false
 # (REALITY :443 must be DNS-only). Token = cloudflare_api_token (SOPS, shared with
 # the acme role). Leave cloudflare_zone empty to disable. See TOPOLOGY.md.
-cloudflare_zone: ""
-cloudflare_dns_records: []
-#   - { name: "entry.example.com", node: entry-1 }   # A -> entry-1 public IP, DNS-only
-#   - { name: "fr.example.com",    node: exit-fr }
+cloudflare_zone: "vmshare.ru"
+cloudflare_dns_records:
+  - { name: "ru.vmshare.ru", node: exit-ru }   # A -> exit-ru public IP, DNS-only (grey cloud)
+#   - { name: "fr.vmshare.ru", node: exit-fr }   # add when moving exit-fr onto DNS
 
 # Node lifecycle. Disabled hosts stay declared but are excluded from deployment,
 # wiring, verification, and observability target generation.

@@ -8,7 +8,11 @@ xray_sniffing_route_only: true
 # Every ordinary backend-created user on the entry uses this default exit. Special
 # per-exit selector identities (via-<country>) remain available only for operator
 # smoke tests. This makes a normal unique backend user work immediately.
-entry_default_exit_tag: fr-exit
+# 2026-08-09: switched fr-exit -> nl-exit after exit-fr went down. Every ordinary
+# user follows this tag, so the migration needs no client-side change (links point
+# at entry-1, not at an exit). fleet-infra.yml asserts this tag exists in
+# entry_exits, so `make wire` must run BEFORE this value changes.
+entry_default_exit_tag: nl-exit
 xray_entry_block_unmatched: false
 
 # Self-heal runtime users after an Xray restart (add-only; no-op without a
