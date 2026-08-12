@@ -1,0 +1,76 @@
+---
+- name: Validate v1 Vault installation inputs
+  ansible.builtin.assert:
+    that:
+      - platform_vault_image is match('^.+@sha256:[0-9a-f]{64}$')
+      - platform_vault_tls_server_name | length > 0
+      - platform_vault_node_id | length > 0
+      - platform_vault_tls_certificate | length > 0
+      - platform_vault_tls_private_key | length > 0
+    fail_msg: "v1 Vault requires a pinned image and operator-supplied TLS material."
+  no_log: true
+
+- name: Create protected v1 Vault directories
+  ansible.builtin.file:
+    path: "{{ platform_vault_dir }}/{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: config, owner: root, group: "1000", mode: "0750"}
+    - {path: tls, owner: root, group: "1000", mode: "0750"}
+    - {path: data, owner: "100", group: "1000", mode: "0750"}
+    - {path: snapshots, owner: "100", group: "1000", mode: "0750"}
+
+- name: Install v1 Vault TLS certificate
+  ansible.builtin.copy:
+    content: "{{ platform_vault_tls_certificate }}"
+    dest: "{{ platform_vault_dir }}/tls/vault.crt"
+    owner: root
+    group: "1000"
+    mode: "0640"
+  no_log: true
+  diff: false
+
+- name: Install v1 Vault TLS private key
+  ansible.builtin.copy:
+    content: "{{ platform_vault_tls_private_key }}"
+    dest: "{{ platform_vault_dir }}/tls/vault.key"
+    owner: root
+    group: "1000"
+    mode: "0640"
+  no_log: true
+  diff: false
+
+- name: Render v1 Vault configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ platform_vault_dir }}/{{ item.dest }}"
+    owner: root
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {src: vault.hcl.j2, dest: config/vault.hcl, group: "1000", mode: "0640"}
+    - {src: compose.yml.j2, dest: compose.yml, group: root, mode: "0640"}
+  no_log: true
+  diff: false
+
+- name: Start uninitialized or existing v1 Vault
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ platform_vault_dir }}/compose.yml"
+      - up
+      - -d
+      - --remove-orphans
+      - --pull
+      - missing
+  register: _platform_vault_apply
+  changed_when: >-
+    ('Created' in (_platform_vault_apply.stdout ~ _platform_vault_apply.stderr))
+    or ('Started' in (_platform_vault_apply.stdout ~ _platform_vault_apply.stderr))
+    or ('Recreated' in (_platform_vault_apply.stdout ~ _platform_vault_apply.stderr))
+    or ('Pulled' in (_platform_vault_apply.stdout ~ _platform_vault_apply.stderr))

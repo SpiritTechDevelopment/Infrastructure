@@ -311,6 +311,7 @@ def build_initial_baseline(current: DesiredState) -> DesiredState:
         environment_common=current.environment_common,
         node_common={},
         environment=current.environment,
+        platform=current.platform,
         fleets=(),
         nodes=(),
         instances=(),

@@ -1,0 +1,9 @@
+---
+platform_vault_dir: /opt/spiritvpn/platform/vault
+platform_vault_image: ""
+platform_vault_api_port: 8200
+platform_vault_cluster_port: 8201
+platform_vault_tls_server_name: ""
+platform_vault_node_id: ""
+platform_vault_tls_certificate: ""
+platform_vault_tls_private_key: ""

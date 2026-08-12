@@ -1,0 +1,6 @@
+---
+spiritvpn_platform_bootstrap_secret_values: {}
+spiritvpn_platform_host_key_verified: false
+spiritvpn_operator_ssh_public_keys: []
+spiritvpn_platform_ssh_allowed_cidrs: []
+spiritvpn_platform_plan_mode: bootstrap

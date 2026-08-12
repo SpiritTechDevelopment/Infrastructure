@@ -1,0 +1,39 @@
+---
+- name: Check the v1 platform bootstrap boundary
+  hosts: spiritvpn_platform_bootstrap
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Wait for Vault status endpoint inside the container
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ platform_vault_dir }}/compose.yml"
+          - exec
+          - -T
+          - -e
+          - "VAULT_ADDR=https://127.0.0.1:{{ platform_vault_api_port }}"
+          - -e
+          - "VAULT_CACERT=/vault/tls/vault.crt"
+          - -e
+          - "VAULT_TLS_SERVER_NAME={{ platform_vault_tls_server_name }}"
+          - vault
+          - vault
+          - status
+          - -format=json
+      register: _platform_vault_status
+      changed_when: false
+      failed_when: _platform_vault_status.rc not in [0, 2]
+      retries: 20
+      delay: 3
+      until: _platform_vault_status.rc in [0, 2]
+
+    - name: Report the manual Vault ceremony boundary
+      ansible.builtin.debug:
+        msg: >-
+          Vault is reachable and no init, unseal, recovery-key storage, policy
+          configuration, secret write, or deployment-ref update was performed.

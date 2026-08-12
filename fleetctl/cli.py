@@ -12,11 +12,14 @@ from fleetctl.adapters import (
     GitAdapterError,
     GitRepository,
     OutputDirectoryError,
+    PlatformArtifactsError,
     write_generated_artifact,
     write_rendered_files,
     validate_ansible_artifacts,
+    validate_platform_artifacts,
+    validate_platform_known_hosts,
 )
-from fleetctl.compiler import render_files
+from fleetctl.compiler import PlatformNotDeclared, render_files, render_platform_files
 from fleetctl.deployment import DeploymentCoordinator, DeploymentError, DeploymentOptions
 from fleetctl.planning import PlanningError, build_impact_plan, build_initial_baseline
 from fleetctl.provisioning import ManualProvisioningAdapter
@@ -32,6 +35,21 @@ def build_parser() -> argparse.ArgumentParser:
     render = commands.add_parser("render", help="render deterministic local artifacts without network access")
     render.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
     render.add_argument("--output", required=True, type=Path)
+    platform_render = commands.add_parser(
+        "platform-render", help="render a deterministic manual platform-bootstrap plan"
+    )
+    platform_render.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    platform_render.add_argument("--output", required=True, type=Path)
+    platform_check = commands.add_parser(
+        "platform-check", help="validate generated platform inputs without SSH or Vault access"
+    )
+    platform_check.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    platform_check.add_argument("--build-dir", required=True, type=Path)
+    platform_known_hosts = commands.add_parser(
+        "platform-known-hosts-check", help="match pinned known_hosts to reviewed platform fingerprints"
+    )
+    platform_known_hosts.add_argument("--build-dir", required=True, type=Path)
+    platform_known_hosts.add_argument("--known-hosts", required=True, type=Path)
     plan = commands.add_parser("plan", help="compare a Git source with the last deployed baseline")
     plan.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
     baseline_mode = plan.add_mutually_exclusive_group()
@@ -108,6 +126,36 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 2
         print(f"{args.environment}: rendered {len(files)} artifact(s) to {args.output}")
+        return 0
+    if args.command == "platform-render":
+        try:
+            state = validate_environment(args.root, args.environment)
+            files = render_platform_files(state)
+            write_rendered_files(args.output, files)
+        except DesiredStateInvalid as exc:
+            for issue in exc.issues:
+                print(issue.render(), file=sys.stderr)
+            return 1
+        except (PlatformNotDeclared, OutputDirectoryError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(f"{args.environment}: rendered platform bootstrap artifacts to {args.output}")
+        return 0
+    if args.command == "platform-check":
+        try:
+            host = validate_platform_artifacts(args.build_dir, args.environment)
+        except PlatformArtifactsError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(f"{args.environment}: generated platform input valid ({host})")
+        return 0
+    if args.command == "platform-known-hosts-check":
+        try:
+            fingerprint = validate_platform_known_hosts(args.build_dir, args.known_hosts)
+        except PlatformArtifactsError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(f"platform SSH host key matches reviewed fingerprint {fingerprint}")
         return 0
     if args.command == "plan":
         try:

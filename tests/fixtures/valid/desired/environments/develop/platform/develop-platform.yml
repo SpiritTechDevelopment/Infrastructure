@@ -1,0 +1,25 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: Platform
+metadata:
+  id: develop-platform
+spec:
+  environment: develop
+  public_address: 1.1.1.2
+  provider:
+    name: manual
+    resource_id: fixture-platform-01
+  ssh:
+    bootstrap_user: root
+    runtime_user: deploy
+    host_key_fingerprints:
+      - SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+  vault:
+    api_port: 8200
+    cluster_port: 8201
+    tls_server_name: vault.develop.example.invalid
+    tls_certificate_ref: secret://bootstrap/develop/platform/vault#tls_certificate
+    tls_private_key_ref: secret://bootstrap/develop/platform/vault#tls_private_key
+  github_actions:
+    repository: example/spiritvpn
+    environment: develop
+    oidc_audience: https://github.com/example

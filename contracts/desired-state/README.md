@@ -1,7 +1,7 @@
 # Desired-state schemas
 
 JSON Schemas in this directory define the structural contract for
-`Environment`, `Fleet`, `LogicalNode`, and `Instance` objects with
+`Environment`, `Platform`, `Fleet`, `LogicalNode`, and `Instance` objects with
 `apiVersion: spiritvpn.io/v1alpha1`. Six additional schemas validate the
 singleton files under `desired/common/`:
 
@@ -16,6 +16,12 @@ singleton files under `desired/common/`:
 `Environment.spec.common_overrides` and `LogicalNode.spec.common_overrides`.
 Overrides use deterministic precedence `common < Environment < LogicalNode`;
 unknown and derived fields are rejected before the typed deep merge.
+
+`Platform` is optional while an environment is only a placeholder. Once
+declared under `desired/environments/<env>/platform/`, it must contain only
+non-secret bootstrap topology: the manually provisioned host, independently
+verified SSH fingerprints, Vault TLS secret references, and the GitHub Actions
+OIDC trust identity. Its presence also requires an immutable Vault image digest.
 
 JSON Schema handles field shape and primitive constraints. Cross-object rules,
 such as reference resolution, role matching, environment isolation, and the

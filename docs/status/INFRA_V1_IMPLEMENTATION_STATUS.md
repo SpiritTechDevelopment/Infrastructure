@@ -18,6 +18,14 @@ machine PKI, readiness gates и resume-safe coordinator. Опасные опер
 останавливается в `WAITING_FOR_BACKEND`; backend apply, DNS/data-plane promotion
 и перемещение deployment ref не изображаются выполненными.
 
+Начат отдельный v1 management-foundation контур. `Platform` descriptor
+компилируется в план и два минимальных inventory; операторский playbook может
+установить TLS-only Vault с immutable image digest. Vault остаётся доступен
+только через loopback и намеренно не инициализируется и не unseal'ится
+автоматически. Для временного GitHub-hosted runner добавлен ручной read-only
+readiness workflow с GitHub Environment, concurrency lock и обязательной
+проверкой pinned `known_hosts` против fingerprints из desired state.
+
 Каталоги `desired/environments/{develop,staging,prod}` по-прежнему содержат
 только объекты окружений. Реалистичный develop-флот с placeholder-данными и
 только `secret://` references находится в `tests/fixtures/valid/desired`.
@@ -35,9 +43,10 @@ desired/
 └── fleet-ids.yml
 ```
 
-Поддерживаются четыре объектных вида:
+Поддерживаются пять объектных видов:
 
 - `Environment`;
+- `Platform`;
 - `Fleet`;
 - `LogicalNode`;
 - `Instance`.
@@ -126,7 +135,7 @@ Canonical representation и digest зависят от effective-значени�
 
 На дату обновления проходят:
 
-- 81 unit-тест;
+- 94 unit-теста;
 - валидация `develop`, `staging` и `prod`;
 - Python bytecode compilation;
 - проверка JSON Schema;
@@ -135,6 +144,8 @@ Canonical representation и digest зависят от effective-значени�
 - Git adapter tests во временных репозиториях;
 - bootstrap/PKI shell и YAML проверки;
 - coordinator dry-run до `WAITING_FOR_BACKEND` без SSH и внешних мутаций.
+- deterministic platform render, generated-input boundary и SSH fingerprint
+  matching для GitHub-hosted runtime readiness.
 
 `ansible-core` в текущей локальной среде не установлен, поэтому
 `ansible-inventory --list` и `ansible-playbook --syntax-check` здесь пропущены.
@@ -203,6 +214,8 @@ deployment ref.
 - фактическое применение DNS plan и monitoring targets внешними адаптерами;
 - продвижение `candidate → serving`, drain и retire;
 - защищённый deployment runner;
+- автоматическая Vault init/unseal ceremony, GitHub OIDC policy configuration,
+  secret resolver и завершённый platform handoff;
 - реальные флоты в `desired/environments/*`;
 - воспроизводимое построение `develop` с чистых машин;
 - продвижение одинаковых component digests в staging и prod.
@@ -234,6 +247,9 @@ authorization matrix и status/idempotency contracts.
 7. `fleetctl deploy` способен вызвать Ansible только с явным `--apply` и тремя
    читаемыми файлами operator inputs. Без флага выполняются только локальные
    шаги; SSH и mutation помечаются `SKIPPED_DRY_RUN`.
+8. Platform bootstrap пока только устанавливает неинициализированный Vault.
+   Recovery ceremony выполняется оператором; GitHub Actions умеет лишь
+   read-only readiness и ещё не получает Vault token через OIDC.
 
 ## 5. Следующий порядок работ
 

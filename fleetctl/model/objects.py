@@ -118,6 +118,27 @@ class Environment:
 
 
 @dataclass(frozen=True, slots=True)
+class Platform:
+    object_id: str
+    environment: str
+    public_address: str
+    provider_name: str
+    provider_resource_id: str
+    bootstrap_user: str
+    runtime_user: str
+    host_key_fingerprints: tuple[str, ...]
+    vault_api_port: int
+    vault_cluster_port: int
+    vault_tls_server_name: str
+    vault_tls_certificate_ref: str
+    vault_tls_private_key_ref: str
+    github_repository: str
+    github_environment: str
+    github_oidc_audience: str
+    source: Path
+
+
+@dataclass(frozen=True, slots=True)
 class BridgeRelation:
     routing_key: str
     entry: str
@@ -174,6 +195,7 @@ class DesiredState:
     environment_common: CommonConfig
     node_common: dict[str, CommonConfig]
     environment: Environment
+    platform: Platform | None
     fleets: tuple[Fleet, ...]
     nodes: tuple[LogicalNode, ...]
     instances: tuple[Instance, ...]

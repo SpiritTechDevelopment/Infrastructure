@@ -17,6 +17,7 @@ from fleetctl.model import (
     Fleet,
     Instance,
     LogicalNode,
+    Platform,
     common_from_values,
 )
 
@@ -24,9 +25,10 @@ from .issues import ValidationIssue
 
 
 API_VERSION = "spiritvpn.io/v1alpha1"
-KINDS = ("Environment", "Fleet", "LogicalNode", "Instance")
+KINDS = ("Environment", "Platform", "Fleet", "LogicalNode", "Instance")
 SCHEMA_FILES = {
     "Environment": "environment.schema.json",
+    "Platform": "platform.schema.json",
     "Fleet": "fleet.schema.json",
     "LogicalNode": "logical-node.schema.json",
     "Instance": "instance.schema.json",
@@ -207,6 +209,26 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 secret_kv=spec["secret_store"]["kv"],
                 secret_pki=spec["secret_store"]["pki"],
                 common_overrides=spec.get("common_overrides", {}),
+                source=path,
+            )
+        case "Platform":
+            return Platform(
+                object_id=object_id,
+                environment=spec["environment"],
+                public_address=spec["public_address"],
+                provider_name=spec["provider"]["name"],
+                provider_resource_id=spec["provider"]["resource_id"],
+                bootstrap_user=spec["ssh"]["bootstrap_user"],
+                runtime_user=spec["ssh"]["runtime_user"],
+                host_key_fingerprints=tuple(spec["ssh"]["host_key_fingerprints"]),
+                vault_api_port=spec["vault"]["api_port"],
+                vault_cluster_port=spec["vault"]["cluster_port"],
+                vault_tls_server_name=spec["vault"]["tls_server_name"],
+                vault_tls_certificate_ref=spec["vault"]["tls_certificate_ref"],
+                vault_tls_private_key_ref=spec["vault"]["tls_private_key_ref"],
+                github_repository=spec["github_actions"]["repository"],
+                github_environment=spec["github_actions"]["environment"],
+                github_oidc_audience=spec["github_actions"]["oidc_audience"],
                 source=path,
             )
         case "Fleet":

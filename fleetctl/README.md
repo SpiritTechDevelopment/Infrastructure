@@ -15,6 +15,8 @@ fleetctl plan --environment develop --source HEAD --output build/develop
 fleetctl ansible-check --environment develop --build-dir build/develop
 fleetctl provisioning-check --environment develop
 fleetctl deploy --environment develop --source HEAD
+fleetctl platform-render --environment develop --output build/platform/develop
+fleetctl platform-check --environment develop --build-dir build/platform/develop
 ```
 
 `plan` resolves its normal baseline from
@@ -68,3 +70,32 @@ deployment code does not call it.
 Node plans are infrastructure topology projections, not backend manifests or
 `infraagent.v1` requests. They contain secret references, never resolved secret
 values.
+
+## Manual platform bootstrap
+
+The first management host is intentionally a separate one-time contour. A
+`Platform` descriptor compiles into a non-secret plan plus bootstrap/runtime
+inventories. Vault is pinned by digest, TLS is mandatory, and its API is bound
+to loopback for access through a host-key-pinned SSH tunnel from the temporary
+GitHub-hosted Actions runner.
+
+```bash
+make fleet-platform-check ENVIRONMENT=develop
+make fleet-platform-bootstrap ENVIRONMENT=develop APPLY=1 \
+  PLATFORM_BOOTSTRAP_VARS=/protected/platform-bootstrap.yml
+```
+
+The apply target installs and starts Vault but never runs `vault operator init`,
+unseals Vault, stores recovery material, writes secrets, configures GitHub OIDC,
+or moves a deployment ref. Those are explicit handoff gates. The protected vars
+must acknowledge the independently verified SSH host key, contain reviewed SSH
+public keys/source CIDRs, and resolve only the two bootstrap TLS references.
+
+After the manual ceremony, `.github/workflows/platform-readiness.yml` can run
+from a GitHub-hosted runner. Each GitHub Environment must provide
+`PLATFORM_SSH_PRIVATE_KEY` and a pre-reviewed `PLATFORM_SSH_KNOWN_HOSTS` entry.
+The workflow never calls `ssh-keyscan`: fleetctl hashes the supplied public host
+key and requires it to match a fingerprint committed in the `Platform`
+descriptor before Ansible is allowed to connect. The current workflow is
+read-only; GitHub OIDC configuration and secret resolution remain the next
+handoff increment.

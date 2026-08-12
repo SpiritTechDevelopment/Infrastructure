@@ -1,0 +1,43 @@
+---
+- name: Verify the v1 management foundation from GitHub Actions
+  hosts: spiritvpn_platform
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    spiritvpn_platform_plan_mode: runtime
+  pre_tasks:
+    - name: Load and validate the compiled runtime platform plan
+      ansible.builtin.include_role:
+        name: compiled_platform_plan
+  tasks:
+    - name: Read Vault status inside the loopback-only container
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ platform_vault_dir }}/compose.yml"
+          - exec
+          - -T
+          - -e
+          - "VAULT_ADDR=https://127.0.0.1:{{ platform_vault_api_port }}"
+          - -e
+          - "VAULT_CACERT=/vault/tls/vault.crt"
+          - -e
+          - "VAULT_TLS_SERVER_NAME={{ platform_vault_tls_server_name }}"
+          - vault
+          - vault
+          - status
+          - -format=json
+      register: _platform_vault_runtime_status
+      changed_when: false
+      failed_when: _platform_vault_runtime_status.rc not in [0, 2]
+
+    - name: Require initialized and unsealed Vault after handoff
+      ansible.builtin.assert:
+        that:
+          - (_platform_vault_runtime_status.stdout | from_json).initialized | bool
+          - not ((_platform_vault_runtime_status.stdout | from_json).sealed | bool)
+        fail_msg: "Vault is not initialized and unsealed; GitHub automation remains fail-closed."

@@ -12,6 +12,7 @@ from .objects import (
     LogicalNode,
     NetworkingConfig,
     ObservabilityConfig,
+    Platform,
     RolloutConfig,
     XrayConfig,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "LogicalNode",
     "NetworkingConfig",
     "ObservabilityConfig",
+    "Platform",
     "RolloutConfig",
     "XrayConfig",
     "CommonOverrideError",

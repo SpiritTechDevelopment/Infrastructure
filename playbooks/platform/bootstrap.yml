@@ -1,0 +1,18 @@
+---
+- name: Install the v1 management foundation from a generated platform plan
+  hosts: spiritvpn_platform_bootstrap
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Load and validate the compiled platform plan
+      ansible.builtin.include_role:
+        name: compiled_platform_plan
+  roles:
+    - role: docker
+    - role: common
+    - role: platform_vault
+
+- name: Verify the installed Vault process without initializing or unsealing it
+  ansible.builtin.import_playbook: readiness.yml

@@ -110,6 +110,7 @@ vless://<client_uuid>@<address>:<port>
 
 ```text
 Environment                     develop | staging | prod
+├── Platform                    management host, Vault и runner trust
 └── Fleet                       набор нод, который видит один клиент
     ├── LogicalNode             стабильная публичная личность
     │   └── Instance            заменяемый исполнитель
@@ -131,6 +132,21 @@ Environment                     develop | staging | prod
 - метки и цели мониторинга.
 
 Членство во флоте, bridge-связи и ссылки на секреты между окружениями ЗАПРЕЩЕНЫ.
+
+### 3.2.1. Platform
+
+Однократная bootstrap-цель management-плоскости окружения. Хранит только
+несекретные данные вручную созданного management host: provider resource ID,
+публичный адрес, проверенные SSH fingerprints, Vault TLS secret references и
+GitHub Actions trust identity. Platform не несёт клиентский трафик и не входит
+ни в один Fleet.
+
+До появления выделенного management runner GitHub-hosted runner МОЖЕТ
+использоваться как временный исполнитель только через GitHub Environment,
+environment lock и pinned SSH host key. Операции с Vault secrets дополнительно
+ОБЯЗАНЫ использовать краткоживущую Vault OIDC identity.
+Vault API при этом ОБЯЗАН оставаться loopback-only и достигаться через SSH
+transport. Статические Vault tokens в GitHub ЗАПРЕЩЕНЫ.
 
 ### 3.3. Fleet
 
@@ -376,7 +392,7 @@ reality:
 
 ```yaml
 apiVersion: spiritvpn.io/v1alpha1
-kind: <Environment|Fleet|LogicalNode|Instance>
+kind: <Environment|Platform|Fleet|LogicalNode|Instance>
 metadata:
   id: <идентификатор>
 spec:
@@ -526,6 +542,8 @@ fleetctl render   --environment <env> --output build/<env>
 fleetctl plan     --environment <env>
 fleetctl deploy   --environment <env>
 fleetctl status   --environment <env>
+fleetctl platform-render --environment <env> --output build/platform/<env>
+fleetctl platform-check  --environment <env> --build-dir build/platform/<env>
 ```
 
 ### 7.2. Артефакты
@@ -538,6 +556,11 @@ build/<environment>/
 ├── dns-plan.json
 ├── monitoring-targets.json
 └── impact-plan.json
+
+build/platform/<environment>/
+├── platform-plan.json
+├── platform-bootstrap-inventory.json
+└── platform-inventory.json
 ```
 
 - артефакты — разные проекции одной типизированной модели; дублировать
