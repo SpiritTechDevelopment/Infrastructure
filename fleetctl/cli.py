@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from fleetctl.adapters import (
 )
 from fleetctl.compiler import render_files
 from fleetctl.planning import PlanningError, build_impact_plan, build_initial_baseline
+from fleetctl.provisioning import ManualProvisioningAdapter
 from fleetctl.validation import DesiredStateInvalid, validate_environment
 
 
@@ -55,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ansible_check.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
     ansible_check.add_argument("--build-dir", required=True, type=Path)
+    provisioning_check = commands.add_parser(
+        "provisioning-check",
+        help="run provider-neutral manual provisioning preflight without external actions",
+    )
+    provisioning_check.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
     return parser
 
 
@@ -172,6 +179,27 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"{args.environment}: generated Ansible input valid ({host_count} host(s))")
         return 0
+    if args.command == "provisioning-check":
+        try:
+            state = validate_environment(args.root, args.environment)
+        except DesiredStateInvalid as exc:
+            for issue in exc.issues:
+                print(issue.render(), file=sys.stderr)
+            return 1
+        adapter = ManualProvisioningAdapter()
+        reports = [
+            adapter.preflight(instance)
+            for instance in sorted(state.instances, key=lambda item: item.object_id)
+        ]
+        payload = {
+            "_notice": "GENERATED — DO NOT EDIT",
+            "schema_version": 1,
+            "environment": args.environment,
+            "passed": all(report.passed for report in reports),
+            "instances": [report.to_dict() for report in reports],
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if payload["passed"] else 1
     raise AssertionError(f"unreachable command: {args.command}")
 
 

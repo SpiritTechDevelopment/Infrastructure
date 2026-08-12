@@ -76,6 +76,9 @@ fleet-configure: fleet-ansible-check ## Apply compiled configure; requires APPLY
 	@test -n "$(COMPILED_SECRETS)" || (echo 'COMPILED_SECRETS is required for protected secret resolution' >&2; exit 2)
 	ansible-playbook -i "build/$(or $(ENVIRONMENT),develop)/ansible-inventory.json" playbooks/deploy/configure.yml --extra-vars "@$(COMPILED_SECRETS)"
 
+fleet-provisioning-check: ## Validate manual VPS declarations; never calls provider APIs
+	python3 -m fleetctl.cli provisioning-check --environment "$(or $(ENVIRONMENT),develop)"
+
 deps: ## Check local controller prerequisites (no external collections required)
 	@python3 -c 'import ansible,sys; parts=tuple(int(x) for x in ansible.__version__.split(".")[:2]); sys.exit("ansible-core >=2.18,<2.19 required; found " + ansible.__version__) if parts != (2,18) else print("ansible-core", ansible.__version__, "OK")'
 	@for cmd in ansible-playbook ansible-inventory python3 curl openssl timeout; do command -v "$$cmd" >/dev/null || { echo "$$cmd is required" >&2; exit 2; }; done
@@ -218,7 +221,7 @@ certs: ## Obtain/renew certificates; LIMIT defaults to control-1
 dns: decrypt ## Reconcile Cloudflare DNS from the inventory (plan; APPLY=1 to apply)
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
 
-.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
+.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
 	backend-staging \
 	platform wire apply-node check-node api-ping api-list api-emails api-has api-add api-remove api-stats \
 	gen-client smoke-via reconcile management certs dns
