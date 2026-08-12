@@ -7,11 +7,13 @@ import sys
 from pathlib import Path
 
 from fleetctl.adapters import (
+    CompiledArtifactsError,
     GitAdapterError,
     GitRepository,
     OutputDirectoryError,
     write_generated_artifact,
     write_rendered_files,
+    validate_ansible_artifacts,
 )
 from fleetctl.compiler import render_files
 from fleetctl.planning import PlanningError, build_impact_plan, build_initial_baseline
@@ -47,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     expected = update_ref.add_mutually_exclusive_group(required=True)
     expected.add_argument("--expected-baseline-git-sha")
     expected.add_argument("--initial", action="store_true")
+    ansible_check = commands.add_parser(
+        "ansible-check",
+        help="validate generated inventory and node-plan inputs without SSH",
+    )
+    ansible_check.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    ansible_check.add_argument("--build-dir", required=True, type=Path)
     return parser
 
 
@@ -155,6 +163,14 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"{repository.deployment_ref(args.environment)} atomically updated to {source_git_sha}"
         )
+        return 0
+    if args.command == "ansible-check":
+        try:
+            host_count = validate_ansible_artifacts(args.build_dir, args.environment)
+        except CompiledArtifactsError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(f"{args.environment}: generated Ansible input valid ({host_count} host(s))")
         return 0
     raise AssertionError(f"unreachable command: {args.command}")
 

@@ -102,16 +102,13 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(list(entry_hosts), ["develop-entry-nl-01"])
         self.assertEqual(list(exit_hosts), ["develop-exit-de-01"])
         self.assertEqual(
-            entry_hosts["develop-entry-nl-01"]["spiritvpn_agent_endpoint"],
-            "10.80.1.11:9443",
+            entry_hosts["develop-entry-nl-01"]["spiritvpn_node_plan_file"],
+            "node-plans/develop-entry-nl-01.json",
         )
-        self.assertEqual(entry_hosts["develop-entry-nl-01"]["spiritvpn_management_mtu"], 1420)
-        self.assertEqual(entry_hosts["develop-entry-nl-01"]["node_limits_egress_limit_mbps"], 900)
         self.assertEqual(
-            entry_hosts["develop-entry-nl-01"]["node_limits_flow_isolation"],
-            "dual-dsthost",
+            set(entry_hosts["develop-entry-nl-01"]),
+            {"ansible_host", "spiritvpn_node_plan_file"},
         )
-        self.assertEqual(exit_hosts["develop-exit-de-01"]["node_limits_flow_isolation"], "flows")
 
     def test_entry_plan_contains_stable_logical_exit_projection(self) -> None:
         files = render_files(self.state)
@@ -123,6 +120,14 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(
             plan["logical_node"]["reality"]["private_key_ref"],
             "secret://kv/develop/nodes/develop-entry-nl/reality#private_key",
+        )
+        self.assertEqual(
+            plan["logical_node"]["mask"]["certificate_ref"],
+            "secret://kv/develop/nodes/develop-entry-nl/mask#fullchain",
+        )
+        self.assertEqual(
+            bridge["service_credential_ref"],
+            "secret://kv/develop/bridges/develop-entry-nl.to-develop-exit-de#service_uuid",
         )
         self.assertEqual(plan["instance"]["bandwidth"]["egress_limit_mbps"], 900)
         self.assertEqual(plan["instance"]["bandwidth"]["qdisc"]["flow_isolation"], "dual-dsthost")
@@ -148,18 +153,9 @@ class RenderingTests(unittest.TestCase):
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             files = render_files(state)
 
-        inventory = json.loads(files["ansible-inventory.json"])
-        groups = inventory["all"]["children"]["spiritvpn_fleet"]["children"]
-        self.assertEqual(
-            groups["entry"]["hosts"]["develop-entry-nl-01"]["spiritvpn_agent_endpoint"],
-            "10.80.1.11:9555",
-        )
-        self.assertEqual(
-            groups["exit"]["hosts"]["develop-exit-de-01"]["spiritvpn_agent_endpoint"],
-            "10.80.2.11:9443",
-        )
         node_plan = json.loads(files["node-plans/develop-entry-nl-01.json"])
         self.assertEqual(node_plan["infrastructure"]["components"]["xray"]["digest"], "sha256:" + "f" * 64)
+        self.assertEqual(node_plan["instance"]["agent"]["endpoint"], "10.80.1.11:9555")
         monitoring = json.loads(files["monitoring-targets.json"])
         entry_exporter = next(
             target

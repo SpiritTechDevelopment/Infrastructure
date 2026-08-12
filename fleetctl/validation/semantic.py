@@ -259,6 +259,7 @@ def _validate_instances(state: DesiredState, issues: list[ValidationIssue]) -> N
 
 
 def _validate_fleets(state: DesiredState, issues: list[ValidationIssue]) -> None:
+    env = state.environment.object_id
     nodes = {node.object_id: node for node in state.nodes}
     membership: Counter[str] = Counter()
     for fleet in state.fleets:
@@ -283,6 +284,14 @@ def _validate_fleets(state: DesiredState, issues: list[ValidationIssue]) -> None
         routing_keys: set[str] = set()
         pairs: set[tuple[str, str]] = set()
         for bridge in fleet.bridges:
+            if not bridge.service_credential_ref.startswith(f"secret://kv/{env}/bridges/"):
+                issues.append(
+                    ValidationIssue.at(
+                        fleet.source,
+                        "SECRET_ENV",
+                        f"bridge credential reference {bridge.routing_key!r} belongs to another environment",
+                    )
+                )
             if bridge.routing_key in routing_keys:
                 issues.append(ValidationIssue.at(fleet.source, "BRIDGE_KEY", f"duplicate routing_key {bridge.routing_key!r}"))
             routing_keys.add(bridge.routing_key)
@@ -314,6 +323,15 @@ def _validate_secrets_and_public_identity(state: DesiredState, issues: list[Vali
     for node in state.nodes:
         if not node.private_key_ref.startswith(f"secret://kv/{env}/"):
             issues.append(ValidationIssue.at(node.source, "SECRET_ENV", "REALITY private key reference belongs to another environment"))
+        for reference in (node.mask_certificate_ref, node.mask_private_key_ref):
+            if not reference.startswith(f"secret://kv/{env}/"):
+                issues.append(
+                    ValidationIssue.at(
+                        node.source,
+                        "SECRET_ENV",
+                        "mask certificate reference belongs to another environment",
+                    )
+                )
         if node.hostname == node.object_id or node.hostname.startswith(f"{node.object_id}."):
             issues.append(ValidationIssue.at(node.source, "PUBLIC_NAME", "public hostname must not be derived directly from node_id"))
         hostname_in_zone = node.hostname == state.environment.dns_zone or node.hostname.endswith(

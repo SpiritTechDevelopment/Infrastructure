@@ -123,6 +123,7 @@ class BridgeRelation:
     entry: str
     exit: str
     display_name: str
+    service_credential_ref: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +150,8 @@ class LogicalNode:
     reality_public_key: str
     reality_short_id: str
     private_key_ref: str
+    mask_certificate_ref: str
+    mask_private_key_ref: str
     common_overrides: dict[str, Any]
     source: Path
 

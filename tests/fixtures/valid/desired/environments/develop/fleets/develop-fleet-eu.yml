@@ -10,3 +10,4 @@ spec:
       entry: develop-entry-nl
       exit: develop-exit-de
       display_name: Netherlands via Germany
+      service_credential_ref: secret://kv/develop/bridges/develop-entry-nl.to-develop-exit-de#service_uuid

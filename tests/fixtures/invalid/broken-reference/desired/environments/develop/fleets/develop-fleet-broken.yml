@@ -10,3 +10,4 @@ spec:
       entry: develop-entry-missing
       exit: develop-exit-missing
       display_name: Broken fixture
+      service_credential_ref: secret://kv/develop/bridges/develop-entry-missing.to-develop-exit-missing#service_uuid

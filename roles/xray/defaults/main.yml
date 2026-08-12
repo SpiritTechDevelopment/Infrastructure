@@ -47,6 +47,7 @@ reality_dest: "{{ mask_bind_address }}:{{ mask_port }}"
 reality_server_names: []
 reality_short_ids: []
 reality_private_key: ""
+xray_require_supplied_reality_key: false
 
 # Infrastructure/service identities only. Customer users are added at runtime.
 xray_static_clients: []
@@ -56,6 +57,10 @@ xray_static_clients: []
 entry_exits: []
 entry_default_exit_tag: ""
 xray_entry_block_unmatched: true
+xray_manage_routing_via_agent: false
+xray_inbound_tag: vless-in
+xray_direct_outbound_tag: direct
+xray_block_outbound_tag: block
 
 xray_domain_strategy: AsIs
 xray_dns_servers: []

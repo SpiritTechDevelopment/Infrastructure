@@ -20,6 +20,9 @@ SSH_KEY ?=
 ANSIBLE_EXTRA_ARGS ?=
 SOURCE ?= HEAD
 INITIAL ?= 0
+CONNECT ?= 0
+APPLY ?= 0
+COMPILED_SECRETS ?=
 
 # SOPS-encrypted deploy secrets (committed) and their decrypted form (gitignored).
 # `make decrypt` materializes the plaintext; deploy targets depend on it and pass
@@ -57,6 +60,21 @@ fleet-render: ## Render local artifacts; ENVIRONMENT=develop by default
 
 fleet-plan: ## Plan SOURCE=HEAD against deployment ref; INITIAL=1 only for first deploy
 	python3 -m fleetctl.cli plan --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(BASELINE),--baseline "$(BASELINE)",$(if $(filter 1 yes true,$(INITIAL)),--initial,)) --output "build/$(or $(ENVIRONMENT),develop)"
+
+fleet-ansible-check: ## Validate compiled inventory/node plans locally; never connects
+	python3 -m fleetctl.cli ansible-check --environment "$(or $(ENVIRONMENT),develop)" --build-dir "build/$(or $(ENVIRONMENT),develop)"
+	@if command -v ansible-inventory >/dev/null; then ansible-inventory -i "build/$(or $(ENVIRONMENT),develop)/ansible-inventory.json" --list >/dev/null; else echo 'ansible-inventory unavailable; parser check skipped' >&2; fi
+
+fleet-configure-check: fleet-ansible-check ## Local check by default; CONNECT=1 enables SSH --check
+	@if [ "$(CONNECT)" = 1 ]; then \
+	  command -v ansible-playbook >/dev/null || { echo 'ansible-playbook is required for CONNECT=1' >&2; exit 2; }; \
+	  ansible-playbook -i "build/$(or $(ENVIRONMENT),develop)/ansible-inventory.json" playbooks/deploy/configure.yml --check --diff $(if $(COMPILED_SECRETS),--extra-vars "@$(COMPILED_SECRETS)",); \
+	else echo 'local compiled-artifact checks complete; no SSH attempted (set CONNECT=1 explicitly)'; fi
+
+fleet-configure: fleet-ansible-check ## Apply compiled configure; requires APPLY=1 and COMPILED_SECRETS=file
+	@test "$(APPLY)" = 1 || (echo 'refusing SSH/mutation: set APPLY=1 explicitly' >&2; exit 2)
+	@test -n "$(COMPILED_SECRETS)" || (echo 'COMPILED_SECRETS is required for protected secret resolution' >&2; exit 2)
+	ansible-playbook -i "build/$(or $(ENVIRONMENT),develop)/ansible-inventory.json" playbooks/deploy/configure.yml --extra-vars "@$(COMPILED_SECRETS)"
 
 deps: ## Check local controller prerequisites (no external collections required)
 	@python3 -c 'import ansible,sys; parts=tuple(int(x) for x in ansible.__version__.split(".")[:2]); sys.exit("ansible-core >=2.18,<2.19 required; found " + ansible.__version__) if parts != (2,18) else print("ansible-core", ansible.__version__, "OK")'
@@ -200,7 +218,7 @@ certs: ## Obtain/renew certificates; LIMIT defaults to control-1
 dns: decrypt ## Reconcile Cloudflare DNS from the inventory (plan; APPLY=1 to apply)
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
 
-.PHONY: help fleet-validate fleet-test fleet-render fleet-plan deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
+.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
 	backend-staging \
 	platform wire apply-node check-node api-ping api-list api-emails api-has api-add api-remove api-stats \
 	gen-client smoke-via reconcile management certs dns

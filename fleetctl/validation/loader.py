@@ -220,6 +220,7 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                         entry=bridge["entry"],
                         exit=bridge["exit"],
                         display_name=bridge["display_name"],
+                        service_credential_ref=bridge["service_credential_ref"],
                     )
                     for bridge in spec["bridges"]
                 ),
@@ -240,6 +241,8 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 reality_public_key=spec["reality"]["public_key"],
                 reality_short_id=spec["reality"]["short_id"],
                 private_key_ref=spec["reality"]["private_key_ref"],
+                mask_certificate_ref=spec["mask"]["certificate_ref"],
+                mask_private_key_ref=spec["mask"]["private_key_ref"],
                 common_overrides=spec.get("common_overrides", {}),
                 source=path,
             )

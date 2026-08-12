@@ -1,4 +1,15 @@
 ---
+- name: Require the compiled logical-node REALITY identity
+  ansible.builtin.assert:
+    that:
+      - reality_private_key | trim | length == 43
+      - reality_private_key | trim is match('^[A-Za-z0-9_-]{43}$')
+    fail_msg: >-
+      Compiled deployments must resolve the logical-node REALITY private-key
+      reference before configuring Xray; generating an instance-local replacement is forbidden.
+  when: xray_require_supplied_reality_key | bool
+  no_log: true
+
 - name: Ensure Xray config directory
   ansible.builtin.file:
     path: "{{ xray_config_dir }}"

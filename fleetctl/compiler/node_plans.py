@@ -30,6 +30,7 @@ def compile_node_plans(state: DesiredState) -> dict[str, dict[str, Any]]:
         bandwidth = common.limits.bandwidth_profiles[instance.bandwidth_profile]
         address = management_address(state.environment, node, instance)
         plans[instance.object_id] = {
+            "_notice": "GENERATED — DO NOT EDIT",
             "schema_version": 1,
             "environment": state.environment.object_id,
             "infrastructure": common_values(common),
@@ -55,12 +56,17 @@ def compile_node_plans(state: DesiredState) -> dict[str, dict[str, Any]]:
                     "short_id": node.reality_short_id,
                     "private_key_ref": node.private_key_ref,
                 },
+                "mask": {
+                    "certificate_ref": node.mask_certificate_ref,
+                    "private_key_ref": node.mask_private_key_ref,
+                },
             },
             "instance": {
                 "id": instance.object_id,
                 "target_state": instance.target_state,
                 "public_address": instance.public_address,
                 "management_address": address,
+                "management_network": state.environment.management_network,
                 "bandwidth": {
                     "profile": instance.bandwidth_profile,
                     "port_capacity_mbps": bandwidth.port_capacity_mbps,
@@ -126,6 +132,7 @@ def _routing_projection(
             as_entry.append(
                 {
                     "routing_key": bridge.routing_key,
+                    "service_credential_ref": bridge.service_credential_ref,
                     "exit_node_id": exit_node.object_id,
                     "egress_tag": tag,
                     "target": {
@@ -145,6 +152,7 @@ def _routing_projection(
             as_exit.append(
                 {
                     "routing_key": bridge.routing_key,
+                    "service_credential_ref": bridge.service_credential_ref,
                     "entry_node_id": bridge.entry,
                     "egress_tag": f"{xray.exit_outbound_prefix}{node.object_id}",
                 }

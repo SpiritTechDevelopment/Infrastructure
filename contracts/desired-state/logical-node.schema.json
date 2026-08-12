@@ -17,7 +17,7 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["role", "region", "public", "reality", "display_name"],
+      "required": ["role", "region", "public", "reality", "mask", "display_name"],
       "properties": {
         "role": {"enum": ["entry", "exit"]},
         "region": {"type": "string", "minLength": 2, "maxLength": 16, "pattern": "^[a-z0-9-]+$"},
@@ -42,6 +42,21 @@
             "public_key": {"type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"},
             "short_id": {"type": "string", "minLength": 2, "maxLength": 16, "pattern": "^[0-9a-f]+$"},
             "private_key_ref": {"type": "string", "pattern": "^secret://kv/(develop|staging|prod)/nodes/[a-z0-9-]+/reality#private_key$"}
+          }
+        },
+        "mask": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["certificate_ref", "private_key_ref"],
+          "properties": {
+            "certificate_ref": {
+              "type": "string",
+              "pattern": "^secret://kv/(develop|staging|prod)/nodes/[a-z0-9-]+/mask#fullchain$"
+            },
+            "private_key_ref": {
+              "type": "string",
+              "pattern": "^secret://kv/(develop|staging|prod)/nodes/[a-z0-9-]+/mask#private_key$"
+            }
           }
         },
         "display_name": {"type": "string", "minLength": 1, "maxLength": 128},

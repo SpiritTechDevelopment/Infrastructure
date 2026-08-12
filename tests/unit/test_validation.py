@@ -181,6 +181,30 @@ class DesiredStateValidationTests(unittest.TestCase):
         )
         self.assertIn("SECRET_ENV", codes)
 
+    def test_cross_environment_mask_secret_is_rejected(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["mask"]["certificate_ref"] = (
+                "secret://kv/prod/nodes/develop-entry-nl/mask#fullchain"
+            )
+
+        codes = self.validate_mutated_fixture(
+            "environments/develop/nodes/develop-entry-nl.yml",
+            mutate,
+        )
+        self.assertIn("SECRET_ENV", codes)
+
+    def test_cross_environment_bridge_secret_is_rejected(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["bridges"][0]["service_credential_ref"] = (
+                "secret://kv/prod/bridges/develop-entry-nl.to-develop-exit-de#service_uuid"
+            )
+
+        codes = self.validate_mutated_fixture(
+            "environments/develop/fleets/develop-fleet-eu.yml",
+            mutate,
+        )
+        self.assertIn("SECRET_ENV", codes)
+
     def test_plaintext_secret_shaped_field_is_rejected_by_schema(self) -> None:
         def mutate(document: dict[str, object]) -> None:
             reality = document["spec"]["reality"]

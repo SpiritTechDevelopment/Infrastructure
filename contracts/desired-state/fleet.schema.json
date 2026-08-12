@@ -22,12 +22,16 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["routing_key", "entry", "exit", "display_name"],
+            "required": ["routing_key", "entry", "exit", "display_name", "service_credential_ref"],
             "properties": {
               "routing_key": {"type": "string", "maxLength": 63, "pattern": "^[a-z0-9-]+\\.to-[a-z0-9-]+$"},
               "entry": {"$ref": "#/$defs/id"},
               "exit": {"$ref": "#/$defs/id"},
-              "display_name": {"type": "string", "minLength": 1, "maxLength": 128}
+              "display_name": {"type": "string", "minLength": 1, "maxLength": 128},
+              "service_credential_ref": {
+                "type": "string",
+                "pattern": "^secret://kv/(develop|staging|prod)/bridges/[a-z0-9.-]+#service_uuid$"
+              }
             }
           }
         }

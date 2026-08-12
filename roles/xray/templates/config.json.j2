@@ -50,7 +50,7 @@
       "listen": "0.0.0.0",
       "port": {{ xray_listen_port }},
       "protocol": "vless",
-      "tag": "vless-in",
+      "tag": "{{ xray_inbound_tag }}",
       "settings": {
         "clients": [
 {% for client in xray_static_clients %}
@@ -96,7 +96,7 @@
             "users": [
               {
                 "id": "{{ exit.uuid }}",
-                "flow": "xtls-rprx-vision",
+                "flow": "{{ exit.flow | default('xtls-rprx-vision') }}",
                 "encryption": "none"
               }
             ]
@@ -116,8 +116,8 @@
     },
 {% endfor %}
 {% endif %}
-    { "protocol": "freedom", "tag": "direct" },
-    { "protocol": "blackhole", "tag": "block" }
+    { "protocol": "freedom", "tag": "{{ xray_direct_outbound_tag }}" },
+    { "protocol": "blackhole", "tag": "{{ xray_block_outbound_tag }}" }
   ],
   "routing": {
     "domainStrategy": "{{ xray_domain_strategy }}",
@@ -125,18 +125,20 @@
 {% if xray_enable_api | bool %}
       { "type": "field", "inboundTag": ["api"], "outboundTag": "api" },
 {% endif %}
-      { "type": "field", "ip": ["geoip:private"], "outboundTag": "block" }
+      { "type": "field", "ip": ["geoip:private"], "outboundTag": "{{ xray_block_outbound_tag }}" }
 {% if xray_block_domains | length > 0 %}
       ,{ "type": "field", "domain": {{ xray_block_domains | to_json }}, "outboundTag": "block" }
 {% endif %}
 {% if node_role == 'entry' %}
+{% if not (xray_manage_routing_via_agent | bool) %}
 {% for exit in entry_exits %}
       ,{ "type": "field", "user": ["{{ exit.email }}"], "outboundTag": "{{ exit.tag }}" }
 {% endfor %}
+{% endif %}
 {% if entry_default_exit_tag | length > 0 %}
-      ,{ "type": "field", "inboundTag": ["vless-in"], "outboundTag": "{{ entry_default_exit_tag }}" }
+      ,{ "type": "field", "inboundTag": ["{{ xray_inbound_tag }}"], "outboundTag": "{{ entry_default_exit_tag }}" }
 {% elif xray_entry_block_unmatched | bool %}
-      ,{ "type": "field", "inboundTag": ["vless-in"], "outboundTag": "block" }
+      ,{ "type": "field", "inboundTag": ["{{ xray_inbound_tag }}"], "outboundTag": "{{ xray_block_outbound_tag }}" }
 {% endif %}
 {% endif %}
     ]
