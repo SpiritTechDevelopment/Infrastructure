@@ -17,6 +17,7 @@ from fleetctl.adapters import (
     validate_ansible_artifacts,
 )
 from fleetctl.compiler import render_files
+from fleetctl.deployment import DeploymentCoordinator, DeploymentError, DeploymentOptions
 from fleetctl.planning import PlanningError, build_impact_plan, build_initial_baseline
 from fleetctl.provisioning import ManualProvisioningAdapter
 from fleetctl.validation import DesiredStateInvalid, validate_environment
@@ -62,6 +63,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="run provider-neutral manual provisioning preflight without external actions",
     )
     provisioning_check.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    deploy = commands.add_parser(
+        "deploy",
+        help="run infrastructure workflow; dry-run is the default and stops at WAITING_FOR_BACKEND",
+    )
+    deploy.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    deploy.add_argument("--source", default="HEAD")
+    deploy.add_argument("--initial", action="store_true")
+    deploy.add_argument("--apply", action="store_true", help="explicitly allow Ansible SSH/mutation")
+    deploy.add_argument("--resume", action="store_true")
+    deploy.add_argument("--build-dir", type=Path)
+    deploy.add_argument("--bootstrap-vars", type=Path)
+    deploy.add_argument("--compiled-secrets", type=Path)
+    deploy.add_argument("--readiness-vars", type=Path)
     return parser
 
 
@@ -200,6 +214,26 @@ def main(argv: list[str] | None = None) -> int:
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if payload["passed"] else 1
+    if args.command == "deploy":
+        try:
+            record = DeploymentCoordinator(args.root).run(
+                DeploymentOptions(
+                    environment=args.environment,
+                    source=args.source,
+                    initial=args.initial,
+                    apply=args.apply,
+                    resume=args.resume,
+                    build_directory=args.build_dir,
+                    bootstrap_vars=args.bootstrap_vars,
+                    compiled_secrets=args.compiled_secrets,
+                    readiness_vars=args.readiness_vars,
+                )
+            )
+        except (DeploymentError, GitAdapterError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     raise AssertionError(f"unreachable command: {args.command}")
 
 
