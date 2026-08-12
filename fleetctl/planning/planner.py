@@ -24,7 +24,14 @@ AFFECTED_KEYS = (
 )
 
 
-def build_impact_plan(current: DesiredState, baseline: DesiredState) -> ImpactPlan:
+def build_impact_plan(
+    current: DesiredState,
+    baseline: DesiredState,
+    *,
+    source_git_sha: str | None = None,
+    baseline_git_sha: str | None = None,
+    initial_deployment: bool = False,
+) -> ImpactPlan:
     _check_stability_preconditions(current, baseline)
     current_data = canonical_state(current)
     baseline_data = canonical_state(baseline)
@@ -285,11 +292,29 @@ def build_impact_plan(current: DesiredState, baseline: DesiredState) -> ImpactPl
     changes.sort(key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True))
     return ImpactPlan(
         environment=current.environment.object_id,
+        source_git_sha=source_git_sha,
+        baseline_git_sha=baseline_git_sha,
+        initial_deployment=initial_deployment,
         source_digest=canonical_digest(current),
         baseline_digest=canonical_digest(baseline),
         changes=tuple(changes),
         affected={key: tuple(sorted(values)) for key, values in affected.items()},
         destructive=destructive,
+    )
+
+
+def build_initial_baseline(current: DesiredState) -> DesiredState:
+    """Return an empty, environment-compatible state for an explicit first deploy."""
+
+    return DesiredState(
+        common=current.common,
+        environment_common=current.environment_common,
+        node_common={},
+        environment=current.environment,
+        fleets=(),
+        nodes=(),
+        instances=(),
+        fleet_ids={},
     )
 
 

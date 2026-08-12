@@ -18,6 +18,8 @@ ASK_PASS ?= 0
 SSH_AUTH ?= $(if $(filter 1 yes true,$(ASK_PASS)),password,auto)
 SSH_KEY ?=
 ANSIBLE_EXTRA_ARGS ?=
+SOURCE ?= HEAD
+INITIAL ?= 0
 
 # SOPS-encrypted deploy secrets (committed) and their decrypted form (gitignored).
 # `make decrypt` materializes the plaintext; deploy targets depend on it and pass
@@ -53,9 +55,8 @@ fleet-test: ## Run offline fleetctl unit tests
 fleet-render: ## Render local artifacts; ENVIRONMENT=develop by default
 	python3 -m fleetctl.cli render --environment "$(or $(ENVIRONMENT),develop)" --output "build/$(or $(ENVIRONMENT),develop)"
 
-fleet-plan: ## Plan against BASELINE=<desired-dir>; run fleet-render first
-	@test -n "$(BASELINE)" || (echo 'BASELINE is required' >&2; exit 2)
-	python3 -m fleetctl.cli plan --environment "$(or $(ENVIRONMENT),develop)" --baseline "$(BASELINE)" --output "build/$(or $(ENVIRONMENT),develop)"
+fleet-plan: ## Plan SOURCE=HEAD against deployment ref; INITIAL=1 only for first deploy
+	python3 -m fleetctl.cli plan --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(BASELINE),--baseline "$(BASELINE)",$(if $(filter 1 yes true,$(INITIAL)),--initial,)) --output "build/$(or $(ENVIRONMENT),develop)"
 
 deps: ## Check local controller prerequisites (no external collections required)
 	@python3 -c 'import ansible,sys; parts=tuple(int(x) for x in ansible.__version__.split(".")[:2]); sys.exit("ansible-core >=2.18,<2.19 required; found " + ansible.__version__) if parts != (2,18) else print("ansible-core", ansible.__version__, "OK")'
