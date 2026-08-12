@@ -85,6 +85,7 @@ class DeploymentCoordinator:
             if existing.get("source_git_sha") != source_git_sha:
                 raise DeploymentError("resume record belongs to another source commit")
             record = existing
+            record["dry_run"] = not options.apply
         else:
             record = {
                 "schema_version": 1,

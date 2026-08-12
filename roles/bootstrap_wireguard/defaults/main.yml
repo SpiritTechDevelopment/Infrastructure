@@ -7,6 +7,7 @@ bootstrap_wireguard_mtu: "{{ spiritvpn_node_plan.infrastructure.networking.manag
 bootstrap_wireguard_persistent_keepalive: "{{ spiritvpn_node_plan.infrastructure.networking.management.persistent_keepalive_seconds }}"
 bootstrap_wireguard_hub_endpoint: ""
 bootstrap_wireguard_hub_public_key: ""
+bootstrap_wireguard_hub_management_address: ""
 bootstrap_wireguard_private_key_path: "/etc/wireguard/{{ bootstrap_wireguard_interface }}.key"
 bootstrap_wireguard_public_key_path: "/etc/wireguard/{{ bootstrap_wireguard_interface }}.pub"
 bootstrap_wireguard_config_path: "/etc/wireguard/{{ bootstrap_wireguard_interface }}.conf"

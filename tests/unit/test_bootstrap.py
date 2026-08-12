@@ -19,6 +19,10 @@ class BootstrapContourTests(unittest.TestCase):
         self.assertNotIn("compiled_runtime", bootstrap)
         self.assertIn("compiled_runtime", configure)
         self.assertNotIn("bootstrap_wireguard", configure)
+        wireguard = (REPO_ROOT / "roles" / "bootstrap_wireguard" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Require management hub reachability", wireguard)
 
     def test_bootstrap_make_target_needs_explicit_apply(self) -> None:
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")

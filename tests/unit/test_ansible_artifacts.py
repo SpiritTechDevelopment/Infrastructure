@@ -70,6 +70,8 @@ class CompiledAnsibleArtifactTests(unittest.TestCase):
         self.assertNotIn("desired/", combined)
         self.assertNotIn("fleet-entries.yml", playbook)
         self.assertNotIn("fleet-exits.yml", playbook)
+        self.assertIn("common_restricted_tcp_rules", loader)
+        self.assertIn("infrastructure.networking.agent.port", loader)
 
 
 if __name__ == "__main__":

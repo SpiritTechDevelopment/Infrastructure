@@ -8,6 +8,7 @@
       - bootstrap_wireguard_hub_endpoint | length > 0
       - "':' in bootstrap_wireguard_hub_endpoint"
       - bootstrap_wireguard_hub_public_key is match('^[A-Za-z0-9+/]{43}=$')
+      - bootstrap_wireguard_hub_management_address is match('^[0-9.]+$')
     fail_msg: >-
       Bootstrap requires the management hub's public endpoint and public WireGuard key.
       No private key may be supplied from the controller.
@@ -90,3 +91,8 @@
     enabled: true
     state: started
     daemon_reload: true
+
+- name: Require management hub reachability after peer registration
+  ansible.builtin.command:
+    argv: [ping, -c, "1", -W, "5", "{{ bootstrap_wireguard_hub_management_address }}"]
+  changed_when: false

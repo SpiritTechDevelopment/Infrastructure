@@ -67,6 +67,32 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
         names = [step["name"] for step in resumed["steps"]]
         self.assertEqual(len(names), len(set(names)))
 
+    def test_explicit_apply_resume_cannot_keep_a_false_dry_run_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            coordinator = DeploymentCoordinator(repository.root)
+            coordinator.run(DeploymentOptions(environment="develop", initial=True))
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            with mock.patch.object(coordinator, "_run_ansible"):
+                resumed = coordinator.run(
+                    DeploymentOptions(
+                        environment="develop",
+                        initial=True,
+                        resume=True,
+                        apply=True,
+                        bootstrap_vars=variables["bootstrap.yml"],
+                        compiled_secrets=variables["secrets.yml"],
+                        readiness_vars=variables["readiness.yml"],
+                    )
+                )
+
+        self.assertFalse(resumed["dry_run"])
+        self.assertEqual(resumed["status"], "WAITING_FOR_BACKEND")
+
     def test_apply_requires_all_operator_inputs_before_ansible(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = self.prepare_repository(Path(temporary))
