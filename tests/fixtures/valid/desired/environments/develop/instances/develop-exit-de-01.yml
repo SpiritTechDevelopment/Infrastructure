@@ -1,0 +1,12 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: Instance
+metadata:
+  id: develop-exit-de-01
+spec:
+  logical_node: develop-exit-de
+  target_state: serving
+  public_address: 192.0.2.20
+  bandwidth_profile: vps-1g
+  provider:
+    name: manual
+    resource_id: fixture-exit-01

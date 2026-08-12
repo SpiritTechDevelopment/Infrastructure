@@ -29,6 +29,7 @@ client-*.json
 smoke-client.json
 s.sh
 generated/
+build/
 deploy-e2e.log
 support-bundle/
 # editor / patch / backup cruft — never commit (may contain secrets)

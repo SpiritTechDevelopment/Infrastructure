@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/rollout.schema.json",
+  "title": "Common rollout policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "max_parallel_logical_nodes_per_fleet", "convergence_timeout_seconds", "drain_timeout_seconds"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "max_parallel_logical_nodes_per_fleet": {"type": "integer", "minimum": 1},
+    "convergence_timeout_seconds": {"type": "integer", "minimum": 1},
+    "drain_timeout_seconds": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1},
+        {"type": "null"}
+      ]
+    }
+  }
+}

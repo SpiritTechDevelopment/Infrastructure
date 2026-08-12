@@ -44,6 +44,19 @@ API_TARGET = $(if $(ENDPOINT),$(ENDPOINT),$(NODE))
 help: ## Show targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n",$$1,$$2}'
 
+fleet-validate: ## Validate desired state for all environments without network access
+	@for environment in develop staging prod; do python3 -m fleetctl.cli validate --environment "$$environment" || exit $$?; done
+
+fleet-test: ## Run offline fleetctl unit tests
+	python3 -m unittest discover -s tests/unit -v
+
+fleet-render: ## Render local artifacts; ENVIRONMENT=develop by default
+	python3 -m fleetctl.cli render --environment "$(or $(ENVIRONMENT),develop)" --output "build/$(or $(ENVIRONMENT),develop)"
+
+fleet-plan: ## Plan against BASELINE=<desired-dir>; run fleet-render first
+	@test -n "$(BASELINE)" || (echo 'BASELINE is required' >&2; exit 2)
+	python3 -m fleetctl.cli plan --environment "$(or $(ENVIRONMENT),develop)" --baseline "$(BASELINE)" --output "build/$(or $(ENVIRONMENT),develop)"
+
 deps: ## Check local controller prerequisites (no external collections required)
 	@python3 -c 'import ansible,sys; parts=tuple(int(x) for x in ansible.__version__.split(".")[:2]); sys.exit("ansible-core >=2.18,<2.19 required; found " + ansible.__version__) if parts != (2,18) else print("ansible-core", ansible.__version__, "OK")'
 	@for cmd in ansible-playbook ansible-inventory python3 curl openssl timeout; do command -v "$$cmd" >/dev/null || { echo "$$cmd is required" >&2; exit 2; }; done
@@ -186,7 +199,7 @@ certs: ## Obtain/renew certificates; LIMIT defaults to control-1
 dns: decrypt ## Reconcile Cloudflare DNS from the inventory (plan; APPLY=1 to apply)
 	$(PLAYBOOK) -i "$(INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
 
-.PHONY: help deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
+.PHONY: help fleet-validate fleet-test fleet-render fleet-plan deps inventory ping lint syntax render check test-api-wrapper decrypt deploy verify e2e e2e-all deploy-e2e \
 	backend-staging \
 	platform wire apply-node check-node api-ping api-list api-emails api-has api-add api-remove api-stats \
 	gen-client smoke-via reconcile management certs dns

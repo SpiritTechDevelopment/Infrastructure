@@ -1,0 +1,18 @@
+schema_version: 1
+components:
+  xray:
+    repository: example.invalid/xray
+    tag: fixture
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000001
+  nginx_mask:
+    repository: example.invalid/nginx
+    tag: fixture
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000002
+  alloy:
+    repository: example.invalid/alloy
+    tag: fixture
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000003
+  node_exporter:
+    repository: example.invalid/node-exporter
+    tag: fixture
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000004

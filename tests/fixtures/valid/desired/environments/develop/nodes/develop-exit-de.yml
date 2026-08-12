@@ -1,0 +1,19 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: LogicalNode
+metadata:
+  id: develop-exit-de
+spec:
+  role: exit
+  region: de
+  public:
+    hostname: edge-b4.develop.example.invalid
+    port: 443
+    transport: tcp
+    flow: xtls-rprx-vision
+    fingerprint: chrome
+    server_name: edge-b4.develop.example.invalid
+  reality:
+    public_key: BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+    short_id: 4567cdef
+    private_key_ref: secret://kv/develop/nodes/develop-exit-de/reality#private_key
+  display_name: Germany

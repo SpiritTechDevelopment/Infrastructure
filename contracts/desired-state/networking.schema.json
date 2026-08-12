@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/networking.schema.json",
+  "title": "Common networking settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "management", "agent", "dns"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "management": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interface", "listen_port", "mtu", "persistent_keepalive_seconds"],
+      "properties": {
+        "interface": {"type": "string", "pattern": "^[a-zA-Z0-9_.-]{1,15}$"},
+        "listen_port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "mtu": {"type": "integer", "minimum": 1280, "maximum": 9000},
+        "persistent_keepalive_seconds": {"type": "integer", "minimum": 0, "maximum": 65535}
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port"],
+      "properties": {
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    },
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ttl_seconds", "proxied"],
+      "properties": {
+        "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+        "proxied": {"type": "boolean"}
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+schema_version: 1
+retention:
+  operations_days: 30
+  activity_days: 7
+ports:
+  node_exporter: 9100
+  xray_metrics: 11111
+scrape_interval_seconds: 15
+probe:
+  interval_seconds: 30
+  timeout_seconds: 5

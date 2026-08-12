@@ -1,0 +1,11 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: Environment
+metadata:
+  id: staging
+spec:
+  dns_zone: staging.example.invalid
+  management_network: 10.81.0.0/16
+  backend_endpoint: backend.staging.internal:9443
+  secret_store:
+    kv: kv/staging
+    pki: pki/staging

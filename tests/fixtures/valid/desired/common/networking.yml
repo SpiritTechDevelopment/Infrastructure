@@ -1,0 +1,11 @@
+schema_version: 1
+management:
+  interface: wg0
+  listen_port: 51820
+  mtu: 1420
+  persistent_keepalive_seconds: 25
+agent:
+  port: 9443
+dns:
+  ttl_seconds: 60
+  proxied: false

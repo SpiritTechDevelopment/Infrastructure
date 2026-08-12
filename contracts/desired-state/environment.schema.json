@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/environment-v1alpha1.json",
+  "title": "SpiritVPN Environment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "spiritvpn.io/v1alpha1"},
+    "kind": {"const": "Environment"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {"enum": ["develop", "staging", "prod"]}
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dns_zone", "management_network", "backend_endpoint", "secret_store"],
+      "properties": {
+        "dns_zone": {"type": "string", "format": "hostname", "minLength": 1, "maxLength": 253},
+        "management_network": {"type": "string", "format": "ipv4-network"},
+        "backend_endpoint": {"type": "string", "pattern": "^[A-Za-z0-9.-]+:[0-9]{1,5}$"},
+        "secret_store": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kv", "pki"],
+          "properties": {
+            "kv": {"type": "string", "pattern": "^kv/(develop|staging|prod)$"},
+            "pki": {"type": "string", "pattern": "^pki/(develop|staging|prod)$"}
+          }
+        },
+        "common_overrides": {"type": "object"}
+      }
+    }
+  }
+}

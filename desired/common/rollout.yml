@@ -1,0 +1,5 @@
+schema_version: 1
+max_parallel_logical_nodes_per_fleet: 1
+convergence_timeout_seconds: 300
+# Open architecture decision: no production drain timeout has been accepted yet.
+drain_timeout_seconds: null

@@ -1,0 +1,12 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: Instance
+metadata:
+  id: develop-entry-nl-01
+spec:
+  logical_node: develop-entry-nl
+  target_state: serving
+  public_address: 192.0.2.10
+  bandwidth_profile: vps-1g
+  provider:
+    name: manual
+    resource_id: fixture-entry-01

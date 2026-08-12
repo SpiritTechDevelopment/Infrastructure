@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/xray.schema.json",
+  "title": "Common Xray conventions",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "tags", "default_outbound_tag", "access_log"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "tags": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inbound", "direct_outbound", "block_outbound", "exit_outbound_prefix", "probe_outbound_prefix"],
+      "properties": {
+        "inbound": {"type": "string", "minLength": 1},
+        "direct_outbound": {"type": "string", "minLength": 1},
+        "block_outbound": {"type": "string", "minLength": 1},
+        "exit_outbound_prefix": {"type": "string", "minLength": 1},
+        "probe_outbound_prefix": {"type": "string", "minLength": 1}
+      }
+    },
+    "default_outbound_tag": {"type": "string", "minLength": 1},
+    "access_log": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "export_enabled"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "export_enabled": {"type": "boolean"}
+      }
+    }
+  }
+}

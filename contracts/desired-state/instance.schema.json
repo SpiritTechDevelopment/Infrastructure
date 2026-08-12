@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/instance-v1alpha1.json",
+  "title": "SpiritVPN Instance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "spiritvpn.io/v1alpha1"},
+    "kind": {"const": "Instance"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9-]+$"}}
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["logical_node", "target_state", "public_address", "bandwidth_profile", "provider"],
+      "properties": {
+        "logical_node": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9-]+$"},
+        "target_state": {"enum": ["provisioning", "candidate", "serving", "draining", "retired"]},
+        "public_address": {
+          "oneOf": [
+            {"type": "string", "format": "ipv4"},
+            {"type": "string", "format": "ipv6"}
+          ]
+        },
+        "bandwidth_profile": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "provider": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "resource_id"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[a-z0-9-]+$"},
+            "resource_id": {"type": "string", "minLength": 1, "maxLength": 256}
+          }
+        }
+      }
+    }
+  }
+}
