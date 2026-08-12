@@ -27,7 +27,9 @@ ALLOW_LEGACY ?= 0
 COMPILED_SECRETS ?=
 BOOTSTRAP_VARS ?=
 READINESS_VARS ?=
-PLATFORM_BOOTSTRAP_VARS ?=
+PLATFORM_INVENTORY ?= inventories/bootstrap/platform.yml
+PLATFORM_KNOWN_HOSTS ?= inventories/bootstrap/known_hosts
+PLATFORM_VARS ?=
 RESUME ?= 0
 
 # SOPS-encrypted deploy secrets (committed) and their decrypted form (gitignored).
@@ -102,27 +104,23 @@ fleet-bootstrap: fleet-ansible-check ## Bootstrap clean hosts; requires APPLY=1 
 fleet-deploy: ## Infrastructure coordinator; dry-run by default, APPLY=1 enables SSH
 	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",)
 
-fleet-platform-render: ## Render a local v1 platform bootstrap plan; never connects
-	python3 -m fleetctl.cli platform-render --environment "$(or $(ENVIRONMENT),develop)" --output "build/platform/$(or $(ENVIRONMENT),develop)"
-
-fleet-platform-check: fleet-platform-render ## Validate generated v1 platform inputs; never connects
-	python3 -m fleetctl.cli platform-check --environment "$(or $(ENVIRONMENT),develop)" --build-dir "build/platform/$(or $(ENVIRONMENT),develop)"
+fleet-platform-check: ## Validate the minimal bootstrap inventory; never connects
+	python3 scripts/platform-bootstrap-check.py --inventory "$(PLATFORM_INVENTORY)" --known-hosts "$(PLATFORM_KNOWN_HOSTS)"
 	@if command -v ansible-inventory >/dev/null; then \
-	  ansible-inventory -i "build/platform/$(or $(ENVIRONMENT),develop)/platform-bootstrap-inventory.json" --list >/dev/null && \
-	  ansible-inventory -i "build/platform/$(or $(ENVIRONMENT),develop)/platform-inventory.json" --list >/dev/null; \
+	  ansible-inventory -i "$(PLATFORM_INVENTORY)" --list >/dev/null; \
 	else echo 'ansible-inventory unavailable; platform parser check skipped' >&2; fi
 
-fleet-platform-bootstrap-check: fleet-platform-check ## Local by default; CONNECT=1 enables SSH --check
+fleet-platform-bootstrap-check: fleet-platform-check ## CONNECT=1 enables an explicit SSH --check
 	@if [ "$(CONNECT)" = 1 ]; then \
 	  command -v ansible-playbook >/dev/null || { echo 'ansible-playbook is required for CONNECT=1' >&2; exit 2; }; \
-	  test -n "$(PLATFORM_BOOTSTRAP_VARS)" || { echo 'PLATFORM_BOOTSTRAP_VARS is required for CONNECT=1' >&2; exit 2; }; \
-	  ansible-playbook -i "build/platform/$(or $(ENVIRONMENT),develop)/platform-bootstrap-inventory.json" playbooks/platform/bootstrap.yml --check --diff --extra-vars "@$(PLATFORM_BOOTSTRAP_VARS)"; \
+	  test -n "$(PLATFORM_VARS)" || { echo 'PLATFORM_VARS is required for CONNECT=1' >&2; exit 2; }; \
+	  ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS='-o UserKnownHostsFile=$(PLATFORM_KNOWN_HOSTS)' ansible-playbook -i "$(PLATFORM_INVENTORY)" playbooks/platform/bootstrap.yml --check --diff --extra-vars "@$(PLATFORM_VARS)"; \
 	else echo 'local platform artifacts valid; no SSH or Vault access attempted (set CONNECT=1 explicitly)'; fi
 
 fleet-platform-bootstrap: fleet-platform-check ## Install uninitialized Vault; requires APPLY=1 and operator vars
 	@test "$(APPLY)" = 1 || (echo 'refusing platform SSH/mutation: set APPLY=1 explicitly' >&2; exit 2)
-	@test -n "$(PLATFORM_BOOTSTRAP_VARS)" || (echo 'PLATFORM_BOOTSTRAP_VARS is required' >&2; exit 2)
-	ansible-playbook -i "build/platform/$(or $(ENVIRONMENT),develop)/platform-bootstrap-inventory.json" playbooks/platform/bootstrap.yml --extra-vars "@$(PLATFORM_BOOTSTRAP_VARS)"
+	@test -n "$(PLATFORM_VARS)" || (echo 'PLATFORM_VARS is required' >&2; exit 2)
+	ANSIBLE_HOST_KEY_CHECKING=True ANSIBLE_SSH_ARGS='-o UserKnownHostsFile=$(PLATFORM_KNOWN_HOSTS)' ansible-playbook -i "$(PLATFORM_INVENTORY)" playbooks/platform/bootstrap.yml --extra-vars "@$(PLATFORM_VARS)"
 
 legacy-guard:
 	@test "$(ALLOW_LEGACY)" = 1 || { \
@@ -155,7 +153,9 @@ syntax: ## Syntax-check the full site and standalone utility playbooks
 		playbooks/fleet-infra.yml \
 		playbooks/backend-staging.yml \
 		playbooks/acme.yml \
-		playbooks/management-network.yml; do \
+		playbooks/management-network.yml \
+		playbooks/platform/bootstrap.yml \
+		playbooks/platform/readiness.yml; do \
 		ANSIBLE_INVENTORY="$(STATIC_INVENTORY)" ansible-playbook "$$playbook" --syntax-check || exit $$?; \
 	done
 
@@ -272,7 +272,7 @@ legacy-certs: legacy-guard ## [LEGACY] Obtain old certificates; requires ALLOW_L
 legacy-dns: legacy-decrypt ## [LEGACY] Reconcile old Cloudflare DNS; requires ALLOW_LEGACY=1
 	$(PLAYBOOK) -i "$(LEGACY_INVENTORY)" playbooks/dns.yml $(SECRETS_ARGS) $(if $(filter 1 yes true,$(APPLY)),-e cloudflare_apply=true,)
 
-.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-platform-render fleet-platform-check fleet-platform-bootstrap-check fleet-platform-bootstrap lint syntax render check test-api-wrapper \
+.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-platform-check fleet-platform-bootstrap-check fleet-platform-bootstrap lint syntax render check test-api-wrapper \
 	legacy-guard legacy-deps legacy-inventory legacy-ping legacy-decrypt legacy-deploy legacy-verify legacy-e2e legacy-e2e-all legacy-deploy-e2e \
 	legacy-backend-staging legacy-platform legacy-wire legacy-apply-node legacy-check-node legacy-api-ping legacy-api-list legacy-api-emails legacy-api-has legacy-api-add legacy-api-remove legacy-api-stats \
 	legacy-gen-client legacy-smoke-via legacy-reconcile legacy-management legacy-certs legacy-dns

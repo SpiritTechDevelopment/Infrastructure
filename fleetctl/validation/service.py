@@ -11,7 +11,6 @@ from fleetctl.model import (
     Fleet,
     Instance,
     LogicalNode,
-    Platform,
     apply_common_overrides,
 )
 
@@ -44,7 +43,6 @@ def validate_environment(
     fleets = tuple(item for item in objects if isinstance(item, Fleet))
     nodes = tuple(item for item in objects if isinstance(item, LogicalNode))
     instances = tuple(item for item in objects if isinstance(item, Instance))
-    platforms = tuple(item for item in objects if isinstance(item, Platform))
     if len(environments) != 1:
         issues.append(
             ValidationIssue.at(
@@ -59,14 +57,6 @@ def validate_environment(
                 environments[0].source,
                 "ENVIRONMENT_ID",
                 f"Environment ID must match directory name {environment_name!r}",
-            )
-        )
-    if len(platforms) > 1:
-        issues.append(
-            ValidationIssue.at(
-                desired_root / "environments" / environment_name / "platform",
-                "PLATFORM_COUNT",
-                f"expected at most one Platform object, found {len(platforms)}",
             )
         )
 
@@ -95,7 +85,6 @@ def validate_environment(
             environment_common=environment_common,
             node_common=node_common,
             environment=environment,
-            platform=platforms[0] if platforms else None,
             fleets=fleets,
             nodes=nodes,
             instances=instances,

@@ -22,6 +22,7 @@ Supporting indexes:
 - [architecture/README.md](architecture/README.md)
 - [integration/README.md](integration/README.md)
 - [status/README.md](status/README.md)
+- [operations/README.md](operations/README.md)
 
 Operational procedures that are not implemented by the v1 coordinator are not
 documented as available. The current coordinator stops at

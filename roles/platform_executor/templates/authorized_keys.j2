@@ -1,0 +1,3 @@
+{% for key in platform_github_ssh_keys %}
+restrict,command="/usr/local/sbin/spiritvpn-github-command {{ key.environment }}" {{ key.public_key }}
+{% endfor %}

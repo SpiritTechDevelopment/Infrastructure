@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec docker compose -f "{{ platform_vault_dir }}/compose.yml" exec -T \
+  -e "VAULT_ADDR=https://127.0.0.1:{{ platform_vault_api_port }}" \
+  -e "VAULT_CACERT=/vault/tls/vault-ca.crt" \
+  -e "VAULT_TLS_SERVER_NAME={{ platform_vault_tls_server_name }}" \
+  vault vault status -format=json

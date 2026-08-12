@@ -1,0 +1,6 @@
+---
+platform_github_user: github-deploy
+platform_github_ssh_keys: []
+platform_vault_dir: /opt/spiritvpn/platform/vault
+platform_vault_api_port: 8200
+platform_vault_tls_server_name: vault.management.internal

@@ -1,0 +1,65 @@
+---
+- name: Require one reviewed and environment-bound GitHub key
+  ansible.builtin.assert:
+    that:
+      - item.environment in ['develop', 'staging', 'prod']
+      - item.public_key is match('^(ssh-ed25519|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+(?: .*)?$')
+    fail_msg: "A reviewed GitHub Environment SSH public key is required."
+  loop: "{{ platform_github_ssh_keys }}"
+
+- name: Require at most one GitHub key per environment
+  ansible.builtin.assert:
+    that:
+      - >-
+        (platform_github_ssh_keys | map(attribute='environment') | unique | length)
+        == (platform_github_ssh_keys | length)
+    fail_msg: "GitHub SSH key environment bindings must be unique."
+
+- name: Create restricted GitHub command user
+  ansible.builtin.user:
+    name: "{{ platform_github_user }}"
+    shell: /bin/bash
+    create_home: true
+    password_lock: true
+
+- name: Create restricted GitHub SSH directory
+  ansible.builtin.file:
+    path: "/home/{{ platform_github_user }}/.ssh"
+    state: directory
+    owner: "{{ platform_github_user }}"
+    group: "{{ platform_github_user }}"
+    mode: "0700"
+
+- name: Install the root-owned GitHub command gate
+  ansible.builtin.template:
+    src: spiritvpn-github-command.j2
+    dest: /usr/local/sbin/spiritvpn-github-command
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the root-owned platform readiness command
+  ansible.builtin.template:
+    src: spiritvpn-platform-readiness.j2
+    dest: /usr/local/sbin/spiritvpn-platform-readiness
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Restrict the GitHub keys to the command gate
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "/home/{{ platform_github_user }}/.ssh/authorized_keys"
+    owner: "{{ platform_github_user }}"
+    group: "{{ platform_github_user }}"
+    mode: "0600"
+
+- name: Permit only the fixed root-owned readiness command through sudo
+  ansible.builtin.copy:
+    content: |
+      {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-platform-readiness
+    dest: "/etc/sudoers.d/91-{{ platform_github_user }}-readiness"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"

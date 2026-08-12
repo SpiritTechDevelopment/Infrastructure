@@ -1,44 +1,48 @@
-# Transitional GitHub-hosted runner
+# Transitional GitHub-hosted orchestration
 
 Status: temporary implementation boundary for infrastructure v1.
 
-The target architecture still requires a dedicated protected management
-runner. Until it exists, GitHub-hosted Actions may perform explicitly scoped
-operations after the operator has bootstrapped the management host.
+GitHub Actions is the user-facing orchestrator. The management VPS is the
+trusted executor: Vault and all resolved secrets remain there, and GitHub never
+connects to Vault or fleet nodes directly.
 
-## Trust and transport
+```text
+GitHub Actions -- restricted SSH command --> management VPS
+                                            ├── Vault on 127.0.0.1
+                                            ├── fleetctl and Ansible (future)
+                                            └── management-network access
+```
 
-- Vault API remains bound to `127.0.0.1`; it is not exposed to the Internet.
-- Actions reaches Vault only through an SSH tunnel to the management host.
-- The SSH private key and complete `known_hosts` entry are GitHub Environment
-  secrets. The public fingerprint is committed in the `Platform` descriptor.
-- `fleetctl platform-known-hosts-check` must match the supplied public host key
-  to a reviewed fingerprint before any SSH connection.
-- GitHub Environment approval and a per-environment concurrency group are
-  required for every remote workflow.
-- GitHub OIDC will authenticate to Vault with a short-lived token after the
-  handoff implementation exists. Static Vault tokens are forbidden in GitHub.
+## Trust boundary
 
-GitHub-hosted source addresses are not a stable management-network identity.
-During this transitional period the management host must expose key-only SSH
-to explicitly approved source CIDRs. Broad SSH exposure, if temporarily chosen
-to accommodate hosted-runner address churn, is recorded security debt and must
-remain protected by pinned host keys, fail2ban and environment-scoped keys.
+- The only GitHub secret is an environment-scoped SSH private key.
+- Each matching key is installed on the separate `github-deploy` account with an
+  OpenSSH forced command, an immutable environment argument and `restrict`
+  options. A workflow cannot claim another environment through command input.
+- The root-owned command gate rejects every operation except an explicit
+  allowlist. It never evaluates arbitrary arguments or a shell command supplied
+  by GitHub.
+- The management host and complete public `known_hosts` line are configured
+  separately; `StrictHostKeyChecking=yes` is mandatory and `ssh-keyscan` is not
+  used in CI.
+- GitHub Environment approval and a per-environment concurrency group wrap each
+  workflow.
+- Vault binds only to loopback. Static Vault tokens and resolved secrets in
+  GitHub are forbidden.
+
+GitHub-hosted source addresses change over time. Key-only SSH may therefore
+need broader ingress than a private runner would require. The host remains
+protected by the forced command, pinned host key, fail2ban and a dedicated key;
+moving SSH behind a stable private runner remains the exit condition.
 
 ## Current authorization
 
-`.github/workflows/platform-readiness.yml` is read-only. It renders and checks
-the committed platform plan, validates the pinned host key, connects as the
-named `deploy` user and verifies that Vault is initialized and unsealed. It has
-no `id-token: write` permission and cannot configure Vault or resolve secrets.
+`.github/workflows/platform-readiness.yml` invokes only
+`platform-readiness`. The management host locally checks Vault status and
+returns non-secret JSON. GitHub cannot initialize/unseal Vault, read secrets,
+run Ansible, call provider/DNS/backend APIs, or move `refs/deployments/*`.
 
-No GitHub workflow currently initializes/unseals Vault, stores recovery keys,
-writes production secrets, deploys fleet nodes, calls provider/DNS/backend APIs,
-or moves `refs/deployments/*`.
-
-## Exit condition
-
-This transitional mode ends when a dedicated management runner can authenticate
-to Vault, resolve `secret://` references, reach the private management network,
-and execute the existing coordinator with the same environment lock and
-approval semantics. The GitHub-hosted remote mutation path must then be removed.
+The next handoff increment will add a second fixed command that accepts a strict
+environment and full commit SHA, materializes that exact commit in an isolated
+directory, resolves secrets locally, and invokes the existing coordinator.
+It will be enabled only after Vault policies and the local resolver exist.

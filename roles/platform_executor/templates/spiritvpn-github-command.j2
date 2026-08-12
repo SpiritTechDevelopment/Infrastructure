@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+bound_environment="${1:-}"
+case "$bound_environment" in
+  develop|staging|prod) ;;
+  *)
+    printf '%s\n' 'refusing invalid GitHub environment binding' >&2
+    exit 64
+    ;;
+esac
+
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  platform-readiness)
+    exec sudo -n /usr/local/sbin/spiritvpn-platform-readiness
+    ;;
+  *)
+    printf '%s\n' 'refusing unsupported GitHub command' >&2
+    exit 64
+    ;;
+esac

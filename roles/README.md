@@ -15,8 +15,8 @@
 | `xray` | Compiled Xray runtime configuration |
 | `nginx_mask` | REALITY mask service |
 | `node_exporter` | Node metrics component |
-| `compiled_platform_plan` | Validate and expose the generated v1 platform plan |
 | `platform_vault` | Install loopback-only TLS Vault without init or unseal |
+| `platform_executor` | Install the restricted GitHub SSH command gate |
 
 ## Retained legacy implementation
 

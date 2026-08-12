@@ -2,13 +2,26 @@
 - name: Validate v1 Vault installation inputs
   ansible.builtin.assert:
     that:
-      - platform_vault_image is match('^.+@sha256:[0-9a-f]{64}$')
-      - platform_vault_tls_server_name | length > 0
-      - platform_vault_node_id | length > 0
-      - platform_vault_tls_certificate | length > 0
-      - platform_vault_tls_private_key | length > 0
-    fail_msg: "v1 Vault requires a pinned image and operator-supplied TLS material."
-  no_log: true
+      - >-
+        platform_vault_image is
+        match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - >-
+        platform_vault_tls_server_name is
+        match('^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$')
+      - platform_vault_node_id is match('^[a-z0-9][a-z0-9-]{0,62}$')
+      - platform_vault_api_port | int >= 1
+      - platform_vault_api_port | int <= 65535
+      - platform_vault_cluster_port | int >= 1
+      - platform_vault_cluster_port | int <= 65535
+      - platform_vault_api_port | int != platform_vault_cluster_port | int
+    fail_msg: "v1 Vault requires a pinned image, node ID, TLS name and distinct ports."
+
+- name: Install local TLS tooling
+  ansible.builtin.apt:
+    name: openssl
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
 
 - name: Create protected v1 Vault directories
   ansible.builtin.file:
@@ -19,29 +32,158 @@
     mode: "{{ item.mode }}"
   loop:
     - {path: config, owner: root, group: "1000", mode: "0750"}
+    - {path: pki, owner: root, group: root, mode: "0700"}
     - {path: tls, owner: root, group: "1000", mode: "0750"}
     - {path: data, owner: "100", group: "1000", mode: "0750"}
     - {path: snapshots, owner: "100", group: "1000", mode: "0750"}
 
-- name: Install v1 Vault TLS certificate
-  ansible.builtin.copy:
-    content: "{{ platform_vault_tls_certificate }}"
-    dest: "{{ platform_vault_dir }}/tls/vault.crt"
-    owner: root
-    group: "1000"
-    mode: "0640"
+- name: Generate local Vault transport CA private key
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - genpkey
+      - -algorithm
+      - RSA
+      - -pkeyopt
+      - rsa_keygen_bits:3072
+      - -out
+      - "{{ platform_vault_dir }}/pki/vault-ca.key"
+    creates: "{{ platform_vault_dir }}/pki/vault-ca.key"
   no_log: true
-  diff: false
 
-- name: Install v1 Vault TLS private key
-  ansible.builtin.copy:
-    content: "{{ platform_vault_tls_private_key }}"
-    dest: "{{ platform_vault_dir }}/tls/vault.key"
+- name: Protect local Vault transport CA private key
+  ansible.builtin.file:
+    path: "{{ platform_vault_dir }}/pki/vault-ca.key"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Generate local Vault transport CA certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -new
+      - -sha256
+      - -key
+      - "{{ platform_vault_dir }}/pki/vault-ca.key"
+      - -days
+      - "3650"
+      - -subj
+      - "/CN={{ platform_vault_ca_common_name }}"
+      - -out
+      - "{{ platform_vault_dir }}/pki/vault-ca.crt"
+    creates: "{{ platform_vault_dir }}/pki/vault-ca.crt"
+
+- name: Generate local Vault TLS private key
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - genpkey
+      - -algorithm
+      - RSA
+      - -pkeyopt
+      - rsa_keygen_bits:3072
+      - -out
+      - "{{ platform_vault_dir }}/tls/vault.key"
+    creates: "{{ platform_vault_dir }}/tls/vault.key"
+  no_log: true
+
+- name: Protect local Vault TLS private key
+  ansible.builtin.file:
+    path: "{{ platform_vault_dir }}/tls/vault.key"
     owner: root
     group: "1000"
     mode: "0640"
+
+- name: Render local Vault TLS extensions
+  ansible.builtin.template:
+    src: vault-tls-ext.cnf.j2
+    dest: "{{ platform_vault_dir }}/pki/vault-tls-ext.cnf"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Generate local Vault TLS certificate request
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -new
+      - -key
+      - "{{ platform_vault_dir }}/tls/vault.key"
+      - -subj
+      - "/CN={{ platform_vault_tls_server_name }}"
+      - -out
+      - "{{ platform_vault_dir }}/pki/vault.csr"
+    creates: "{{ platform_vault_dir }}/pki/vault.csr"
+
+- name: Sign local Vault TLS certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -req
+      - -sha256
+      - -in
+      - "{{ platform_vault_dir }}/pki/vault.csr"
+      - -CA
+      - "{{ platform_vault_dir }}/pki/vault-ca.crt"
+      - -CAkey
+      - "{{ platform_vault_dir }}/pki/vault-ca.key"
+      - -CAcreateserial
+      - -days
+      - "{{ platform_vault_tls_validity_days }}"
+      - -extfile
+      - "{{ platform_vault_dir }}/pki/vault-tls-ext.cnf"
+      - -out
+      - "{{ platform_vault_dir }}/tls/vault.crt"
+    creates: "{{ platform_vault_dir }}/tls/vault.crt"
   no_log: true
-  diff: false
+
+- name: Install public Vault transport CA beside server certificate
+  ansible.builtin.copy:
+    src: "{{ platform_vault_dir }}/pki/vault-ca.crt"
+    dest: "{{ platform_vault_dir }}/tls/vault-ca.crt"
+    remote_src: true
+    owner: root
+    group: "1000"
+    mode: "0644"
+
+- name: Verify local Vault TLS certificate identity
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ platform_vault_dir }}/tls/vault.crt"
+      - -noout
+      - -checkhost
+      - "{{ platform_vault_tls_server_name }}"
+  changed_when: false
+
+- name: Verify local Vault TLS certificate chain
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - verify
+      - -CAfile
+      - "{{ platform_vault_dir }}/tls/vault-ca.crt"
+      - "{{ platform_vault_dir }}/tls/vault.crt"
+  changed_when: false
+
+- name: Require more than thirty days of Vault TLS validity
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ platform_vault_dir }}/tls/vault.crt"
+      - -noout
+      - -checkend
+      - "2592000"
+  changed_when: false
 
 - name: Render v1 Vault configuration
   ansible.builtin.template:

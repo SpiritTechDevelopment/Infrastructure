@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import ipaddress
 import re
 from collections import Counter, defaultdict
 
-from fleetctl.model import CommonConfig, DesiredState, Environment, Fleet, Instance, LogicalNode, Platform
+from fleetctl.model import CommonConfig, DesiredState, Environment, Fleet, Instance, LogicalNode
 
 from .issues import ValidationIssue
 
@@ -23,7 +22,6 @@ def validate_semantics(state: DesiredState) -> list[ValidationIssue]:
     environment = state.environment
     env = environment.object_id
     _validate_environment(environment, issues)
-    _validate_platform(state, issues)
     _validate_common(state, issues)
     _validate_identifiers(state, issues)
     _validate_fleet_ids(state, issues)
@@ -163,55 +161,15 @@ def _validate_environment(environment: Environment, issues: list[ValidationIssue
         )
 
 
-def _validate_platform(state: DesiredState, issues: list[ValidationIssue]) -> None:
-    platform = state.platform
-    if platform is None:
-        return
-    env = state.environment.object_id
-    if platform.object_id != f"{env}-platform" or platform.environment != env:
-        issues.append(
-            ValidationIssue.at(platform.source, "PLATFORM_ENV", "platform ID and environment must match its directory")
-        )
-    if platform.github_environment != env:
-        issues.append(
-            ValidationIssue.at(platform.source, "PLATFORM_GITHUB_ENV", "GitHub environment must match the platform environment")
-        )
-    if not ipaddress.ip_address(platform.public_address).is_global:
-        issues.append(
-            ValidationIssue.at(platform.source, "PLATFORM_PUBLIC_ADDRESS", "platform public_address must be globally routable")
-        )
-    if platform.vault_api_port == platform.vault_cluster_port:
-        issues.append(
-            ValidationIssue.at(platform.source, "PLATFORM_VAULT_PORTS", "Vault API and cluster ports must differ")
-        )
-    if not platform.vault_tls_server_name.endswith(f".{state.environment.dns_zone}"):
-        issues.append(
-            ValidationIssue.at(platform.source, "PLATFORM_VAULT_DNS", "Vault TLS server name must belong to the environment DNS zone")
-        )
-    for reference in (platform.vault_tls_certificate_ref, platform.vault_tls_private_key_ref):
-        if not reference.startswith(f"secret://bootstrap/{env}/platform/vault#"):
-            issues.append(
-                ValidationIssue.at(platform.source, "PLATFORM_SECRET_ENV", "Vault bootstrap secret belongs to another environment")
-            )
-    vault = state.environment_common.components.components.get("vault")
-    if vault is None:
-        issues.append(ValidationIssue.at(state.common.components.source, "PLATFORM_VAULT_COMPONENT", "vault component is required"))
-    elif vault.digest is None:
-        issues.append(
-            ValidationIssue.at(state.common.components.source, "PLATFORM_VAULT_DIGEST", "Vault needs an immutable digest before platform bootstrap")
-        )
-
-
 def _validate_identifiers(state: DesiredState, issues: list[ValidationIssue]) -> None:
     env = state.environment.object_id
-    all_objects: tuple[Environment | Platform | Fleet | LogicalNode | Instance, ...] = (
+    all_objects: tuple[Environment | Fleet | LogicalNode | Instance, ...] = (
         state.environment,
-        *((state.platform,) if state.platform is not None else ()),
         *state.fleets,
         *state.nodes,
         *state.instances,
     )
-    by_id: dict[str, list[Environment | Platform | Fleet | LogicalNode | Instance]] = defaultdict(list)
+    by_id: dict[str, list[Environment | Fleet | LogicalNode | Instance]] = defaultdict(list)
     for item in all_objects:
         by_id[item.object_id].append(item)
     for object_id, items in by_id.items():

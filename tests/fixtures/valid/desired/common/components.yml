@@ -16,7 +16,3 @@ components:
     repository: example.invalid/node-exporter
     tag: fixture
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000004
-  vault:
-    repository: example.invalid/vault
-    tag: fixture
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000005

@@ -1,0 +1,8 @@
+---
+all:
+  children:
+    spiritvpn_platform_bootstrap:
+      hosts:
+        management-1:
+          ansible_host: 1.1.1.1
+          ansible_user: root
