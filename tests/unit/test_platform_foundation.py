@@ -232,6 +232,19 @@ all:
         self.assertEqual(result.returncode, 2)
         self.assertIn("refusing mutation without --apply", result.stderr)
 
+    def test_platform_executor_installs_a_compatible_python(self) -> None:
+        defaults = (
+            REPO_ROOT / "roles" / "platform_executor" / "defaults" / "main.yml"
+        ).read_text(encoding="utf-8")
+        tasks = (
+            REPO_ROOT / "roles" / "platform_executor" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("platform_executor_python_minimum_minor: 11", defaults)
+        self.assertIn("platform_executor_python_executable: /usr/bin/python3.11", defaults)
+        self.assertIn("python3.11-venv", defaults)
+        self.assertIn("platform_executor_python_executable", tasks)
+        self.assertIn("Remove an incompatible executor Python environment", tasks)
+
     def test_github_workflow_cannot_mutate_or_receive_vault_credentials(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "platform-readiness.yml").read_text(
             encoding="utf-8"

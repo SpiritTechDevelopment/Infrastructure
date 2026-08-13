@@ -24,7 +24,7 @@
 
 - name: Install protected executor prerequisites
   ansible.builtin.apt:
-    name: [git, python3-venv, python3-pip, util-linux]
+    name: "{{ ['git', 'python3-pip', 'util-linux'] + platform_executor_python_apt_packages }}"
     state: present
     update_cache: true
   when: ansible_os_family == "Debian"
@@ -47,9 +47,42 @@
     - "{{ platform_executor_config_dir }}/staging"
     - "{{ platform_executor_config_dir }}/prod"
 
+- name: Inspect the existing executor Python environment
+  ansible.builtin.stat:
+    path: "{{ platform_executor_dir }}/venv/bin/python"
+  register: _platform_executor_venv_python
+
+- name: Check whether the existing executor Python is compatible
+  ansible.builtin.command:
+    argv:
+      - "{{ platform_executor_dir }}/venv/bin/python"
+      - -c
+      - >-
+        import sys;
+        print(int(sys.version_info.major == 3 and
+        sys.version_info.minor >= {{ platform_executor_python_minimum_minor }}))
+  register: _platform_executor_venv_compatible
+  changed_when: false
+  failed_when: false
+  when: _platform_executor_venv_python.stat.exists
+
+- name: Remove an incompatible executor Python environment
+  ansible.builtin.file:
+    path: "{{ platform_executor_dir }}/venv"
+    state: absent
+  when:
+    - _platform_executor_venv_python.stat.exists
+    - >-
+      _platform_executor_venv_compatible.rc != 0 or
+      _platform_executor_venv_compatible.stdout | trim != '1'
+
 - name: Create the isolated deployment Python environment
   ansible.builtin.command:
-    argv: [python3, -m, venv, "{{ platform_executor_dir }}/venv"]
+    argv:
+      - "{{ platform_executor_python_executable }}"
+      - -m
+      - venv
+      - "{{ platform_executor_dir }}/venv"
     creates: "{{ platform_executor_dir }}/venv/bin/python"
 
 - name: Install bounded deployment runtime dependencies

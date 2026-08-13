@@ -10,6 +10,11 @@ platform_executor_config_dir: /etc/spiritvpn/deploy
 platform_runtime_config_dir: /etc/spiritvpn/platform
 platform_runtime_vars_file: /etc/spiritvpn/platform/runtime-vars.yml
 platform_executor_bundle_limit_kib: 262144
+# Keep the deployment runtime independent from Ubuntu's system Python.
+# ansible-core 2.18 requires Python 3.11 or newer.
+platform_executor_python_minimum_minor: 11
+platform_executor_python_executable: /usr/bin/python3.11
+platform_executor_python_apt_packages: [python3.11, python3.11-venv]
 platform_executor_python_packages:
   - ansible-core>=2.18,<2.19
   - PyYAML>=6,<7
