@@ -68,6 +68,22 @@ private key on that VPS, configures the environment hub addresses and reviewed
 operator peers, starts `wg-quick`, and only then installs the final firewall.
 The management private key never leaves the VPS.
 
+The recommended operator entry point runs local tests, lint, SOPS validation,
+pinned SSH preflight, an explicit confirmation, bootstrap and convergence
+verification in one command:
+
+```bash
+scripts/platform-bootstrap.sh --apply
+```
+
+Run it without `--apply` to execute the complete non-mutating gate only:
+
+```bash
+scripts/platform-bootstrap.sh
+```
+
+For diagnosis, the same stages remain available as lower-level targets:
+
 ```bash
 make fleet-platform-check
 make fleet-platform-bootstrap-check CONNECT=1

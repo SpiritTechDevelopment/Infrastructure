@@ -23,7 +23,20 @@ wg pubkey < ~/.config/spiritvpn/keys/operator-wg.key
 ноутбука нигде не описывается. После создания WireGuard прямой публичный SSH
 остаётся только для runner, а операторы входят через management overlay.
 
-Затем локально:
+Рекомендуемый единый сценарий сначала выполняет все проверки, затем требует
+явного подтверждения и только после него изменяет management VPS:
+
+```bash
+scripts/platform-bootstrap.sh --apply
+```
+
+Без `--apply` он выполняет только безопасную проверку полного входного контура:
+
+```bash
+scripts/platform-bootstrap.sh
+```
+
+Низкоуровневые команды, которые сценарий выполняет последовательно:
 
 ```bash
 make fleet-platform-check

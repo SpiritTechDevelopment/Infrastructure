@@ -54,8 +54,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install tooling
-        run: |
-          pip install 'ansible-core>=2.18,<2.19' ansible-lint yamllint
+        run: pip install -r requirements-ansible.txt
       - name: Static checks
         run: make check
       - name: Lint

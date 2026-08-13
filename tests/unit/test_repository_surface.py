@@ -53,6 +53,7 @@ class RepositorySurfaceTests(unittest.TestCase):
             scripts,
             {
                 "platform-bootstrap-check.py",
+                "platform-bootstrap.sh",
                 "bootstrap-platform.py",
                 "platform-sops.py",
                 "platform-remote.sh",

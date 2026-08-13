@@ -138,6 +138,23 @@ all:
             self.assertIn(required, text)
         self.assertNotIn("ssh-keyscan", text)
 
+    def test_operator_bootstrap_entrypoint_keeps_vault_ceremony_manual(self) -> None:
+        path = REPO_ROOT / "scripts" / "platform-bootstrap.sh"
+        subprocess.run(["bash", "-n", str(path)], check=True)
+        text = path.read_text(encoding="utf-8")
+        for required in (
+            "git diff --quiet",
+            "make check",
+            "make lint",
+            "fleet-platform-bootstrap-check",
+            "fleet-platform-bootstrap",
+            "sudo wg show spiritvpn-mgmt",
+        ):
+            self.assertIn(required, text)
+        self.assertIn('[[ "$confirmation" == APPLY ]]', text)
+        self.assertNotIn("vault operator init", text)
+        self.assertNotIn("spiritvpn-vault-operator init", text)
+
     def test_vault_is_loopback_only_and_generates_tls_on_host(self) -> None:
         compose = (REPO_ROOT / "roles" / "platform_vault" / "templates" / "compose.yml.j2").read_text(
             encoding="utf-8"
