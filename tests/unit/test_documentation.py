@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -43,9 +44,11 @@ class DocumentationTests(unittest.TestCase):
 
     def test_local_markdown_links_resolve(self) -> None:
         missing: list[str] = []
-        for path in sorted(REPO_ROOT.rglob("*.md")):
-            if ".git" in path.parts:
-                continue
+        tracked = subprocess.check_output(
+            ["git", "ls-files", "-z", "--", "*.md"], cwd=REPO_ROOT
+        ).split(b"\0")
+        for relative in sorted(item.decode("utf-8") for item in tracked if item):
+            path = REPO_ROOT / relative
             for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 for raw_target in MARKDOWN_LINK.findall(line):
                     target = raw_target.split("#", 1)[0].strip()

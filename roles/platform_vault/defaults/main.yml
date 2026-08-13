@@ -7,3 +7,4 @@ platform_vault_tls_server_name: vault.management.internal
 platform_vault_node_id: management-1
 platform_vault_ca_common_name: SpiritVPN management Vault transport CA
 platform_vault_tls_validity_days: 825
+platform_executor_config_dir: /etc/spiritvpn/deploy

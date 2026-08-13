@@ -8,3 +8,6 @@ spiritvpn_deployment_user: deploy
 spiritvpn_deploy_mode: hardened
 spiritvpn_manage_deploy_user: false
 spiritvpn_operator_ssh_public_keys: []
+# Public certificate chains returned by the operator/CA ceremony, keyed by
+# instance ID. Private machine keys remain node-local.
+spiritvpn_agent_certificate_chains: {}

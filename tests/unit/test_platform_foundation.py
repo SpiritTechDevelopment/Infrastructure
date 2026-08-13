@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
@@ -84,11 +85,13 @@ all:
         self.assertEqual(result.returncode, 2)
         self.assertIn("only ansible_host and ansible_user", result.stderr)
 
-    def test_github_forced_command_has_one_read_only_operation(self) -> None:
+    def test_github_forced_command_has_environment_bound_operations(self) -> None:
         gate = REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-github-command.j2"
         subprocess.run(["bash", "-n", str(gate)], check=True)
         text = gate.read_text(encoding="utf-8")
-        self.assertIn("platform-readiness)", text)
+        self.assertIn("original_command\" == platform-readiness", text)
+        self.assertIn("fleet-deploy", text)
+        self.assertIn("cross-environment deployment", text)
         self.assertIn("bound_environment", text)
         self.assertNotIn("eval", text)
         self.assertNotIn("fleetctl deploy", text)
@@ -128,11 +131,115 @@ all:
         for forbidden in ("VAULT_TOKEN", "id-token: write", "fleet-deploy", "ansible-playbook", "ssh-keyscan"):
             self.assertNotIn(forbidden, workflow)
 
+    def test_deploy_workflow_uses_reviewed_sha_bundle_and_no_vault_credential(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "fleet-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "workflow_dispatch",
+            "git merge-base --is-ancestor",
+            "git bundle create",
+            "platform-remote.sh",
+            "environment: ${{ inputs.environment }}",
+        ):
+            self.assertIn(required, workflow)
+        for forbidden in ("VAULT_TOKEN", "id-token: write", "ssh-keyscan", "update-deployment-ref"):
+            self.assertNotIn(forbidden, workflow)
+
+    def test_root_executor_is_fail_closed_and_does_not_move_deployment_ref(self) -> None:
+        path = REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-fleet-deploy.j2"
+        text = path.read_text(encoding="utf-8")
+        for required in (
+            'bundle verify "$bundle"',
+            "refs/spiritvpn/source",
+            "vault-secret-resolver.py",
+            "StrictHostKeyChecking=yes",
+            "--state-dir",
+        ):
+            self.assertIn(required, text)
+        self.assertNotIn("update-deployment-ref", text)
+        self.assertNotIn("eval", text)
+
+    def test_vault_operator_is_manual_and_environment_scoped(self) -> None:
+        operator = (
+            REPO_ROOT / "roles" / "platform_vault" / "templates" / "spiritvpn-vault-operator.j2"
+        ).read_text(encoding="utf-8")
+        policy = (
+            REPO_ROOT / "roles" / "platform_vault" / "templates" / "policy-fleet-deployer.hcl.j2"
+        ).read_text(encoding="utf-8")
+        self.assertIn("operator init", operator)
+        self.assertIn("operator unseal", operator)
+        self.assertIn("secret_id_bound_cidrs=127.0.0.1/32", operator)
+        self.assertIn("token_no_default_policy=true", operator)
+        self.assertNotIn('-e "VAULT_TOKEN=$root_token"', operator)
+        self.assertIn('path "kv/data/{{ policy_environment }}/*"', policy)
+        self.assertNotIn('capabilities = ["create"', policy)
+
+    def test_secret_reference_listing_is_offline_and_environment_scoped(self) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                str(REPO_ROOT / "scripts" / "vault-secret-resolver.py"),
+                "--root",
+                str(REPO_ROOT),
+                "--desired-root",
+                str(REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"),
+                "--environment",
+                "develop",
+                "--list-references",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        references = result.stdout.splitlines()
+        self.assertTrue(references)
+        self.assertEqual(references, sorted(references[:-1]) + [references[-1]])
+        self.assertTrue(all(reference.startswith("secret://kv/develop/") for reference in references))
+        self.assertEqual(
+            references[-1],
+            "secret://kv/develop/executor/ansible#private_key",
+        )
+
+    def test_private_writer_refuses_symlink_and_sets_mode(self) -> None:
+        script = REPO_ROOT / "scripts" / "vault-secret-resolver.py"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "target"
+            link = root / "link"
+            target.write_text("unchanged", encoding="utf-8")
+            link.symlink_to(target)
+            command = (
+                "import importlib.util,pathlib;"
+                f"s=importlib.util.spec_from_file_location('resolver',{str(script)!r});"
+                "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+                f"p=pathlib.Path({str(link)!r});"
+                "m.write_private(p,'secret')"
+            )
+            result = subprocess.run(
+                ["python3", "-c", command], text=True, capture_output=True, check=False
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(target.read_text(encoding="utf-8"), "unchanged")
+
+            output = root / "output"
+            command = command.replace(str(link), str(output))
+            result = subprocess.run(["python3", "-c", command], check=False)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)
+
     def test_executor_templates_have_valid_shell_after_jinja_substitution(self) -> None:
-        path = REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-platform-readiness.j2"
-        rendered = re.sub(r"{{[^\n{}]+}}", "fixture", path.read_text(encoding="utf-8"))
-        self.assertNotIn("{{", rendered)
-        subprocess.run(["bash", "-n"], input=rendered, text=True, check=True)
+        paths = (
+            REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-platform-readiness.j2",
+            REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-fleet-deploy.j2",
+            REPO_ROOT / "roles" / "platform_vault" / "templates" / "spiritvpn-vault-operator.j2",
+        )
+        for path in paths:
+            rendered = re.sub(r"{{[^\n{}]+}}", "fixture", path.read_text(encoding="utf-8"))
+            self.assertNotIn("{{", rendered)
+            subprocess.run(["bash", "-n"], input=rendered, text=True, check=True)
 
 
 if __name__ == "__main__":

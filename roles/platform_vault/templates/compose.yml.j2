@@ -16,3 +16,5 @@ services:
       - ./config:/vault/config:ro
       - ./tls:/vault/tls:ro
       - ./data:/vault/data
+      - ./audit:/vault/audit
+      - ./snapshots:/vault/snapshots

@@ -10,12 +10,23 @@ case "$bound_environment" in
     ;;
 esac
 
-case "${SSH_ORIGINAL_COMMAND:-}" in
-  platform-readiness)
+original_command="${SSH_ORIGINAL_COMMAND:-}"
+if [[ "$original_command" == platform-readiness ]]; then
     exec sudo -n /usr/local/sbin/spiritvpn-platform-readiness
-    ;;
-  *)
-    printf '%s\n' 'refusing unsupported GitHub command' >&2
-    exit 64
-    ;;
-esac
+fi
+
+read -r operation requested_environment source_git_sha mode initial resume allow_destructive extra <<< "$original_command"
+if [[ "$operation" != fleet-deploy || -n "${extra:-}" ]]; then
+  printf '%s\n' 'refusing unsupported GitHub command' >&2
+  exit 64
+fi
+[[ "$requested_environment" == "$bound_environment" ]] || { printf '%s\n' 'refusing cross-environment deployment' >&2; exit 64; }
+[[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'refusing invalid source Git SHA' >&2; exit 64; }
+[[ "$mode" =~ ^(dry-run|apply)$ ]] || { printf '%s\n' 'refusing invalid deployment mode' >&2; exit 64; }
+[[ "$initial" =~ ^(true|false)$ ]] || { printf '%s\n' 'refusing invalid initial flag' >&2; exit 64; }
+[[ "$resume" =~ ^(true|false)$ ]] || { printf '%s\n' 'refusing invalid resume flag' >&2; exit 64; }
+[[ "$allow_destructive" =~ ^(true|false)$ ]] || { printf '%s\n' 'refusing invalid destructive flag' >&2; exit 64; }
+
+exec sudo -n /usr/local/sbin/spiritvpn-fleet-deploy \
+  "$requested_environment" "$source_git_sha" "$mode" \
+  "$initial" "$resume" "$allow_destructive"

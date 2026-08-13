@@ -112,12 +112,17 @@ make fleet-platform-bootstrap APPLY=1 \
 ```
 
 The apply target installs loopback-only Vault with host-generated transport TLS,
-hardens the host and installs a separate `github-deploy` account. That account's
-SSH keys are restricted to a root-owned command gate; today the only accepted
-operation is read-only `platform-readiness`. GitHub stores only its private SSH
-key and the host as an environment variable. Vault credentials and resolved
-secrets never enter the hosted runner.
+hardens the host and installs a separate `github-deploy` account. Its keys are
+restricted to `platform-readiness` and a strictly parsed `fleet-deploy`
+handoff. GitHub stores only its private SSH key and management host; Vault
+credentials, fleet SSH keys and resolved values remain on the management VPS.
 
-Bootstrap never runs `vault operator init`, unseals Vault, stores recovery
-material, writes secrets, or moves a deployment ref. The operator ceremony and
-future local Vault resolver are separate handoff stages.
+Bootstrap never initializes or unseals Vault. The operator then uses the
+root-owned ceremony command to configure environment-scoped policies/AppRoles
+and import values. The local resolver materializes temporary `0600` Ansible
+inputs immediately before `--apply`; they are removed on exit. See
+`docs/operations/PLATFORM_BOOTSTRAP.md`.
+
+The GitHub workflow accepts only a full commit reachable from `main`, transfers
+an exact Git bundle, and invokes the existing coordinator under an environment
+lock. It still stops at `WAITING_FOR_BACKEND` and never moves a deployment ref.

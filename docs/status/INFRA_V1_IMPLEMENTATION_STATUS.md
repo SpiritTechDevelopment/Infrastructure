@@ -1,6 +1,6 @@
 # Состояние реализации инфраструктуры v1
 
-Дата среза: **12 августа 2026 года**
+Дата среза: **13 августа 2026 года**
 Рабочая ветка: `feat/infra-v1-foundation`
 Статус: **инфраструктурный контур до границы backend/node-agent реализован и проверен офлайн**
 
@@ -29,8 +29,11 @@ revision и manifest identity, но намеренно не выполняет g
 может установить Vault с immutable image digest и сгенерировать транспортный
 TLS непосредственно на хосте. Vault остаётся loopback-only и намеренно не
 инициализируется и не unseal'ится автоматически. Для GitHub-hosted orchestration
-добавлены отдельный restricted SSH account, forced-command allowlist и ручной
-read-only readiness workflow с GitHub Environment и concurrency lock.
+добавлены отдельный restricted SSH account, forced-command allowlist, ручной
+read-only readiness workflow и защищённый deployment handoff с GitHub
+Environment и concurrency lock. GitHub передаёт только проверенный Git bundle;
+Vault policy/AppRole, `secret://` resolver и Ansible SSH identity остаются на
+management VPS.
 
 Каталоги `desired/environments/{develop,staging,prod}` по-прежнему содержат
 только объекты окружений. Реалистичный develop-флот с placeholder-данными и
@@ -142,7 +145,7 @@ Canonical representation и digest зависят от effective-значени�
 
 На дату обновления проходят:
 
-- 116 unit-тестов;
+- 121 unit-тест;
 - валидация `develop`, `staging` и `prod`;
 - Python bytecode compilation;
 - проверка JSON Schema;
@@ -152,7 +155,9 @@ Canonical representation и digest зависят от effective-значени�
 - bootstrap/PKI shell и YAML проверки;
 - coordinator dry-run до `WAITING_FOR_BACKEND` без SSH и внешних мутаций.
 - fail-closed bootstrap inventory preflight и shell tests restricted GitHub
-  command gate.
+  command gate;
+- offline reference listing, environment-bound Vault policy и `0600` resolver
+  output checks.
 
 `ansible-core` в текущей локальной среде не установлен, поэтому
 `ansible-inventory --list` и `ansible-playbook --syntax-check` здесь пропущены.
@@ -242,6 +247,21 @@ backend-контрактом.
 Materialization и доставка agent operations асинхронны и должны наблюдаться
 backend-метриками и алертами; manifest v1 не содержит Validate/Status RPC.
 
+### 2.12. Operator bootstrap и GitHub handoff
+
+Оператор вручную выполняет Vault init/unseal, environment policy/AppRole setup,
+initial secret import и Raft snapshot через root-owned команду. Root token и
+unseal shares не сохраняются на VPS; auto-unseal без независимого KMS не
+реализован. AppRole разрешает только read под `kv/<environment>/*`, привязан к
+loopback и не получает default policy.
+
+`fleet-deploy` workflow принимает полный SHA, достижимый из `main`, и передаёт
+source плюс deployment baseline как Git bundle. Forced command проверяет
+environment binding и строгие аргументы. Management executor проверяет bundle,
+изолированно materialize'ит commit, резолвит секреты во временные файлы `0600`,
+запускает coordinator с pinned host keys и удаляет временные значения. GitHub не
+получает Vault token, AppRole, fleet SSH key или resolved secrets.
+
 ## 3. Что пока отсутствует
 
 Следующие части целевой системы ещё не реализованы:
@@ -253,9 +273,6 @@ backend-метриками и алертами; manifest v1 не содержи�
   нормативного backend observability contract;
 - фактическое применение DNS plan и monitoring targets внешними адаптерами;
 - продвижение `candidate → serving`, drain и retire;
-- защищённый deployment runner;
-- автоматическая Vault init/unseal ceremony, Vault policies, local secret
-  resolver и завершённый platform handoff;
 - реальные флоты в `desired/environments/*`;
 - воспроизводимое построение `develop` с чистых машин;
 - продвижение одинаковых component digests в staging и prod.
@@ -288,9 +305,9 @@ authorization wiring и реальный node-agent runtime.
 7. `fleetctl deploy` способен вызвать Ansible только с явным `--apply` и тремя
    читаемыми файлами operator inputs. Без флага выполняются только локальные
    шаги; SSH и mutation помечаются `SKIPPED_DRY_RUN`.
-8. Platform bootstrap пока только устанавливает неинициализированный Vault и
-   restricted GitHub readiness command. Recovery ceremony выполняется
-   оператором; GitHub не получает Vault token и не запускает mutating deploy.
+8. Vault init/unseal, secret import и snapshots намеренно остаются ручной
+   operator ceremony. Auto-unseal без независимого KMS отсутствует; snapshot
+   restore и reboot/unseal ещё не проверены на живом management VPS.
 9. Revision state локален management executor и требует резервного копирования.
    До первого реального Apply к уже существующему backend понадобится отдельная
    проверенная процедура seed/recovery от последней принятой backend revision;

@@ -22,6 +22,40 @@
     create_home: true
     password_lock: true
 
+- name: Install protected executor prerequisites
+  ansible.builtin.apt:
+    name: [git, python3-venv, python3-pip, util-linux]
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Create protected executor directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ platform_executor_dir }}"
+    - "{{ platform_executor_dir }}/incoming"
+    - "{{ platform_executor_dir }}/build"
+    - "{{ platform_executor_state_dir }}"
+    - "{{ platform_executor_config_dir }}"
+    - "{{ platform_executor_config_dir }}/develop"
+    - "{{ platform_executor_config_dir }}/staging"
+    - "{{ platform_executor_config_dir }}/prod"
+
+- name: Create the isolated deployment Python environment
+  ansible.builtin.command:
+    argv: [python3, -m, venv, "{{ platform_executor_dir }}/venv"]
+    creates: "{{ platform_executor_dir }}/venv/bin/python"
+
+- name: Install bounded deployment runtime dependencies
+  ansible.builtin.pip:
+    name: "{{ platform_executor_python_packages }}"
+    virtualenv: "{{ platform_executor_dir }}/venv"
+
 - name: Create restricted GitHub SSH directory
   ansible.builtin.file:
     path: "/home/{{ platform_github_user }}/.ssh"
@@ -46,6 +80,14 @@
     group: root
     mode: "0755"
 
+- name: Install the root-owned fleet deployment executor
+  ansible.builtin.template:
+    src: spiritvpn-fleet-deploy.j2
+    dest: /usr/local/sbin/spiritvpn-fleet-deploy
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Restrict the GitHub keys to the command gate
   ansible.builtin.template:
     src: authorized_keys.j2
@@ -54,10 +96,11 @@
     group: "{{ platform_github_user }}"
     mode: "0600"
 
-- name: Permit only the fixed root-owned readiness command through sudo
+- name: Permit only the fixed root-owned executor commands through sudo
   ansible.builtin.copy:
     content: |
       {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-platform-readiness
+      {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-fleet-deploy
     dest: "/etc/sudoers.d/91-{{ platform_github_user }}-readiness"
     owner: root
     group: root

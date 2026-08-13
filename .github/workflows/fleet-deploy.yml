@@ -1,0 +1,128 @@
+name: fleet-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Protected target environment
+        required: true
+        type: choice
+        options: [develop, staging, prod]
+      source_git_sha:
+        description: Full 40-character commit SHA reachable from main
+        required: true
+        type: string
+      mode:
+        description: Dry-run performs no SSH to fleet nodes; apply enables the infrastructure stages
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, apply]
+      initial:
+        description: Confirm the intentional first deployment when no deployment ref exists
+        required: true
+        default: false
+        type: boolean
+      resume:
+        description: Resume the existing environment/SHA deployment record
+        required: true
+        default: false
+        type: boolean
+      allow_destructive:
+        description: Allow an impact plan that removes fleet membership, nodes, or bridges
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.source_git_sha }}
+          fetch-depth: 0
+
+      - name: Validate reviewed source and deployment baseline
+        id: source
+        shell: bash
+        env:
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+          REQUESTED_INITIAL: ${{ inputs.initial }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          actual_sha="$(git rev-parse HEAD)"
+          test "$actual_sha" = "$REQUESTED_SHA"
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git merge-base --is-ancestor "$actual_sha" refs/remotes/origin/main
+
+          deployment_ref="refs/deployments/$REQUESTED_ENVIRONMENT"
+          if git ls-remote --exit-code origin "$deployment_ref" >/dev/null 2>&1; then
+            test "$REQUESTED_INITIAL" = false
+            git fetch --no-tags origin "+$deployment_ref:$deployment_ref"
+            printf 'baseline=present\n' >> "$GITHUB_OUTPUT"
+          else
+            test "$REQUESTED_INITIAL" = true
+            printf 'baseline=absent\n' >> "$GITHUB_OUTPUT"
+          fi
+
+          git config --local --unset-all http.https://github.com/.extraheader || true
+
+      - name: Build the exact non-secret Git handoff bundle
+        shell: bash
+        env:
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+          BASELINE: ${{ steps.source.outputs.baseline }}
+        run: |
+          set -euo pipefail
+          source_ref=refs/spiritvpn/source
+          git update-ref "$source_ref" "$REQUESTED_SHA"
+          refs=("$source_ref")
+          if test "$BASELINE" = present; then
+            refs+=("refs/deployments/$REQUESTED_ENVIRONMENT")
+          fi
+          git bundle create "$RUNNER_TEMP/fleet-deploy.bundle" "${refs[@]}"
+          git update-ref -d "$source_ref"
+          git bundle verify "$RUNNER_TEMP/fleet-deploy.bundle"
+
+      - name: Install the environment-protected SSH identity
+        shell: bash
+        env:
+          PLATFORM_SSH_PRIVATE_KEY: ${{ secrets.PLATFORM_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$PLATFORM_SSH_PRIVATE_KEY"
+          umask 077
+          printf '%s\n' "$PLATFORM_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/platform-ssh-key"
+
+      - name: Invoke the restricted management executor
+        shell: bash
+        env:
+          PLATFORM_SSH_PRIVATE_KEY_FILE: ${{ runner.temp }}/platform-ssh-key
+          PLATFORM_SSH_KNOWN_HOSTS_FILE: inventories/bootstrap/known_hosts
+          PLATFORM_SSH_HOST: ${{ vars.PLATFORM_SSH_HOST }}
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_INITIAL: ${{ inputs.initial }}
+          REQUESTED_RESUME: ${{ inputs.resume }}
+          REQUESTED_DESTRUCTIVE: ${{ inputs.allow_destructive }}
+        run: |
+          set -euo pipefail
+          test -n "$PLATFORM_SSH_HOST"
+          scripts/platform-remote.sh \
+            "$PLATFORM_SSH_HOST" fleet-deploy \
+            "$REQUESTED_ENVIRONMENT" "$REQUESTED_SHA" "$REQUESTED_MODE" \
+            "$REQUESTED_INITIAL" "$REQUESTED_RESUME" "$REQUESTED_DESTRUCTIVE" \
+            < "$RUNNER_TEMP/fleet-deploy.bundle"

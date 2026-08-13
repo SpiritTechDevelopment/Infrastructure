@@ -9,13 +9,15 @@ connects to Vault or fleet nodes directly.
 ```text
 GitHub Actions -- restricted SSH command --> management VPS
                                             ├── Vault on 127.0.0.1
-                                            ├── fleetctl and Ansible (future)
+                                            ├── fleetctl and Ansible
                                             └── management-network access
 ```
 
 ## Trust boundary
 
-- The only GitHub secret is an environment-scoped SSH private key.
+- The only GitHub secret is an environment-scoped SSH private key. Vault
+  AppRole credentials and the fleet SSH key are root-owned files on the
+  management host.
 - Each matching key is installed on the separate `github-deploy` account with an
   OpenSSH forced command, an immutable environment argument and `restrict`
   options. A workflow cannot claim another environment through command input.
@@ -37,12 +39,27 @@ moving SSH behind a stable private runner remains the exit condition.
 
 ## Current authorization
 
-`.github/workflows/platform-readiness.yml` invokes only
-`platform-readiness`. The management host locally checks Vault status and
-returns non-secret JSON. GitHub cannot initialize/unseal Vault, read secrets,
-run Ansible, call provider/DNS/backend APIs, or move `refs/deployments/*`.
+`.github/workflows/platform-readiness.yml` invokes only `platform-readiness`.
+The management host checks Vault status and returns non-secret JSON.
 
-The next handoff increment will add a second fixed command that accepts a strict
-environment and full commit SHA, materializes that exact commit in an isolated
-directory, resolves secrets locally, and invokes the existing coordinator.
-It will be enabled only after Vault policies and the local resolver exist.
+`.github/workflows/fleet-deploy.yml` accepts an environment, a full commit SHA
+reachable from `main`, `dry-run|apply`, and three boolean guards. It sends an
+exact Git bundle over the same restricted SSH channel. The root-owned executor:
+
+1. rejects unknown refs and a SHA mismatch;
+2. imports the source and optional deployment baseline into a local bare repo;
+3. checks out the exact commit in an isolated directory;
+4. for `apply`, resolves only that environment's `secret://` references from
+   loopback Vault and materializes temporary `0600` Ansible inputs;
+5. invokes the existing resume-safe coordinator with a persistent,
+   environment-locked state directory;
+6. destroys temporary resolved secrets and the worktree on exit.
+
+The workflow cannot initialize/unseal/configure Vault, return secret values,
+call provider or DNS APIs, apply the backend manifest, or move
+`refs/deployments/*`. Until the backend adapter exists the final coordinator
+state remains `WAITING_FOR_BACKEND` even after successful infrastructure apply.
+
+GitHub transfers source objects rather than giving the management VPS a GitHub
+token or repository deploy key. Environment protection and review of the exact
+SHA remain part of the authorization boundary.

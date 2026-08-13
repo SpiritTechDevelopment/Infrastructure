@@ -32,9 +32,11 @@
     mode: "{{ item.mode }}"
   loop:
     - {path: config, owner: root, group: "1000", mode: "0750"}
+    - {path: config/policies, owner: root, group: "1000", mode: "0750"}
     - {path: pki, owner: root, group: root, mode: "0700"}
     - {path: tls, owner: root, group: "1000", mode: "0750"}
     - {path: data, owner: "100", group: "1000", mode: "0750"}
+    - {path: audit, owner: "100", group: "1000", mode: "0750"}
     - {path: snapshots, owner: "100", group: "1000", mode: "0750"}
 
 - name: Generate local Vault transport CA private key
@@ -195,6 +197,27 @@
   loop:
     - {src: vault.hcl.j2, dest: config/vault.hcl, group: "1000", mode: "0640"}
     - {src: compose.yml.j2, dest: compose.yml, group: root, mode: "0640"}
+  no_log: true
+  diff: false
+
+- name: Render environment-scoped fleet deployer policies
+  ansible.builtin.template:
+    src: policy-fleet-deployer.hcl.j2
+    dest: "{{ platform_vault_dir }}/config/policies/fleet-deployer-{{ item }}.hcl"
+    owner: root
+    group: "1000"
+    mode: "0640"
+  loop: [develop, staging, prod]
+  vars:
+    policy_environment: "{{ item }}"
+
+- name: Install the manual Vault ceremony command
+  ansible.builtin.template:
+    src: spiritvpn-vault-operator.j2
+    dest: /usr/local/sbin/spiritvpn-vault-operator
+    owner: root
+    group: root
+    mode: "0700"
   no_log: true
   diff: false
 

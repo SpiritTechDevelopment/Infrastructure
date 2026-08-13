@@ -1,0 +1,9 @@
+# The management executor may resolve only this environment's deployment
+# secrets. It cannot write secrets, configure Vault, unseal it, or issue tokens.
+path "kv/data/{{ policy_environment }}/*" {
+  capabilities = ["read"]
+}
+
+path "kv/metadata/{{ policy_environment }}/*" {
+  capabilities = ["read", "list"]
+}

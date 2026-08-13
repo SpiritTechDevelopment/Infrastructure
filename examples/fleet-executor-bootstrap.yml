@@ -1,0 +1,9 @@
+---
+# Install as /etc/spiritvpn/deploy/<environment>/bootstrap.yml on the management
+# executor. This file contains public/operator inputs, not secret:// values.
+spiritvpn_operator_ssh_public_keys:
+  - ssh-ed25519 REPLACE_WITH_REVIEWED_FLEET_OPERATOR_PUBLIC_KEY
+bootstrap_wireguard_hub_endpoint: REPLACE_WITH_PUBLIC_HOST_OR_IP:51820
+bootstrap_wireguard_hub_public_key: REPLACE_WITH_44_CHARACTER_WIREGUARD_PUBLIC_KEY
+bootstrap_wireguard_hub_management_address: REPLACE_WITH_MANAGEMENT_HUB_ADDRESS
+spiritvpn_agent_certificate_chains: {}

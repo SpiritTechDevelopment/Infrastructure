@@ -27,5 +27,5 @@ Supporting indexes:
 Operational procedures that are not implemented by the v1 coordinator are not
 documented as available. The current coordinator stops at
 `WAITING_FOR_BACKEND`; backend apply, DNS/data-plane promotion, drain/retire,
-rollback, protected runner operation, and deployment-ref advancement remain
-future work.
+rollback, and deployment-ref advancement remain future work. The protected
+GitHub-to-management handoff is documented under [operations/](operations/).

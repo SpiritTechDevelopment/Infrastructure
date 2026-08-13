@@ -1,19 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  printf '%s\n' 'usage: platform-remote.sh <management-host> platform-readiness' >&2
+if [[ $# -lt 2 ]]; then
+  printf '%s\n' 'usage: platform-remote.sh <management-host> <platform-readiness|fleet-deploy ...>' >&2
   exit 64
 fi
 
 host="$1"
 operation="$2"
+shift 2
 if [[ ! "$host" =~ ^[A-Za-z0-9.:[\]-]+$ ]]; then
   printf '%s\n' 'invalid management host' >&2
   exit 64
 fi
 case "$operation" in
-  platform-readiness) ;;
+  platform-readiness)
+    [[ $# -eq 0 ]] || { printf '%s\n' 'platform-readiness accepts no arguments' >&2; exit 64; }
+    remote_command=platform-readiness
+    ;;
+  fleet-deploy)
+    [[ $# -eq 6 ]] || { printf '%s\n' 'fleet-deploy requires environment, SHA, mode and three boolean flags' >&2; exit 64; }
+    environment="$1"
+    source_git_sha="$2"
+    mode="$3"
+    initial="$4"
+    resume="$5"
+    allow_destructive="$6"
+    [[ "$environment" =~ ^(develop|staging|prod)$ ]] || { printf '%s\n' 'invalid environment' >&2; exit 64; }
+    [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'invalid source Git SHA' >&2; exit 64; }
+    [[ "$mode" =~ ^(dry-run|apply)$ ]] || { printf '%s\n' 'invalid deployment mode' >&2; exit 64; }
+    [[ "$initial" =~ ^(true|false)$ ]] || { printf '%s\n' 'invalid initial flag' >&2; exit 64; }
+    [[ "$resume" =~ ^(true|false)$ ]] || { printf '%s\n' 'invalid resume flag' >&2; exit 64; }
+    [[ "$allow_destructive" =~ ^(true|false)$ ]] || { printf '%s\n' 'invalid destructive flag' >&2; exit 64; }
+    remote_command="fleet-deploy $environment $source_git_sha $mode $initial $resume $allow_destructive"
+    ;;
   *)
     printf '%s\n' 'unsupported platform operation' >&2
     exit 64
@@ -33,4 +53,4 @@ exec ssh \
   -o PasswordAuthentication=no \
   -o KbdInteractiveAuthentication=no \
   -o RequestTTY=no \
-  -- "github-deploy@$host" "$operation"
+  -- "github-deploy@$host" "$remote_command"

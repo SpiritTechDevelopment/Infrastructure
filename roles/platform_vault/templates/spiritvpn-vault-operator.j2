@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+compose="{{ platform_vault_dir }}/compose.yml"
+credentials_root="{{ platform_executor_config_dir }}"
+vault_environment=(
+  -e "VAULT_ADDR=https://127.0.0.1:{{ platform_vault_api_port }}"
+  -e "VAULT_CACERT=/vault/tls/vault-ca.crt"
+  -e "VAULT_TLS_SERVER_NAME={{ platform_vault_tls_server_name }}"
+)
+
+vault_without_token() {
+  docker compose -f "$compose" exec -T "${vault_environment[@]}" vault vault "$@"
+}
+
+read_root_token() {
+  read -rsp 'Temporary Vault root token: ' root_token </dev/tty
+  printf '\n' >/dev/tty
+  test -n "$root_token"
+}
+
+vault_as_root() {
+  printf '%s\n' "$root_token" | docker compose -f "$compose" exec -T \
+    "${vault_environment[@]}" vault sh -c \
+    'IFS= read -r VAULT_TOKEN; export VAULT_TOKEN; exec vault "$@"' sh "$@"
+}
+
+vault_as_root_with_input() {
+  input_file="$1"
+  shift
+  { printf '%s\n' "$root_token"; cat -- "$input_file"; } | \
+    docker compose -f "$compose" exec -T "${vault_environment[@]}" vault sh -c \
+      'IFS= read -r VAULT_TOKEN; export VAULT_TOKEN; exec vault "$@"' sh "$@"
+}
+
+require_environment() {
+  case "${1:-}" in
+    develop|staging|prod) ;;
+    *) printf '%s\n' 'environment must be develop, staging, or prod' >&2; exit 64 ;;
+  esac
+}
+
+command="${1:-}"
+case "$command" in
+  status)
+    [[ $# -eq 1 ]] || exit 64
+    exec docker compose -f "$compose" exec -T "${vault_environment[@]}" \
+      vault vault status -format=json
+    ;;
+  init)
+    [[ $# -eq 3 ]] || { printf '%s\n' 'usage: spiritvpn-vault-operator init <shares> <threshold>' >&2; exit 64; }
+    [[ "$2" =~ ^[1-9][0-9]*$ && "$3" =~ ^[1-9][0-9]*$ ]] || exit 64
+    (( 10#$3 <= 10#$2 )) || { printf '%s\n' 'threshold cannot exceed shares' >&2; exit 64; }
+    exec docker compose -f "$compose" exec -T "${vault_environment[@]}" vault \
+      vault operator init -key-shares="$2" -key-threshold="$3" -format=json
+    ;;
+  unseal)
+    [[ $# -eq 1 ]] || exit 64
+    read -rsp 'Unseal key share: ' unseal_key </dev/tty
+    printf '\n' >/dev/tty
+    test -n "$unseal_key"
+    printf '%s' "$unseal_key" | docker compose -f "$compose" exec -T \
+      "${vault_environment[@]}" vault sh -c 'read -r key; vault operator unseal -format=json "$key"'
+    unset unseal_key
+    ;;
+  configure)
+    [[ $# -eq 2 ]] || { printf '%s\n' 'usage: spiritvpn-vault-operator configure <environment>' >&2; exit 64; }
+    environment="$2"
+    require_environment "$environment"
+    read_root_token
+
+    if ! vault_as_root secrets list -format=json | grep -q '"kv/"'; then
+      vault_as_root secrets enable -path=kv -version=2 kv
+    fi
+    if ! vault_as_root auth list -format=json | grep -q '"approle/"'; then
+      vault_as_root auth enable approle
+    fi
+    if ! vault_as_root audit list -format=json | grep -q '"file/"'; then
+      vault_as_root audit enable file file_path=/vault/audit/audit.log
+    fi
+
+    policy="fleet-deployer-$environment"
+    vault_as_root policy write "$policy" "/vault/config/policies/$policy.hcl"
+    vault_as_root write "auth/approle/role/$policy" \
+      token_policies="$policy" \
+      token_no_default_policy=true \
+      token_ttl=10m token_max_ttl=15m \
+      token_bound_cidrs=127.0.0.1/32 \
+      secret_id_bound_cidrs=127.0.0.1/32 \
+      secret_id_ttl=0 secret_id_num_uses=0
+
+    credential_dir="$credentials_root/$environment/vault-approle"
+    install -d -o root -g root -m 0700 "$credential_dir"
+    if [[ -s "$credential_dir/secret-id-accessor" ]]; then
+      old_accessor="$(<"$credential_dir/secret-id-accessor")"
+      vault_as_root write "auth/approle/role/$policy/secret-id-accessor/destroy" \
+        secret_id_accessor="$old_accessor" >/dev/null
+    fi
+    role_id="$(vault_as_root read -field=role_id "auth/approle/role/$policy/role-id")"
+    secret_json="$(vault_as_root write -format=json -f "auth/approle/role/$policy/secret-id")"
+    secret_id="$(printf '%s' "$secret_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["secret_id"])')"
+    secret_accessor="$(printf '%s' "$secret_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["secret_id_accessor"])')"
+    printf '%s\n' "$role_id" > "$credential_dir/role-id"
+    printf '%s\n' "$secret_id" > "$credential_dir/secret-id"
+    printf '%s\n' "$secret_accessor" > "$credential_dir/secret-id-accessor"
+    chmod 0600 "$credential_dir/role-id" "$credential_dir/secret-id" "$credential_dir/secret-id-accessor"
+    unset root_token role_id secret_id secret_accessor secret_json old_accessor
+    printf '%s\n' "$environment Vault policy and local executor AppRole configured"
+    ;;
+  put)
+    [[ $# -eq 3 ]] || { printf '%s\n' 'usage: spiritvpn-vault-operator put <environment> <secret:// reference>' >&2; exit 64; }
+    environment="$2"
+    reference="$3"
+    require_environment "$environment"
+    if [[ ! "$reference" =~ ^secret://kv/(develop|staging|prod)/([a-zA-Z0-9._/-]+)#([a-zA-Z_][a-zA-Z0-9_]*)$ ]]; then
+      printf '%s\n' 'invalid secret reference' >&2
+      exit 64
+    fi
+    [[ "${BASH_REMATCH[1]}" == "$environment" ]] || { printf '%s\n' 'cross-environment secret write refused' >&2; exit 64; }
+    relative_path="${BASH_REMATCH[2]}"
+    field="${BASH_REMATCH[3]}"
+    [[ "/$relative_path/" != *'/../'* && "/$relative_path/" != *'//'* ]] || exit 64
+    read_root_token
+    printf 'Paste the value for %s and finish with Ctrl-D:\n' "$reference" >/dev/tty
+    payload="$(mktemp)"
+    trap 'rm -f -- "$payload"' EXIT
+    cat > "$payload"
+    test -s "$payload" || { printf '%s\n' 'empty secret value refused' >&2; exit 65; }
+    if vault_as_root kv get -mount=kv "$environment/$relative_path" >/dev/null 2>&1; then
+      vault_as_root_with_input "$payload" kv patch -mount=kv \
+        "$environment/$relative_path" "$field=-" >/dev/null
+    else
+      vault_as_root_with_input "$payload" kv put -mount=kv \
+        "$environment/$relative_path" "$field=-" >/dev/null
+    fi
+    unset root_token
+    printf '%s\n' "$reference stored"
+    ;;
+  snapshot)
+    [[ $# -eq 1 ]] || exit 64
+    read_root_token
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    container_path="/vault/snapshots/vault-$timestamp.snap"
+    vault_as_root operator raft snapshot save "$container_path"
+    unset root_token
+    printf '%s\n' "snapshot created at {{ platform_vault_dir }}/snapshots/vault-$timestamp.snap"
+    ;;
+  *)
+    printf '%s\n' 'usage: spiritvpn-vault-operator <status|init|unseal|configure|put|snapshot>' >&2
+    exit 64
+    ;;
+esac

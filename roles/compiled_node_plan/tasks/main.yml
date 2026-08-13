@@ -75,6 +75,8 @@
     common_public_udp_ports: ["{{ spiritvpn_node_plan.infrastructure.networking.management.listen_port }}"]
     common_management_interface: "{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}"
     common_management_cidr: "{{ spiritvpn_node_plan.instance.management_network }}"
+    pki_agent_certificate_chain: >-
+      {{ spiritvpn_agent_certificate_chains.get(spiritvpn_node_plan.instance.id, '') }}
     common_restricted_tcp_rules:
       - ports: ["{{ spiritvpn_node_plan.infrastructure.networking.agent.port }}"]
         cidrs: ["{{ spiritvpn_node_plan.instance.management_network }}"]
