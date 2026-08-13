@@ -24,6 +24,10 @@ Supporting indexes:
 - [status/README.md](status/README.md)
 - [operations/README.md](operations/README.md)
 
+Для последовательного знакомства со всей системой без чтения нормативной
+спецификации начните с русскоязычного
+[операторского гайда](operations/INFRA_V1_GUIDE_RU.md).
+
 Operational procedures that are not implemented by the v1 coordinator are not
 documented as available. The current coordinator stops at
 `WAITING_FOR_BACKEND`; backend apply, DNS/data-plane promotion, drain/retire,

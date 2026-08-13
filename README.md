@@ -5,6 +5,10 @@ infrastructure desired state. The v1 contour is fail-closed: local validation an
 rendering perform no network I/O, deployment is dry-run by default, and the
 coordinator currently stops at the backend boundary.
 
+Для последовательного объяснения системы простыми словами — включая Ansible,
+Vault, PKI, GitHub workflow, первый запуск и текущие ограничения — см.
+[`INFRA_V1_GUIDE_RU.md`](docs/operations/INFRA_V1_GUIDE_RU.md).
+
 ## Sources of truth
 
 - [`docs/architecture/INFRA_TECHNICAL_SPEC.md`](docs/architecture/INFRA_TECHNICAL_SPEC.md)
