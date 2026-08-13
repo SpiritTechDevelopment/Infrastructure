@@ -4,8 +4,8 @@ skip_list:
   - var-naming[no-role-prefix]
   - run-once[task]
 warn_list:
-  # Keep long encrypted SOPS payloads and public keys visible without making
-  # formatting-only findings block otherwise valid infrastructure changes.
+  # Keep long public keys visible without making formatting-only findings block
+  # otherwise valid infrastructure changes.
   - yaml[line-length]
 exclude_paths:
   - .local-secrets/

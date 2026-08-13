@@ -1,6 +1,6 @@
 ---
 # fleetctl enables the role and supplies the remaining values per Instance.
-# Disabled by default so legacy inventories are not mutated implicitly.
+# Enabled explicitly by the compiled node plan for every non-retired instance.
 node_limits_egress_enabled: false
 node_limits_egress_interface: ""
 node_limits_bandwidth_profile: ""

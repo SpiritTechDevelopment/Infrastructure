@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 3 ]]; then
+  printf '%s\n' 'invalid platform deployment invocation' >&2
+  exit 64
+fi
+environment="$1"
+source_git_sha="$2"
+mode="$3"
+
+[[ "$environment" =~ ^(develop|staging|prod)$ ]] || exit 64
+[[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || exit 64
+[[ "$mode" =~ ^(check|apply)$ ]] || exit 64
+
+umask 077
+executor_dir="{{ platform_executor_dir }}"
+repository="$executor_dir/platform-repository.git"
+bundle="$(mktemp "$executor_dir/incoming/platform.XXXXXXXX.bundle")"
+worktree="$(mktemp -d "$executor_dir/incoming/platform.XXXXXXXX.worktree")"
+cleanup() {
+  rm -f -- "$bundle"
+  rm -rf -- "$worktree"
+}
+trap cleanup EXIT
+
+exec 9>"$executor_dir/platform.lock"
+if ! flock -n 9; then
+  printf '%s\n' 'platform deployment already active' >&2
+  exit 75
+fi
+
+ulimit -f "{{ platform_executor_bundle_limit_kib }}"
+dd of="$bundle" bs=64K status=none
+test -s "$bundle"
+
+if [[ ! -d "$repository" ]]; then
+  git init --bare "$repository" >/dev/null
+fi
+git --git-dir="$repository" bundle verify "$bundle" >/dev/null
+
+source_ref=refs/spiritvpn/platform-source
+mapfile -t bundle_heads < <(git bundle list-heads "$bundle")
+test "${#bundle_heads[@]}" -eq 1 || { printf '%s\n' 'platform bundle must contain exactly one ref' >&2; exit 65; }
+read -r head_sha head_ref extra <<< "${bundle_heads[0]}"
+test -z "${extra:-}" || { printf '%s\n' 'invalid platform Git bundle head' >&2; exit 65; }
+test "$head_ref" = "$source_ref" || { printf '%s\n' 'unexpected platform Git bundle ref' >&2; exit 65; }
+test "$head_sha" = "$source_git_sha" || { printf '%s\n' 'platform bundle SHA mismatch' >&2; exit 65; }
+
+git --git-dir="$repository" fetch --no-tags "$bundle" "+$source_ref:$source_ref" >/dev/null
+test "$(git --git-dir="$repository" rev-parse "$source_ref^{commit}")" = "$source_git_sha"
+git clone --no-checkout --shared "$repository" "$worktree" >/dev/null
+git -C "$worktree" checkout --detach "$source_git_sha" >/dev/null
+test -z "$(git -C "$worktree" status --short)"
+
+test -s "{{ platform_runtime_vars_file }}" || {
+  printf '%s\n' 'missing protected management runtime configuration' >&2
+  exit 66
+}
+
+arguments=(
+  -i localhost,
+  --connection local
+  "$worktree/playbooks/platform/steady.yml"
+  --extra-vars "@{{ platform_runtime_vars_file }}"
+)
+if test "$mode" = check; then
+  arguments+=(--check --diff)
+fi
+
+cd "$worktree"
+"{{ platform_executor_dir }}/venv/bin/ansible-playbook" "${arguments[@]}"
+
+if test "$mode" = apply; then
+  git --git-dir="$repository" update-ref \
+    "refs/platform-deployments/$environment" "$source_git_sha"
+fi

@@ -13,6 +13,16 @@ from pathlib import Path
 import yaml
 
 
+PRIVATE_MANAGEMENT_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+)
+
+
+def is_allowed_management_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return address.is_global or any(address in network for network in PRIVATE_MANAGEMENT_NETWORKS)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--inventory", required=True, type=Path)
@@ -29,8 +39,8 @@ def main() -> int:
         if variables["ansible_user"] != "root":
             raise ValueError("initial management bootstrap user must be root")
         address = ipaddress.ip_address(variables["ansible_host"])
-        if not address.is_global:
-            raise ValueError("management ansible_host must be a globally routable IP address")
+        if not is_allowed_management_address(address):
+            raise ValueError("management ansible_host must be a global or private tunnel IP address")
         known_hosts = [
             line.strip()
             for line in args.known_hosts.read_text(encoding="utf-8").splitlines()

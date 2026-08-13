@@ -7,6 +7,8 @@ platform_vault_tls_server_name: vault.management.internal
 platform_executor_dir: /opt/spiritvpn/platform/executor
 platform_executor_state_dir: /var/lib/spiritvpn/fleetctl
 platform_executor_config_dir: /etc/spiritvpn/deploy
+platform_runtime_config_dir: /etc/spiritvpn/platform
+platform_runtime_vars_file: /etc/spiritvpn/platform/runtime-vars.yml
 platform_executor_bundle_limit_kib: 262144
 platform_executor_python_packages:
   - ansible-core>=2.18,<2.19

@@ -1,10 +1,14 @@
 ---
 - name: Check the v1 platform bootstrap boundary
-  hosts: spiritvpn_platform_bootstrap
+  hosts: "{{ platform_readiness_hosts | default('spiritvpn_platform_bootstrap') }}"
   become: true
   gather_facts: false
   serial: 1
   any_errors_fatal: true
+  vars:
+    platform_vault_dir: /opt/spiritvpn/platform/vault
+    platform_vault_api_port: 8200
+    platform_vault_tls_server_name: vault.management.internal
   tasks:
     - name: Wait for Vault status endpoint inside the container
       ansible.builtin.command:

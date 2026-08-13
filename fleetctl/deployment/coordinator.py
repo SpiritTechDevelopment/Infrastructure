@@ -194,24 +194,41 @@ class DeploymentCoordinator:
 
             if options.apply:
                 self._require_apply_inputs(options)
-                self._run_ansible(
-                    build_directory / "bootstrap-inventory.json",
-                    self.root / "playbooks" / "bootstrap" / "bootstrap.yml",
-                    options.bootstrap_vars,
+                bootstrap_targets = plan.affected["provision"]
+                configure_targets = tuple(
+                    sorted(
+                        set(plan.affected["configure"])
+                        | set(plan.affected["node_runtime"])
+                        | set(bootstrap_targets)
+                    )
                 )
-                self._complete_step(record, record_path, "bootstrap", "Ansible completed")
-                self._run_ansible(
-                    build_directory / "ansible-inventory.json",
-                    self.root / "playbooks" / "deploy" / "configure.yml",
-                    options.compiled_secrets,
+                self._reconcile_ansible_step(
+                    record=record,
+                    record_path=record_path,
+                    step="bootstrap",
+                    targets=bootstrap_targets,
+                    inventory=build_directory / "bootstrap-inventory.json",
+                    playbook=self.root / "playbooks" / "bootstrap" / "bootstrap.yml",
+                    variables=options.bootstrap_vars,
                 )
-                self._complete_step(record, record_path, "configure", "Ansible completed")
-                self._run_ansible(
-                    build_directory / "ansible-inventory.json",
-                    self.root / "playbooks" / "operations" / "readiness.yml",
-                    options.readiness_vars,
+                self._reconcile_ansible_step(
+                    record=record,
+                    record_path=record_path,
+                    step="configure",
+                    targets=configure_targets,
+                    inventory=build_directory / "ansible-inventory.json",
+                    playbook=self.root / "playbooks" / "deploy" / "configure.yml",
+                    variables=options.compiled_secrets,
                 )
-                self._complete_step(record, record_path, "readiness_gates", "all gates passed")
+                self._reconcile_ansible_step(
+                    record=record,
+                    record_path=record_path,
+                    step="readiness_gates",
+                    targets=configure_targets,
+                    inventory=build_directory / "ansible-inventory.json",
+                    playbook=self.root / "playbooks" / "operations" / "readiness.yml",
+                    variables=options.readiness_vars,
+                )
             else:
                 for step in ("bootstrap", "configure", "readiness_gates"):
                     self._skip_step(record, record_path, step, "SKIPPED_DRY_RUN; no SSH or mutation")
@@ -341,8 +358,42 @@ class DeploymentCoordinator:
         if missing:
             raise DeploymentError(f"--apply requires readable {', '.join(missing)} files")
 
-    def _run_ansible(self, inventory: Path, playbook: Path, variables: Path | None) -> None:
+    def _reconcile_ansible_step(
+        self,
+        *,
+        record: dict[str, Any],
+        record_path: Path,
+        step: str,
+        targets: tuple[str, ...],
+        inventory: Path,
+        playbook: Path,
+        variables: Path | None,
+    ) -> None:
+        if self._step_is_completed(record, step):
+            return
+        if not targets:
+            self._complete_step(record, record_path, step, "no affected nodes; no Ansible invocation")
+            return
+        self._run_ansible(inventory, playbook, variables, limit=targets)
+        self._complete_step(
+            record,
+            record_path,
+            step,
+            f"Ansible converged {len(targets)} affected node(s): {', '.join(targets)}",
+        )
+
+    def _run_ansible(
+        self,
+        inventory: Path,
+        playbook: Path,
+        variables: Path | None,
+        *,
+        limit: tuple[str, ...],
+    ) -> None:
+        if not limit:
+            raise DeploymentError("internal error: refusing an unbounded Ansible invocation")
         arguments = ["ansible-playbook", "-i", str(inventory), str(playbook)]
+        arguments.extend(("--limit", ",".join(limit)))
         if variables is not None:
             arguments.extend(("--extra-vars", f"@{variables}"))
         try:
@@ -356,6 +407,13 @@ class DeploymentCoordinator:
     def _complete_step(record: dict[str, Any], path: Path, name: str, diagnostic: str) -> None:
         DeploymentCoordinator._set_step(record, name, "COMPLETED", diagnostic)
         DeploymentCoordinator._write_record(path, record)
+
+    @staticmethod
+    def _step_is_completed(record: dict[str, Any], name: str) -> bool:
+        return any(
+            step.get("name") == name and step.get("status") == "COMPLETED"
+            for step in record["steps"]
+        )
 
     @staticmethod
     def _skip_step(record: dict[str, Any], path: Path, name: str, diagnostic: str) -> None:

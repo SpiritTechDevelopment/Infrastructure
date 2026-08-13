@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   readiness:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, spiritvpn-deploy]
     environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -26,19 +26,23 @@ jobs:
         shell: bash
         env:
           PLATFORM_SSH_PRIVATE_KEY: ${{ secrets.PLATFORM_SSH_PRIVATE_KEY }}
+          PLATFORM_SSH_KNOWN_HOSTS: ${{ secrets.PLATFORM_SSH_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
           test -n "$PLATFORM_SSH_PRIVATE_KEY"
+          test -n "$PLATFORM_SSH_KNOWN_HOSTS"
           umask 077
           printf '%s\n' "$PLATFORM_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/platform-ssh-key"
-      - name: Validate tracked public SSH trust input
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${{ vars.PLATFORM_SSH_HOST }}"
-          grep -Ev '^[[:space:]]*(#|$)' inventories/bootstrap/known_hosts >/dev/null
+          printf '%s\n' "$PLATFORM_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/platform-known-hosts"
       - name: Invoke the restricted read-only command
         env:
+          PLATFORM_SSH_HOST: ${{ secrets.PLATFORM_SSH_HOST }}
           PLATFORM_SSH_PRIVATE_KEY_FILE: ${{ runner.temp }}/platform-ssh-key
-          PLATFORM_SSH_KNOWN_HOSTS_FILE: inventories/bootstrap/known_hosts
-        run: scripts/platform-remote.sh "${{ vars.PLATFORM_SSH_HOST }}" platform-readiness
+          PLATFORM_SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/platform-known-hosts
+        run: |
+          test -n "$PLATFORM_SSH_HOST"
+          scripts/platform-remote.sh "$PLATFORM_SSH_HOST" platform-readiness
+      - name: Remove temporary SSH material
+        if: always()
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/platform-ssh-key" "$RUNNER_TEMP/platform-known-hosts"

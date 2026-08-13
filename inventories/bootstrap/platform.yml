@@ -1,7 +1,0 @@
----
-# The only hand-maintained inventory allowed by infrastructure v1. Add exactly
-# one management host after creating it manually; never put secrets here.
-all:
-  children:
-    spiritvpn_platform_bootstrap:
-      hosts: {}

@@ -46,7 +46,7 @@
   changed_when: true
   no_log: true
 
-- name: Reconcile public key from the retained private key on-node
+- name: Reconcile public key from the node-local private key
   ansible.builtin.shell: |
     set -euo pipefail
     umask 077
@@ -69,6 +69,21 @@
       instance_id: "{{ spiritvpn_node_plan.instance.id }}"
       management_address: "{{ spiritvpn_node_plan.instance.management_address }}"
       public_key: "{{ _bootstrap_wireguard_public_key.content | b64decode | trim }}"
+
+- name: Reconcile this node as a management-hub peer
+  ansible.builtin.command:
+    argv:
+      - "{{ bootstrap_wireguard_hub_peer_command }}"
+      - reconcile
+      - "{{ spiritvpn_node_plan.environment }}"
+      - "{{ spiritvpn_node_plan.instance.id }}"
+      - "{{ bootstrap_wireguard_address }}"
+      - "{{ _bootstrap_wireguard_public_key.content | b64decode | trim }}"
+  delegate_to: localhost
+  become: true
+  register: _bootstrap_wireguard_hub_peer
+  changed_when: "'changed' in _bootstrap_wireguard_hub_peer.stdout_lines"
+  no_log: true
 
 - name: Install node-local WireGuard config reconciler
   ansible.builtin.template:

@@ -16,10 +16,11 @@
     common_enable_unattended_upgrades: true
     common_enable_auditd: true
     common_public_tcp_ports: []
-    common_public_udp_ports: []
+    common_public_udp_ports: ["{{ platform_wireguard_listen_port }}"]
+    common_trusted_interfaces: ["{{ platform_wireguard_interface }}"]
     ssh_allowed_cidrs: "{{ platform_ssh_allowed_cidrs }}"
     common_fail2ban_ignoreip: >-
-      127.0.0.1/8 ::1 {{ platform_ssh_allowed_cidrs | join(' ') }}
+      127.0.0.1/8 ::1 {{ platform_fail2ban_ignore_cidrs | default([]) | join(' ') }}
   pre_tasks:
     - name: Require explicit non-secret operator inputs
       ansible.builtin.assert:
@@ -27,13 +28,15 @@
           - platform_operator_ssh_public_keys | default([]) | length > 0
           - platform_github_ssh_keys | default([]) | length > 0
           - platform_ssh_allowed_cidrs | default([]) | length > 0
-          - >-
-            platform_vault_image | default('') is
-            match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+          - platform_wireguard_operator_peers | default([]) | length > 0
+          - platform_wireguard_hub_addresses | default({}) | length > 0
+          - platform_wireguard_public_endpoint is match('^[A-Za-z0-9.:[\]-]+:[0-9]{1,5}$')
+          - platform_fail2ban_ignore_cidrs | default([]) is sequence
         fail_msg: >-
-          Bootstrap requires reviewed operator/GitHub public keys, explicit SSH
-          source CIDRs and a Vault image pinned by digest.
+          Bootstrap requires reviewed SSH keys/CIDRs and at least one operator
+          WireGuard peer for clean-host management access.
   roles:
+    - role: platform_wireguard
     - role: docker
     - role: common
     - role: platform_vault

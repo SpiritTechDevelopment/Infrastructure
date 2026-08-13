@@ -1,9 +1,4 @@
-# MANAGED by playbooks/access.yml from the `operators` list (group_vars).
-# Do not edit by hand — changes are overwritten. Add/remove operators via a
-# reviewed PR to `operators`, then run playbooks/access.yml (--check --diff first).
+# Managed by the SpiritVPN bootstrap contour. Do not edit by hand.
 {% for key in common_authorized_keys %}
 {{ key }}
-{% endfor %}
-{% for op in operators | default([]) %}
-{{ op.ssh_key }}
 {% endfor %}

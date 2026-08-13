@@ -10,6 +10,5 @@ descriptive compatibility document:
 | [Infrastructure specification](../architecture/INFRA_TECHNICAL_SPEC.md) | Infrastructure-owned topology, rollout, PKI, readiness, and required backend delta |
 | [Desired-state schemas](../../contracts/desired-state/README.md) | Structural input contract consumed by `fleetctl` |
 
-The old direct-Xray API and add-only snapshot documentation was removed. It
-described the isolated legacy runtime and is not a supported v1 integration
-surface.
+Direct Xray mutation is not an integration surface. Runtime customer ownership
+belongs to the backend/node-agent contract.

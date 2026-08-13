@@ -71,9 +71,9 @@ build/<environment>/
 └── impact-plan.json
 ```
 
-The ordinary fleet inventory is generated from compiled desired state. The old
-manual production inventory is retained only behind explicitly named
-`legacy-*` break-glass Make targets and is not a deployment source for v1.
+The fleet inventory is always generated from compiled desired state. The only
+hand-maintained inventory is the one-host management bootstrap input, tracked
+only inside the SOPS-sealed `inventories/bootstrap/platform.sops.yml` bundle.
 
 ## Repository map
 
@@ -88,10 +88,6 @@ roles/                   reusable Ansible component roles
 tests/unit/              offline validation and orchestration tests
 docs/                    normative architecture and implementation status
 ```
-
-Legacy roles and playbooks remain temporarily because platform, Vault,
-observability, backend, DNS, and runtime replacements are not yet functionally
-complete. They are not an alternative v1 deployment path.
 
 ## Security boundary
 

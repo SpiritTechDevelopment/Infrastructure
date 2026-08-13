@@ -1,6 +1,9 @@
 ---
 platform_vault_dir: /opt/spiritvpn/platform/vault
-platform_vault_image: ""
+# Public, reviewed supply-chain pin. This is deliberately not a secret and is
+# updated through the normal pull-request flow. The digest is the multi-platform
+# index published for hashicorp/vault:1.21.4.
+platform_vault_image: "docker.io/hashicorp/vault:1.21.4@sha256:4e33b126a59c0c333b76fb4e894722462659a6bec7c48c9ee8cea56fccfd2569"
 platform_vault_api_port: 8200
 platform_vault_cluster_port: 8201
 platform_vault_tls_server_name: vault.management.internal

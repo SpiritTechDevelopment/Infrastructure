@@ -1,7 +1,5 @@
 # Ansible role map
 
-## Used by infrastructure v1
-
 | Role | Responsibility |
 |---|---|
 | `compiled_node_plan` | Validate and expose one generated node plan |
@@ -15,16 +13,9 @@
 | `xray` | Compiled Xray runtime configuration |
 | `nginx_mask` | REALITY mask service |
 | `node_exporter` | Node metrics component |
+| `platform_wireguard` | Create the management WireGuard hub and reconcile operator/node public peers without exporting private keys |
 | `platform_vault` | Install loopback-only TLS Vault and manual ceremony/policy tooling without automatic init or unseal |
 | `platform_executor` | Install the restricted GitHub SSH command gate and local deployment executor |
 
-## Retained legacy implementation
-
-`acme`, `alloy`, `backend`, `cloudflare_dns`, `management_wireguard`,
-`observability`, `vault`, and `vpn_stack` are retained only because their v1
-replacements are not functionally complete. They are not wired into the
-compiled `playbooks/deploy/configure.yml` contour and must not be treated as a
-second supported deployment path.
-
 Role inputs used by v1 come from generated node plans. Component roles must not
-read `desired/`, infer topology, or use the legacy manual production inventory.
+read `desired/`, infer topology, or use a hand-maintained fleet inventory.

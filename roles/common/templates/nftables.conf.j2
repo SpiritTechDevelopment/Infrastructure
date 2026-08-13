@@ -3,14 +3,17 @@
 # Docker's ip nat table and strand every published port). `destroy table` needs
 # nft>=1.0.3; add+delete is the 1.0.2-compatible equivalent and leaves the
 # Docker/ufw-managed tables untouched, so no `docker restart` is required.
-add table inet filter
-delete table inet filter
-table inet filter {
+add table inet spiritvpn_filter
+delete table inet spiritvpn_filter
+table inet spiritvpn_filter {
   chain input {
     type filter hook input priority filter; policy drop;
     ct state invalid drop
     ct state established,related accept
     iifname "lo" accept
+{% for interface in common_trusted_interfaces %}
+    iifname "{{ interface }}" accept
+{% endfor %}
     ip protocol icmp limit rate 20/second accept
     ip6 nexthdr ipv6-icmp limit rate 20/second accept
 
@@ -46,14 +49,6 @@ table inet filter {
 {% endfor %}
 {% endif %}
 {% endfor %}
-{% elif common_restricted_tcp_ports | length > 0 %}
-{% for cidr in common_restricted_cidrs %}
-{% if ':' in cidr %}
-    {% if common_restricted_interface | length > 0 %}iifname "{{ common_restricted_interface }}" {% endif %}ip6 saddr {{ cidr }} tcp dport { {{ common_restricted_tcp_ports | join(', ') }} } accept
-{% else %}
-    {% if common_restricted_interface | length > 0 %}iifname "{{ common_restricted_interface }}" {% endif %}ip saddr {{ cidr }} tcp dport { {{ common_restricted_tcp_ports | join(', ') }} } accept
-{% endif %}
-{% endfor %}
 {% endif %}
   }
 
@@ -61,14 +56,10 @@ table inet filter {
     type filter hook forward priority filter; policy drop;
     ct state invalid drop
     ct state established,related accept
-{% if common_docker_bridge_forwarding | bool %}
-
-    # Docker bridge networks: let containers reach each other and egress. Without
-    # this, bridge-networked platform containers (Prometheus scraping, blackbox
-    # probes) silently fail once conntrack state resets.
-    ip saddr {{ common_docker_bridge_cidr }} accept
-{% endif %}
-
+{% for interface in common_trusted_interfaces %}
+    iifname "{{ interface }}" accept
+    oifname "{{ interface }}" accept
+{% endfor %}
     # Docker-published ports are DNATed before filtering and therefore traverse
     # this forward chain (not the input chain) when userland-proxy is disabled.
 {% if common_restricted_tcp_rules | length > 0 %}
@@ -85,19 +76,8 @@ table inet filter {
 {% endfor %}
 {% endif %}
 {% endfor %}
-{% elif common_restricted_tcp_ports | length > 0 %}
-{% for cidr in common_restricted_cidrs %}
-{% if ':' in cidr %}
-    {% if common_restricted_interface | length > 0 %}iifname "{{ common_restricted_interface }}" {% endif %}ip6 saddr {{ cidr }} ct status dnat tcp dport { {{ common_restricted_tcp_ports | join(', ') }} } accept
-{% else %}
-    {% if common_restricted_interface | length > 0 %}iifname "{{ common_restricted_interface }}" {% endif %}ip saddr {{ cidr }} ct status dnat tcp dport { {{ common_restricted_tcp_ports | join(', ') }} } accept
-{% endif %}
-{% endfor %}
 {% endif %}
 
-{% if common_management_forwarding_enabled | bool %}
-    iifname "{{ common_management_interface }}" oifname "{{ common_management_interface }}" ip saddr {{ common_management_cidr }} ip daddr {{ common_management_cidr }} accept
-{% endif %}
   }
 
   chain output { type filter hook output priority filter; policy accept; }

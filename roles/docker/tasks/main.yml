@@ -1,13 +1,4 @@
 ---
-- name: Refuse Docker daemon policy changes in runtime mode
-  ansible.builtin.assert:
-    that:
-      - not docker_manage_daemon_config | bool
-      - not docker_remove_legacy_no_new_privileges | bool
-    fail_msg: >-
-      Runtime deployment does not edit /etc/docker/daemon.json. Keep both Docker
-      daemon-management flags false.
-
 - name: Check for Docker Engine
   ansible.builtin.command: docker --version
   register: _docker_engine

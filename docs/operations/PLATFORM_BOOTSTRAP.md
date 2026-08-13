@@ -9,15 +9,43 @@ Create one management VPS manually. Independently obtain its public SSH host
 key from the provider console or another trusted channel; do not discover trust
 with `ssh-keyscan` during deployment.
 
-Edit the two public bootstrap inputs:
+The reviewed one-host inventory, pinned host key and non-secret Ansible
+bootstrap variables are tracked together in
+`inventories/bootstrap/platform.sops.yml`. The `inventory`, `known_hosts` and
+`vars` values are SOPS ciphertext; their structure and values do not appear in
+Git. Edit the bundle only through SOPS:
 
-- `inventories/bootstrap/platform.yml` — exactly one global IP and `root` user;
-- `inventories/bootstrap/known_hosts` — complete public host-key line for that IP.
+```bash
+sops inventories/bootstrap/platform.sops.yml
+```
 
-Copy `examples/platform-bootstrap-vars.yml` outside the repository and fill in
-the immutable Vault image digest, reviewed operator/GitHub SSH public keys,
-explicit SSH source CIDRs, internal Vault TLS name and stable node ID. No private
-key belongs in these files.
+The first connection to a clean management VPS uses its public address from
+the encrypted inventory and its independently pinned host key. The bundle also
+carries operator SSH public keys, develop/prod handoff public keys, the
+runner's public `IP/32`, management WireGuard addresses, and operator
+WireGuard public peers. Operator laptop public addresses are not needed. Never
+decrypt the bundle into a persistent file or use `sops --decrypt --in-place`.
+
+Each operator creates a WireGuard key locally before bootstrap. Only the
+public key and its reserved `/32` addresses enter the SOPS bundle; the private
+key remains on that operator's device:
+
+```bash
+umask 077
+wg genkey > ~/.config/spiritvpn/keys/operator-wg.key
+wg pubkey < ~/.config/spiritvpn/keys/operator-wg.key
+```
+
+`fleet-platform-check` rejects an empty operator peer roster, so the final
+firewall cannot be applied before a tested recovery path has been declared.
+
+The Vault image is public configuration pinned by both version and digest in
+`roles/platform_vault/defaults/main.yml`. Upgrade it through an ordinary
+reviewed pull request; it does not belong in SOPS.
+
+The matching age private identity is an operator/recovery credential. It must
+remain outside the repository and be backed up in approved offline recovery
+storage. The public recipient and SOPS policy live in `.sops.yaml`.
 
 Use a different GitHub SSH key pair for each environment. Add each public half
 to `platform_github_ssh_keys` with its environment binding; store the matching
@@ -26,13 +54,43 @@ binding from root-owned `authorized_keys`, not from workflow input.
 
 ## 2. Validate and apply
 
+Create the ignored operator environment from the reviewed version constraints:
+
+```bash
+python3 -m venv ansible-env
+ansible-env/bin/pip install -r requirements-ansible.txt
+export PATH="$PWD/ansible-env/bin:$PATH"
+ansible --version  # must report ansible-core 2.18.x
+```
+
+WireGuard is not a prerequisite. The role installs it, generates the management
+private key on that VPS, configures the environment hub addresses and reviewed
+operator peers, starts `wg-quick`, and only then installs the final firewall.
+The management private key never leaves the VPS.
+
 ```bash
 make fleet-platform-check
-make fleet-platform-bootstrap-check CONNECT=1 \
-  PLATFORM_VARS=/protected/platform-bootstrap.yml
-make fleet-platform-bootstrap APPLY=1 \
-  PLATFORM_VARS=/protected/platform-bootstrap.yml
+make fleet-platform-bootstrap-check CONNECT=1
+make fleet-platform-bootstrap APPLY=1
 ```
+
+Each target decrypts into a fresh mode-`0700` temporary directory, materializes
+mode-`0600` inventory/known-hosts/vars files, runs validation or Ansible, and
+removes plaintext on exit. Override `PLATFORM_BUNDLE` only for an explicitly
+reviewed alternative encrypted bundle.
+
+`fleet-platform-bootstrap-check` verifies parsing, syntax, pinned SSH trust and
+connectivity; a clean-host check cannot predict files and keys that do not yet
+exist. Keep a provider console open for the first apply.
+
+`fleet-platform-bootstrap` is a two-phase orchestrator. It first installs the
+management WireGuard role while public SSH remains open, receives only the hub
+public metadata, matches the local private key to the encrypted operator
+roster, installs `/etc/wireguard/spiritvpn-mgmt.conf` through `sudo`, starts the
+local tunnel and verifies pinned SSH through it. Only after that succeeds does
+it apply the firewall, Docker, Vault and executors through the tunnel. It then
+runs the same playbook again to verify convergence. It refuses to overwrite an
+unmanaged local WireGuard config.
 
 The role hardens SSH/firewall, installs Docker, generates a host-local transport
 CA and Vault certificate, starts loopback-only Vault, and installs the
@@ -129,22 +187,39 @@ management address used by Ansible. The executor sets
 `StrictHostKeyChecking=yes`; it never invokes `ssh-keyscan`.
 
 The first node bootstrap intentionally pauses while the WireGuard public key is
-registered and its CSR is signed. Add returned public certificate chains to
+registered and its CSR is signed. WireGuard peer registration on the management
+hub is automatic; node and hub private keys never leave their hosts. Add returned public certificate chains to
 `spiritvpn_agent_certificate_chains`, keyed by instance ID, and resume the same
 SHA. Private WireGuard and agent keys never leave their node.
 
 ## 6. GitHub readiness and deployment
 
-For each GitHub Environment set:
+For each GitHub Environment set all three values as secrets:
 
 - secret `PLATFORM_SSH_PRIVATE_KEY` — private half of the dedicated forced-command key;
-- variable `PLATFORM_SSH_HOST` — the IP from the tracked bootstrap inventory.
+- secret `PLATFORM_SSH_HOST` — management address;
+- secret `PLATFORM_SSH_KNOWN_HOSTS` — complete pinned management host-key line.
 
 Run `platform-readiness` manually. GitHub connects with the tracked pinned host
 key and that workflow can execute only the root-owned readiness command. A
 sealed or uninitialized Vault returns a non-zero job result; no secret values
-are returned. The separate `fleet-deploy` workflow is restricted to the
-environment-bound deployment command described below.
+are returned. The `platform-deploy` and `fleet-deploy` workflows are restricted
+to their environment-bound commands.
+
+After the first bootstrap, management component changes use the normal Git
+flow. Merge the reviewed pull request to `main`, copy the resulting full
+40-character commit SHA, then dispatch `platform-deploy` first with
+`mode=check` and then with `mode=apply`. The runner sends only an exact Git
+bundle. The management host runs `playbooks/platform/steady.yml` locally with
+the root-owned runtime variables persisted during bootstrap; GitHub receives
+no SOPS identity or Vault credential.
+
+`inventories/bootstrap/platform.sops.yml` is intentionally not consumed by
+that steady-state command. If operator keys, the runner address, management
+address, or pinned host key change, merge the encrypted bundle change normally
+and then repeat the operator-controlled `fleet-platform-bootstrap-check` and
+`fleet-platform-bootstrap` procedure. This prevents a routine component
+upgrade from silently changing the access boundary.
 
 After readiness succeeds, run `fleet-deploy` with a full SHA already reachable
 from `main`. Start with `mode=dry-run`; choose `mode=apply` only after reviewing
@@ -154,7 +229,7 @@ deployment record/revision, so the following apply of the same SHA must set
 absent, and `allow_destructive=true` only for an explicitly reviewed destructive
 plan. A different SHA is always a separate deployment and must not use resume.
 
-The hosted runner sends an exact Git bundle but no secrets. Resolution and
+The self-hosted runner sends an exact Git bundle but no Vault secrets. Resolution and
 Ansible execution happen on the management VPS. Current coordinator behavior is
 to stop at `WAITING_FOR_BACKEND`; it does not apply backend/DNS changes or move
 the deployment ref.

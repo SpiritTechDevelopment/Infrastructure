@@ -231,6 +231,119 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                     )
                 ansible.assert_not_called()
 
+    def test_apply_limits_ansible_to_impact_plan_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            coordinator = DeploymentCoordinator(repository.root)
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            with mock.patch.object(coordinator, "_run_ansible") as ansible:
+                coordinator.run(
+                    DeploymentOptions(
+                        environment="develop",
+                        initial=True,
+                        apply=True,
+                        bootstrap_vars=variables["bootstrap.yml"],
+                        compiled_secrets=variables["secrets.yml"],
+                        readiness_vars=variables["readiness.yml"],
+                    )
+                )
+
+        self.assertEqual(ansible.call_count, 3)
+        for call in ansible.call_args_list:
+            self.assertEqual(
+                call.kwargs["limit"],
+                ("develop-entry-nl-01", "develop-exit-de-01"),
+            )
+
+    def test_no_desired_change_touches_no_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            baseline = repository.head()
+            repository.git("update-ref", "refs/deployments/develop", baseline)
+            documentation = repository.root / "README.md"
+            documentation.write_text("documentation-only change\n", encoding="utf-8")
+            repository.git("add", "README.md")
+            repository.git("commit", "-qm", "documentation only")
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            coordinator = DeploymentCoordinator(repository.root)
+            with mock.patch.object(coordinator, "_run_ansible") as ansible:
+                record = coordinator.run(
+                    DeploymentOptions(
+                        environment="develop",
+                        apply=True,
+                        bootstrap_vars=variables["bootstrap.yml"],
+                        compiled_secrets=variables["secrets.yml"],
+                        readiness_vars=variables["readiness.yml"],
+                    )
+                )
+
+        ansible.assert_not_called()
+        node_steps = {
+            step["name"]: step["diagnostic"]
+            for step in record["steps"]
+            if step["name"] in {"bootstrap", "configure", "readiness_gates"}
+        }
+        self.assertTrue(all("no affected nodes" in diagnostic for diagnostic in node_steps.values()))
+
+    def test_resume_does_not_rerun_a_completed_bootstrap_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            coordinator = DeploymentCoordinator(repository.root)
+            options = DeploymentOptions(
+                environment="develop",
+                initial=True,
+                apply=True,
+                bootstrap_vars=variables["bootstrap.yml"],
+                compiled_secrets=variables["secrets.yml"],
+                readiness_vars=variables["readiness.yml"],
+            )
+            first_calls: list[str] = []
+
+            def fail_configure(_inventory, playbook, _variables, *, limit):
+                del limit
+                first_calls.append(playbook.name)
+                if playbook.name == "configure.yml":
+                    raise DeploymentError("fixture configure failure")
+
+            with mock.patch.object(coordinator, "_run_ansible", side_effect=fail_configure):
+                with self.assertRaisesRegex(DeploymentError, "fixture configure failure"):
+                    coordinator.run(options)
+
+            resumed_calls: list[str] = []
+
+            def record_call(_inventory, playbook, _variables, *, limit):
+                del limit
+                resumed_calls.append(playbook.name)
+
+            with mock.patch.object(coordinator, "_run_ansible", side_effect=record_call):
+                coordinator.run(
+                    DeploymentOptions(
+                        environment="develop",
+                        initial=True,
+                        resume=True,
+                        apply=True,
+                        bootstrap_vars=variables["bootstrap.yml"],
+                        compiled_secrets=variables["secrets.yml"],
+                        readiness_vars=variables["readiness.yml"],
+                    )
+                )
+
+        self.assertEqual(first_calls, ["bootstrap.yml", "configure.yml"])
+        self.assertEqual(resumed_calls, ["configure.yml", "readiness.yml"])
+
     def test_environment_lock_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = self.prepare_repository(Path(temporary))

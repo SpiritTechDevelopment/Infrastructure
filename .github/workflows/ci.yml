@@ -1,10 +1,9 @@
 name: ci
 
 # Static validation only: desired state, compiler tests, deterministic render,
-# Ansible inventory parsing, lint, syntax, template render, dashboard checks.
+# generated inventory parsing, and active v1 Ansible lint/syntax checks.
 # Runs on the GitHub-hosted runner — it needs NO secrets and NO fleet access
-# (make check / make lint operate entirely on the repo + the static fixture
-# inventory). Safe to run on every PR, including from forks.
+# and is safe to run on every PR, including from forks.
 
 on:
   pull_request:
@@ -57,8 +56,7 @@ jobs:
       - name: Install tooling
         run: |
           pip install 'ansible-core>=2.18,<2.19' ansible-lint yamllint
-          ansible-galaxy collection install -r requirements.yml
-      - name: Static checks (render/syntax/dashboards)
-        run: make check STATIC_INVENTORY=examples/static-check-inventory.yml
+      - name: Static checks
+        run: make check
       - name: Lint
-        run: make lint STATIC_INVENTORY=examples/static-check-inventory.yml
+        run: make lint

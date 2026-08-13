@@ -1,2 +1,2 @@
 ---
-# Service lifecycle is centralized in vpn_stack after every configuration file exists.
+# Service lifecycle is centralized in compiled_runtime after all files exist.

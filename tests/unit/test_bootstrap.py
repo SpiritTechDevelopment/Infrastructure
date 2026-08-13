@@ -23,6 +23,7 @@ class BootstrapContourTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("Require management hub reachability", wireguard)
+        self.assertIn("Reconcile this node as a management-hub peer", wireguard)
 
     def test_bootstrap_make_target_needs_explicit_apply(self) -> None:
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
@@ -41,6 +42,17 @@ class BootstrapContourTests(unittest.TestCase):
         rendered = re.sub(r"{{[^\n{}]+}}", "fixture", path.read_text(encoding="utf-8"))
         self.assertNotIn("{{", rendered)
         subprocess.run(["bash", "-n"], input=rendered, text=True, check=True)
+
+    def test_runtime_reconciliation_does_not_force_container_recreation(self) -> None:
+        tasks = (REPO_ROOT / "roles" / "compiled_runtime" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("docker", tasks)
+        self.assertIn("compose", tasks)
+        self.assertIn("up", tasks)
+        self.assertIn("_compiled_runtime_definition.changed", tasks)
+        self.assertNotIn("--force-recreate", tasks)
+        self.assertNotIn("compose\n      - down", tasks)
 
 
 if __name__ == "__main__":

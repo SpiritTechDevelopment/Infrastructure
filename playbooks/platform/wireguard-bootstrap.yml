@@ -1,0 +1,31 @@
+---
+- name: Establish management WireGuard before applying the public firewall
+  hosts: spiritvpn_platform_bootstrap
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Require a protected local metadata destination
+      ansible.builtin.assert:
+        that:
+          - platform_wireguard_metadata_output | default('') | length > 0
+        fail_msg: "The two-phase bootstrap requires a protected local metadata path."
+  roles:
+    - role: platform_wireguard
+  post_tasks:
+    - name: Export only public hub enrollment metadata to the operator
+      ansible.builtin.copy:
+        content: |
+          {{ {
+            'interface': platform_wireguard_interface,
+            'listen_port': platform_wireguard_listen_port | int,
+            'hub_addresses': platform_wireguard_hub_addresses,
+            'public_key': _platform_wireguard_public_key_readback.content | b64decode | trim
+          } | to_nice_json(indent=2, sort_keys=true) }}
+        dest: "{{ platform_wireguard_metadata_output }}"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      no_log: true
+      diff: false

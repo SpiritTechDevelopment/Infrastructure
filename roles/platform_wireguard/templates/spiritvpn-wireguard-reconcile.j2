@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+private_key="$(tr -d '\r\n' < '{{ platform_wireguard_private_key_path }}')"
+temporary="$(mktemp '{{ platform_wireguard_config_path }}.tmp.XXXXXX')"
+trap 'rm -f "$temporary"' EXIT
+
+{
+  sed "1a PrivateKey = $private_key" '{{ platform_wireguard_base_path }}'
+  while IFS= read -r -d '' fragment; do
+    printf '\n'
+    cat -- "$fragment"
+  done < <(find '{{ platform_wireguard_peer_dir }}' -mindepth 2 -maxdepth 2 -type f -name '*.conf' -print0 | sort -z)
+} > "$temporary"
+chmod 0600 "$temporary"
+
+if test -f '{{ platform_wireguard_config_path }}' && cmp -s "$temporary" '{{ platform_wireguard_config_path }}'; then
+  echo unchanged
+  exit 0
+fi
+install -o root -g root -m 0600 "$temporary" '{{ platform_wireguard_config_path }}'
+echo changed

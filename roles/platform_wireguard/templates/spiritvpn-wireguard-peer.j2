@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+[[ "$EUID" -eq 0 ]] || { printf '%s\n' 'root is required' >&2; exit 77; }
+[[ $# -ge 3 ]] || { printf '%s\n' 'usage: spiritvpn-wireguard-peer <reconcile ENV ID ADDRESS PUBLIC_KEY|remove ENV ID>' >&2; exit 64; }
+operation="$1"
+environment="$2"
+instance_id="$3"
+[[ "$environment" =~ ^(develop|staging|prod)$ ]] || exit 64
+[[ "$instance_id" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || exit 64
+
+peer_dir='{{ platform_wireguard_peer_dir }}'
+fragment="$peer_dir/$environment/$instance_id.conf"
+
+case "$operation" in
+  reconcile)
+    [[ $# -eq 5 ]] || exit 64
+    address="$4"
+    public_key="$5"
+    python3 - "$environment" "$address" "$public_key" <<'PY'
+import base64
+import binascii
+import ipaddress
+import json
+import sys
+
+environment, address, public_key = sys.argv[1:]
+expected = {
+    name: ipaddress.ip_network(network)
+    for name, network in json.loads(r'''{{ platform_wireguard_environment_networks | to_json }}''').items()
+}
+try:
+    interface = ipaddress.ip_interface(address)
+    decoded = base64.b64decode(public_key, validate=True)
+except (ValueError, binascii.Error):
+    raise SystemExit(64)
+if interface.version != 4 or interface.network.prefixlen != 32:
+    raise SystemExit(64)
+if interface.ip not in expected[environment] or interface.ip == expected[environment].network_address:
+    raise SystemExit(64)
+if len(decoded) != 32:
+    raise SystemExit(64)
+PY
+    temporary="$(mktemp "$peer_dir/$environment/.$instance_id.XXXXXXXX")"
+    trap 'rm -f "$temporary"' EXIT
+    {
+      printf '%s\n' '[Peer]'
+      printf '# node:%s/%s\n' "$environment" "$instance_id"
+      printf 'PublicKey = %s\n' "$public_key"
+      printf 'AllowedIPs = %s\n' "$address"
+    } > "$temporary"
+    if test -f "$fragment" && cmp -s "$temporary" "$fragment"; then
+      printf '%s\n' unchanged
+      exit 0
+    fi
+    install -o root -g root -m 0600 "$temporary" "$fragment"
+    ;;
+  remove)
+    [[ $# -eq 3 ]] || exit 64
+    if test ! -e "$fragment"; then
+      printf '%s\n' unchanged
+      exit 0
+    fi
+    rm -f -- "$fragment"
+    ;;
+  *) exit 64 ;;
+esac
+
+result="$({{ platform_wireguard_reconcile_command }})"
+if systemctl is-active --quiet 'wg-quick@{{ platform_wireguard_interface }}'; then
+  systemctl restart 'wg-quick@{{ platform_wireguard_interface }}'
+fi
+printf '%s\n' "changed ($result)"

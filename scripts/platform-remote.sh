@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  printf '%s\n' 'usage: platform-remote.sh <management-host> <platform-readiness|fleet-deploy ...>' >&2
+  printf '%s\n' 'usage: platform-remote.sh <management-host> <platform-readiness|platform-deploy ...|fleet-deploy ...>' >&2
   exit 64
 fi
 
@@ -17,6 +17,16 @@ case "$operation" in
   platform-readiness)
     [[ $# -eq 0 ]] || { printf '%s\n' 'platform-readiness accepts no arguments' >&2; exit 64; }
     remote_command=platform-readiness
+    ;;
+  platform-deploy)
+    [[ $# -eq 3 ]] || { printf '%s\n' 'platform-deploy requires environment, SHA and mode' >&2; exit 64; }
+    environment="$1"
+    source_git_sha="$2"
+    mode="$3"
+    [[ "$environment" =~ ^(develop|staging|prod)$ ]] || { printf '%s\n' 'invalid environment' >&2; exit 64; }
+    [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'invalid source Git SHA' >&2; exit 64; }
+    [[ "$mode" =~ ^(check|apply)$ ]] || { printf '%s\n' 'invalid platform deployment mode' >&2; exit 64; }
+    remote_command="platform-deploy $environment $source_git_sha $mode"
     ;;
   fleet-deploy)
     [[ $# -eq 6 ]] || { printf '%s\n' 'fleet-deploy requires environment, SHA, mode and three boolean flags' >&2; exit 64; }

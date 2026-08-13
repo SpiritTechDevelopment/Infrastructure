@@ -26,18 +26,23 @@ class NodeLimitsRoleTests(unittest.TestCase):
         self.assertNotIn("{{", rendered)
         subprocess.run(["bash", "-n"], input=rendered, text=True, check=True)
 
-    def test_role_is_wired_into_all_traffic_deploy_playbooks(self) -> None:
-        for name in ("fleet-infra.yml", "fleet-entries.yml", "fleet-exits.yml"):
-            with self.subTest(playbook=name):
-                content = (REPO_ROOT / "playbooks" / name).read_text(encoding="utf-8")
-                self.assertIn("role: node_limits", content)
+    def test_role_is_wired_into_compiled_deployment(self) -> None:
+        content = (REPO_ROOT / "playbooks" / "deploy" / "configure.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("role: node_limits", content)
+        self.assertIn("hosts: spiritvpn_fleet", content)
 
-    def test_verify_reports_capacity_without_tuning_kernel_or_nofile(self) -> None:
-        content = (REPO_ROOT / "playbooks" / "verify.yml").read_text(encoding="utf-8")
+    def test_readiness_checks_cake_without_tuning_kernel_or_nofile(self) -> None:
+        content = (
+            REPO_ROOT / "playbooks" / "operations" / "readiness.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("tc, -s, qdisc, show", content)
+        self.assertIn("qdisc cake", content)
+        self.assertIn("egress_limit_mbps", content)
         self.assertIn("nf_conntrack_count", content)
         self.assertIn("nf_conntrack_max", content)
         self.assertIn("Max open files", content)
-        self.assertIn("tc, -s, qdisc", content)
         self.assertNotIn("ansible.posix.sysctl", content)
         self.assertNotIn("ulimits:", content)
 

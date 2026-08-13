@@ -1,9 +1,7 @@
 # Documentation
 
-The repository keeps only current v1 documentation. Superseded runbooks,
-point-in-time fleet snapshots, duplicate infrastructure specifications, and the
-direct-Xray/manual-inventory deployment guides were removed; Git history remains
-the archive.
+The repository keeps only current v1 documentation. Superseded runbooks and
+point-in-time fleet snapshots remain available through Git history.
 
 ## Authoritative documents
 

@@ -135,7 +135,7 @@ Canonical representation и digest зависят от effective-значени�
 - CAKE применяется на публичном egress и сохраняется через systemd;
 - entry использует `dual-dsthost`, exit — `flows`;
 - политика проверяется после применения;
-- `verify.yml` читает CAKE, conntrack occupancy/capacity, Xray file descriptors,
+- readiness playbook читает CAKE, conntrack occupancy/capacity, Xray file descriptors,
   CPU, память и threads без изменения kernel или process limits.
 
 Текущий профиль `vps-1g` задаёт 1000 Мбит/с capacity и 90% utilization, то есть
@@ -182,8 +182,8 @@ Live-, contract-, scenario- и нагрузочные тесты намерен�
 Generated inventory содержит только connection data и ссылку на один node plan.
 Локальный preflight запрещает дополнительные доменные hostvars, проверяет
 schema/version, environment/instance binding и соответствие bootstrap/configure
-inventories. Новый `playbooks/deploy/configure.yml` не читает `desired/` и не
-вычисляет topology. Legacy playbooks сохранены отдельно.
+inventories. `playbooks/deploy/configure.yml` не читает `desired/` и не
+вычисляет topology. Альтернативный ручной deployment-контур удалён.
 
 Bootstrap использует отдельный inventory с публичными адресами, создаёт deploy
 user, hardening/firewall, Docker prerequisites, node directories, management
@@ -350,27 +350,3 @@ authorization wiring и реальный node-agent runtime.
 - отдельно утверждённое разрешение на SSH/bootstrap. DNS, Vault, backend и
   live fleet mutations требуют собственных разрешений и в текущий запуск не
   входят.
-
-## 7. Git-состояние на дату среза
-
-Технические изменения находятся в локальной ветке
-`feat/infra-v1-foundation`:
-
-```text
-26c1d67  chore: retire legacy deployment entrypoints
-fa46cfb  fix: harden bootstrap and deployment resume
-27bb73d  feat: add infrastructure deployment coordinator
-db5e376  feat: define fail-closed readiness gates
-e1737dd  feat: add bootstrap and machine PKI scaffolding
-4c56a2c  feat: add manual provisioning preflight
-92c688d  feat: drive Ansible from compiled node plans
-27e85e3  feat: add fail-closed Git deployment baseline
-a7aaec3  chore: scaffold target infrastructure layout
-b8e56b8  feat: add desired-state compiler and planner
-621e4ff  feat: enforce node egress limits with CAKE
-e525dde  ops: register exit-ru and switch default exit
-```
-
-Ветка не отправлена в remote. Нормативные документы, backend agreement и
-baseline `nodeagent.v1` входят в этот документационный срез; оставшиеся
-контрактные поверхности перечислены в §3 и §5.

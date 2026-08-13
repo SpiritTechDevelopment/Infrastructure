@@ -42,6 +42,7 @@
     - "{{ platform_executor_dir }}/build"
     - "{{ platform_executor_state_dir }}"
     - "{{ platform_executor_config_dir }}"
+    - "{{ platform_runtime_config_dir }}"
     - "{{ platform_executor_config_dir }}/develop"
     - "{{ platform_executor_config_dir }}/staging"
     - "{{ platform_executor_config_dir }}/prod"
@@ -88,6 +89,64 @@
     group: root
     mode: "0755"
 
+- name: Persist the bounded management runtime configuration
+  ansible.builtin.copy:
+    content: |
+      {{ {
+        'platform_operator_ssh_public_keys': platform_operator_ssh_public_keys,
+        'platform_github_ssh_keys': platform_github_ssh_keys,
+        'platform_ssh_allowed_cidrs': platform_ssh_allowed_cidrs,
+        'platform_wireguard_interface': platform_wireguard_interface,
+        'platform_wireguard_hub_addresses': platform_wireguard_hub_addresses,
+        'platform_wireguard_environment_networks': platform_wireguard_environment_networks,
+        'platform_wireguard_listen_port': platform_wireguard_listen_port,
+        'platform_wireguard_mtu': platform_wireguard_mtu,
+        'platform_wireguard_operator_peers': platform_wireguard_operator_peers,
+        'platform_wireguard_public_endpoint': platform_wireguard_public_endpoint,
+        'platform_fail2ban_ignore_cidrs': platform_fail2ban_ignore_cidrs | default([]),
+        'platform_vault_node_id': platform_vault_node_id,
+        'platform_vault_tls_server_name': platform_vault_tls_server_name
+      } | to_nice_yaml(indent=2, sort_keys=true) }}
+    dest: "{{ platform_runtime_vars_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Read the public management WireGuard key for fleet bootstrap
+  ansible.builtin.slurp:
+    src: "{{ platform_wireguard_public_key_path }}"
+  register: _platform_executor_wireguard_public_key
+
+- name: Create initial environment fleet bootstrap inputs
+  ansible.builtin.copy:
+    content: |
+      {{ {
+        'spiritvpn_operator_ssh_public_keys': platform_operator_ssh_public_keys,
+        'bootstrap_wireguard_hub_endpoint': platform_wireguard_public_endpoint,
+        'bootstrap_wireguard_hub_public_key': _platform_executor_wireguard_public_key.content | b64decode | trim,
+        'bootstrap_wireguard_hub_management_address': item.value | regex_replace('/16$', ''),
+        'spiritvpn_agent_certificate_chains': {}
+      } | to_nice_yaml(indent=2, sort_keys=true) }}
+    dest: "{{ platform_executor_config_dir }}/{{ item.key }}/bootstrap.yml"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+  loop: "{{ platform_wireguard_hub_addresses | dict2items }}"
+  no_log: true
+  diff: false
+  when: deploy_mode == 'bootstrap'
+
+- name: Install the root-owned platform deployment executor
+  ansible.builtin.template:
+    src: spiritvpn-platform-deploy.j2
+    dest: /usr/local/sbin/spiritvpn-platform-deploy
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Restrict the GitHub keys to the command gate
   ansible.builtin.template:
     src: authorized_keys.j2
@@ -100,6 +159,7 @@
   ansible.builtin.copy:
     content: |
       {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-platform-readiness
+      {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-platform-deploy *
       {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-fleet-deploy
     dest: "/etc/sudoers.d/91-{{ platform_github_user }}-readiness"
     owner: root

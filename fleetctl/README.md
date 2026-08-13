@@ -37,7 +37,7 @@ build/<environment>/
 
 `plan` additionally writes `impact-plan.json`. Generated Ansible inventories
 contain connection data and references to compiled node plans; the deploy
-playbooks do not read `desired/` or the legacy manual production inventory.
+playbooks do not read `desired/` or any hand-maintained fleet inventory.
 
 The deployment coordinator is resume-safe and dry-run by default. Its ordered
 infrastructure stages are:

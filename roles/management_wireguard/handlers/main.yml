@@ -1,7 +1,0 @@
----
-- name: Restart management WireGuard
-  ansible.builtin.systemd:
-    name: "wg-quick@{{ management_wireguard_interface }}"
-    state: restarted
-    enabled: true
-    daemon_reload: true

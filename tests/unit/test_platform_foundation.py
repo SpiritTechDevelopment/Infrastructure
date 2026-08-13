@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -33,22 +35,18 @@ class PlatformFoundationTests(unittest.TestCase):
                 check=False,
             )
 
-    def test_checked_in_bootstrap_placeholders_fail_closed(self) -> None:
-        result = subprocess.run(
-            [
-                "python3",
-                str(REPO_ROOT / "scripts" / "platform-bootstrap-check.py"),
-                "--inventory",
-                str(REPO_ROOT / "inventories" / "bootstrap" / "platform.yml"),
-                "--known-hosts",
-                str(REPO_ROOT / "inventories" / "bootstrap" / "known_hosts"),
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("exactly one management host", result.stderr)
+    def test_tracked_platform_bootstrap_is_sops_ciphertext_only(self) -> None:
+        bootstrap = REPO_ROOT / "inventories" / "bootstrap"
+        self.assertFalse((bootstrap / "platform.yml").exists())
+        self.assertFalse((bootstrap / "known_hosts").exists())
+        envelope = yaml.safe_load((bootstrap / "platform.sops.yml").read_text(encoding="utf-8"))
+        self.assertEqual(envelope["apiVersion"], "spiritvpn.io/v1alpha1")
+        self.assertEqual(envelope["kind"], "PlatformBootstrap")
+        for field in ("inventory", "known_hosts", "vars"):
+            self.assertTrue(envelope[field].startswith("ENC[AES256_GCM,"))
+        ciphertext = (bootstrap / "platform.sops.yml").read_text(encoding="utf-8")
+        for forbidden in ("ansible_host", "ssh-ed25519", "REPLACE_WITH", "github-develop"):
+            self.assertNotIn(forbidden, ciphertext)
 
     def test_real_minimal_bootstrap_input_passes(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap"
@@ -67,6 +65,36 @@ class PlatformFoundationTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("management-1 (1.1.1.1)", result.stdout)
+
+    def test_private_wireguard_management_address_passes(self) -> None:
+        result = self.run_preflight(
+            """---
+all:
+  children:
+    spiritvpn_platform_bootstrap:
+      hosts:
+        management-1:
+          ansible_host: 10.70.0.1
+          ansible_user: root
+""",
+            "10.70.0.1 ssh-ed25519 Zml4dHVyZS1wdWJsaWMta2V5\n",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_documentation_address_is_not_accepted_as_management(self) -> None:
+        result = self.run_preflight(
+            """---
+all:
+  children:
+    spiritvpn_platform_bootstrap:
+      hosts:
+        management-1:
+          ansible_host: 192.0.2.1
+          ansible_user: root
+""",
+            "192.0.2.1 ssh-ed25519 Zml4dHVyZS1wdWJsaWMta2V5\n",
+        )
+        self.assertEqual(result.returncode, 2)
 
     def test_bootstrap_rejects_extra_inventory_variables(self) -> None:
         result = self.run_preflight(
@@ -91,6 +119,7 @@ all:
         text = gate.read_text(encoding="utf-8")
         self.assertIn("original_command\" == platform-readiness", text)
         self.assertIn("fleet-deploy", text)
+        self.assertIn("platform-deploy", text)
         self.assertIn("cross-environment deployment", text)
         self.assertIn("bound_environment", text)
         self.assertNotIn("eval", text)
@@ -121,6 +150,70 @@ all:
         self.assertNotIn("platform_vault_tls_private_key", tasks)
         self.assertNotIn("operator init", tasks)
         self.assertNotIn("operator unseal", tasks)
+        defaults = (REPO_ROOT / "roles" / "platform_vault" / "defaults" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertRegex(
+            defaults,
+            r"hashicorp/vault:1\.21\.4@sha256:[0-9a-f]{64}",
+        )
+
+    def test_platform_bootstrap_creates_wireguard_without_laptop_cidr(self) -> None:
+        playbook = (REPO_ROOT / "playbooks" / "platform" / "bootstrap.yml").read_text(
+            encoding="utf-8"
+        )
+        wireguard = (REPO_ROOT / "roles" / "platform_wireguard" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        node_wireguard = (
+            REPO_ROOT / "roles" / "bootstrap_wireguard" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        firewall = (REPO_ROOT / "roles" / "common" / "templates" / "nftables.conf.j2").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("role: platform_wireguard", playbook)
+        self.assertIn("Generate the management WireGuard private key locally once", wireguard)
+        self.assertIn("creates: \"{{ platform_wireguard_private_key_path }}\"", wireguard)
+        self.assertIn("Reconcile this node as a management-hub peer", node_wireguard)
+        self.assertIn("delegate_to: localhost", node_wireguard)
+        self.assertNotIn("platform_ssh_allowed_cidrs | join(' ')", playbook)
+        self.assertIn("common_trusted_interfaces", firewall)
+        self.assertIn("table inet spiritvpn_filter", firewall)
+
+    def test_two_phase_platform_script_verifies_tunnel_before_hardening(self) -> None:
+        script = (REPO_ROOT / "scripts" / "bootstrap-platform.py").read_text(
+            encoding="utf-8"
+        )
+        makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+        for required in (
+            "playbooks/platform/wireguard-bootstrap.yml",
+            "verifying pinned SSH through WireGuard",
+            "playbooks/platform/bootstrap.yml",
+            "refusing to overwrite unmanaged WireGuard config",
+            "--verify-convergence",
+        ):
+            self.assertIn(required, script)
+        self.assertLess(
+            script.index("verifying pinned SSH through WireGuard"),
+            script.index("phase 2/2: applying hardening"),
+        )
+        self.assertIn("scripts/bootstrap-platform.py --apply --verify-convergence", makefile)
+
+        result = subprocess.run(
+            [
+                "python3",
+                str(REPO_ROOT / "scripts" / "bootstrap-platform.py"),
+                "--bundle",
+                str(REPO_ROOT / "inventories" / "bootstrap" / "platform.sops.yml"),
+                "--operator-wireguard-private-key",
+                "/does/not/matter/without-apply",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("refusing mutation without --apply", result.stderr)
 
     def test_github_workflow_cannot_mutate_or_receive_vault_credentials(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "platform-readiness.yml").read_text(
@@ -128,6 +221,11 @@ all:
         )
         self.assertIn("platform-remote.sh", workflow)
         self.assertIn("PLATFORM_SSH_PRIVATE_KEY", workflow)
+        self.assertIn("secrets.PLATFORM_SSH_HOST", workflow)
+        self.assertIn("secrets.PLATFORM_SSH_KNOWN_HOSTS", workflow)
+        self.assertIn("runs-on: [self-hosted, linux, spiritvpn-deploy]", workflow)
+        self.assertNotIn("vars.PLATFORM_SSH_HOST", workflow)
+        self.assertNotIn("inventories/bootstrap/known_hosts", workflow)
         for forbidden in ("VAULT_TOKEN", "id-token: write", "fleet-deploy", "ansible-playbook", "ssh-keyscan"):
             self.assertNotIn(forbidden, workflow)
 
@@ -141,10 +239,45 @@ all:
             "git bundle create",
             "platform-remote.sh",
             "environment: ${{ inputs.environment }}",
+            "secrets.PLATFORM_SSH_HOST",
+            "secrets.PLATFORM_SSH_KNOWN_HOSTS",
+            "runs-on: [self-hosted, linux, spiritvpn-deploy]",
         ):
             self.assertIn(required, workflow)
+        self.assertNotIn("vars.PLATFORM_SSH_HOST", workflow)
+        self.assertNotIn("inventories/bootstrap/known_hosts", workflow)
         for forbidden in ("VAULT_TOKEN", "id-token: write", "ssh-keyscan", "update-deployment-ref"):
             self.assertNotIn(forbidden, workflow)
+
+    def test_platform_deploy_uses_exact_sha_and_local_protected_config(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "platform-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        executor = (
+            REPO_ROOT
+            / "roles"
+            / "platform_executor"
+            / "templates"
+            / "spiritvpn-platform-deploy.j2"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "git merge-base --is-ancestor",
+            "git bundle create",
+            "platform-remote.sh",
+            "environment: ${{ inputs.environment }}",
+            "runs-on: [self-hosted, linux, spiritvpn-deploy]",
+        ):
+            self.assertIn(required, workflow)
+        for forbidden in ("VAULT_TOKEN", "SOPS_AGE_KEY", "ssh-keyscan"):
+            self.assertNotIn(forbidden, workflow)
+        for required in (
+            'bundle verify "$bundle"',
+            "refs/spiritvpn/platform-source",
+            "playbooks/platform/steady.yml",
+            "platform_runtime_vars_file",
+        ):
+            self.assertIn(required, executor)
+        self.assertNotIn("eval", executor)
 
     def test_root_executor_is_fail_closed_and_does_not_move_deployment_ref(self) -> None:
         path = REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-fleet-deploy.j2"
@@ -234,7 +367,10 @@ all:
         paths = (
             REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-platform-readiness.j2",
             REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-fleet-deploy.j2",
+            REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-platform-deploy.j2",
             REPO_ROOT / "roles" / "platform_vault" / "templates" / "spiritvpn-vault-operator.j2",
+            REPO_ROOT / "roles" / "platform_wireguard" / "templates" / "spiritvpn-wireguard-reconcile.j2",
+            REPO_ROOT / "roles" / "platform_wireguard" / "templates" / "spiritvpn-wireguard-peer.j2",
         )
         for path in paths:
             rendered = re.sub(r"{{[^\n{}]+}}", "fixture", path.read_text(encoding="utf-8"))

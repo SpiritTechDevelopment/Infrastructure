@@ -542,8 +542,8 @@ Smoke commands должны быть предоставлены оператор
 - backend materialization/operation dashboards и alerts не применены;
 - DNS/data-plane probes не включены в автоматическое promotion.
 
-Legacy observability роли сохранены в репозитории, но не считаются поддерживаемым
-v1 deployment path.
+Центральный observability adapter ещё не реализован; отдельного альтернативного
+пути развёртывания в репозитории нет.
 
 После появления agent минимально нужны alerts на:
 
@@ -563,9 +563,14 @@ v1 deployment path.
 
 Оператор вручную создаёт VPS, независимо получает его SSH host key и заполняет:
 
-- `inventories/bootstrap/platform.yml`;
-- `inventories/bootstrap/known_hosts`;
-- внешнюю копию `examples/platform-bootstrap-vars.yml`.
+- SOPS-зашифрованный bundle
+  `inventories/bootstrap/platform.sops.yml`, содержащий inventory, pinned
+  `known_hosts` и bootstrap vars без plaintext IP/ключей в Git.
+
+В bootstrap vars входят public WireGuard peers операторов. Management VPS
+считается чистым: роль сама устанавливает WireGuard, локально создаёт hub key,
+настраивает адреса develop/staging/prod и только после этого включает firewall.
+IP ноутбука не является входным параметром.
 
 Затем с рабочего компьютера запускает platform check и bootstrap. Это единственный
 этап, где новый management VPS настраивается напрямую оператором.
@@ -584,7 +589,9 @@ v1 deployment path.
 
 ### Шаг 3. Подготовить executor
 
-На management VPS создаются root-owned:
+Platform bootstrap автоматически создаёт первоначальный root-owned
+`bootstrap.yml` с endpoint и public hub key. Оператор дополняет certificate
+chains после получения CSR. На management VPS используются:
 
 ```text
 /etc/spiritvpn/deploy/develop/bootstrap.yml
@@ -637,8 +644,14 @@ resume=true
 allow_destructive=false
 ```
 
-На первых прогонах нормальны остановки для регистрации WireGuard peer и подписи
-agent CSR. После ручного действия запускается resume того же SHA.
+WireGuard peer регистрируется на management hub автоматически. На первых
+прогонах нормальна остановка для подписи agent CSR. После ручного действия
+запускается resume того же SHA.
+
+Coordinator передаёт Ansible `--limit`: bootstrap получает только новые
+инстансы, configure/readiness — только множество `affected` из impact plan.
+При пустом impact Ansible не вызывается. Повторный `resume` не запускает уже
+завершённый этап, а одинаковый Compose/config state не пересоздаёт контейнеры.
 
 ### Шаг 8. Зафиксировать текущую границу
 
@@ -733,7 +746,7 @@ make fleet-platform-check
 
 ```bash
 make fleet-platform-bootstrap APPLY=1 \
-  PLATFORM_VARS=/protected/platform-bootstrap.yml
+  PLATFORM_BUNDLE=inventories/bootstrap/platform.sops.yml
 ```
 
 Главные данные для резервного копирования:
@@ -743,7 +756,7 @@ Vault unseal shares и root recovery material — раздельное внеш�
 Vault Raft snapshots                       — зашифрованное внешнее хранение
 /var/lib/spiritvpn/fleetctl                — protected backup
 /etc/spiritvpn/deploy                      — protected backup или воспроизводимое восстановление
-inventories/bootstrap/known_hosts          — Git, после независимой проверки
+inventories/bootstrap/platform.sops.yml    — Git, только SOPS ciphertext
 ```
 
 Перед любой реальной операцией полезно задать себе четыре вопроса:

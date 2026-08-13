@@ -1,3 +1,0 @@
----
-# The active deployment uses only ansible-core modules and Docker Compose v2.
-collections: []

@@ -33,7 +33,7 @@
   changed_when: true
   no_log: true
 
-- name: Protect retained agent private key
+- name: Protect node-local agent private key
   ansible.builtin.file:
     path: "{{ pki_agent_private_key_path }}"
     owner: root

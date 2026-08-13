@@ -12,7 +12,6 @@
   ansible.builtin.assert:
     that:
       - not common_manage_deploy_user | bool
-      - not common_remove_legacy_sshd_dropin | bool
       - not common_manage_sshd | bool
       - not common_manage_firewall | bool
       - not common_enable_fail2ban | bool
@@ -59,11 +58,11 @@
 
 # Named, auditable non-root deploy account (docker + sudo, key-only). Additive —
 # root stays as break-glass; ansible_user is migrated to deploy separately once
-# this is proven. authorized_keys = the operator roster (operators log in AS deploy).
+# this is proven. authorized_keys contains the reviewed operator roster.
 - name: Require an operator key before creating the deployment account
   ansible.builtin.assert:
     that:
-      - (common_authorized_keys | length > 0) or (operators | default([]) | length > 0)
+      - common_authorized_keys | length > 0
     fail_msg: "At least one reviewed operator SSH public key is required for the deployment user."
   when: common_manage_deploy_user | bool
 
@@ -104,21 +103,6 @@
     mode: "0600"
   when: common_manage_deploy_user | bool
 
-# Vault SSH CA trust: deploy the CA public key BEFORE the sshd drop-in that
-# references it (TrustedUserCAKeys). Hosts then accept short-lived, overlay-locked
-# certs signed by the CA — in addition to authorized_keys (break-glass).
-- name: Deploy Vault SSH CA public key
-  ansible.builtin.copy:
-    content: "{{ common_ssh_ca_public_key }}\n"
-    dest: /etc/ssh/trusted-user-ca-keys.pem
-    owner: root
-    group: root
-    mode: "0644"
-  when:
-    - common_manage_sshd | bool
-    - common_ssh_ca_public_key | default('') | length > 0
-  notify: Reload sshd
-
 # Key-only root, no password/keyboard-interactive auth. A drop-in overrides any
 # distro/cloud-init default via first-match ordering (00- sorts before 50-).
 # validate: on the fragment catches syntax errors before placement; the handler
@@ -144,7 +128,14 @@
     update_cache: true
   when:
     - common_manage_firewall | bool
-    - common_firewall_engine == 'nftables'
+
+- name: Validate trusted tunnel interface names
+  ansible.builtin.assert:
+    that:
+      - item is match('^[A-Za-z0-9_.-]{1,15}$')
+    fail_msg: "Trusted firewall interfaces must be valid Linux interface names."
+  loop: "{{ common_trusted_interfaces }}"
+  when: common_manage_firewall | bool
 
 - name: Render nftables firewall
   ansible.builtin.template:
@@ -156,7 +147,6 @@
     validate: "nft -c -f %s"
   when:
     - common_manage_firewall | bool
-    - common_firewall_engine == 'nftables'
   notify: Reload nftables
 
 - name: Enable nftables service (persist across reboot)
@@ -165,7 +155,6 @@
     enabled: true
   when:
     - common_manage_firewall | bool
-    - common_firewall_engine == 'nftables'
 
 # fail2ban — SSH brute-force protection (systemd journal backend, port-aware ban).
 - name: Install fail2ban
@@ -219,16 +208,6 @@
     owner: root
     group: root
     mode: "0640"
-  when: common_enable_auditd | bool
-  notify: Load audit rules
-
-# Remove the hand-placed 50-vpn.rules — it is byte-identical drift that the
-# managed 90-spirit.rules supersedes. Leaving both makes augenrules --load fail
-# with "Rule exists" (duplicate watches).
-- name: Remove legacy hand-placed audit rules
-  ansible.builtin.file:
-    path: /etc/audit/rules.d/50-vpn.rules
-    state: absent
   when: common_enable_auditd | bool
   notify: Load audit rules
 

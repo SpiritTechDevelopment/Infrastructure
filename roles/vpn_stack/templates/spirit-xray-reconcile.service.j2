@@ -1,8 +1,0 @@
-[Unit]
-Description=Re-add backend desired Xray runtime users (node-local self-heal)
-After=docker.service
-Wants=docker.service
-
-[Service]
-Type=oneshot
-ExecStart={{ xray_reconcile_libdir }}/auto-reconcile.sh

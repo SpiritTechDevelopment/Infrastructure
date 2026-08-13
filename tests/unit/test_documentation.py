@@ -24,7 +24,7 @@ class DocumentationTests(unittest.TestCase):
             with self.subTest(path=relative):
                 self.assertTrue((REPO_ROOT / relative).is_file())
 
-    def test_legacy_documentation_trees_are_absent(self) -> None:
+    def test_superseded_documentation_trees_are_absent(self) -> None:
         removed = (
             ".local-secrets.example",
             "captured-state",
