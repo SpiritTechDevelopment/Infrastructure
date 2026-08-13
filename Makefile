@@ -94,8 +94,9 @@ syntax: ## Syntax-check the active v1 playbooks
 	done
 
 lint: ## Run YAML and Ansible lint on the active v1 contour
-	yamllint .
-	ansible-lint
+	@git ls-files -z -- '*.yml' '*.yaml' | xargs -0 --no-run-if-empty yamllint
+	ANSIBLE_INVENTORY="$(CURDIR)/tests/fixtures/platform-bootstrap/platform.yml" \
+		ansible-lint playbooks roles
 
 check: fleet-validate fleet-test ## Run local v1 static checks
 	@for script in scripts/*.sh; do bash -n "$$script" || exit $$?; done

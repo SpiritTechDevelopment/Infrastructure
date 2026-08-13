@@ -9,15 +9,15 @@
 
 Иерархия при расхождениях — сверху вниз:
 
-1. `proto/spiritvpn/nodeagent/v1/node_agent.proto` — провод. Байт-в-байт копия
-   `infra_v1/contracts/nodeagent/v1/node_agent.proto`, владелец — инфраструктурный
-   репозиторий. Побеждает текст любой спеки.
-2. `internal/nodeagent/` этого репозитория — реализованный клиент. Всё, что здесь
-   помечено ссылкой на файл, проверяемо чтением кода и уже работает именно так.
-3. `dev/BACKEND_DOMAIN_AGREEMENTS.md` §7, §9, §10, §12, §16 — семантика. Файл
-   удалён из рабочего дерева; читается через
-   `git show caa4a87^:dev/BACKEND_DOMAIN_AGREEMENTS.md`.
-4. `README.md` — устройство backend как смежной системы.
+1. [`contracts/nodeagent/v1/node_agent.proto`](../contracts/nodeagent/v1/node_agent.proto)
+   — провод; владелец контракта — инфраструктурный репозиторий. Побеждает текст
+   любой спеки.
+2. `internal/nodeagent/` backend-репозитория — реализованный клиент. Указанные
+   ниже пути и строки относятся к этому отдельному репозиторию и поэтому
+   приведены как текст, а не как локальные ссылки.
+3. [`contracts/backend/BACKEND_DOMAIN_AGREEMENTS.md`](../contracts/backend/BACKEND_DOMAIN_AGREEMENTS.md)
+   §7, §9, §10, §12, §16 — семантика backend.
+4. [`README.md`](../README.md) — границы инфраструктуры и смежных систем.
 
 `dev/NODE_AGENT_CONTRACT.md` описывает отброшенную архитектуру и помечен
 `superseded`. Ссылаться на него нельзя.
@@ -55,7 +55,7 @@
 
 `Health` реализовать всё равно: он нужен операторам и smoke-тестам деплоя.
 Готовность ноды backend определяет по исходу остальных вызовов
-([README.md:52](../README.md:52)).
+(`README.md:52` backend-репозитория).
 
 ### 2.1 Транспорт и идентичность
 
@@ -64,7 +64,7 @@ Mutual TLS поверх management WireGuard overlay. Порт агента от
 
 Backend держит по одному переиспользуемому HTTP/2 channel на ноду, ключ кеша —
 `node_id|address|tls_server_name|certificate_identity`
-([client.go:36](../internal/nodeagent/client.go:36)). Смена endpoint в манифесте
+(`internal/nodeagent/client.go:36`). Смена endpoint в манифесте
 даёт новый ключ и новое соединение, старое закрывается.
 
 Требования к агенту:
@@ -73,11 +73,11 @@ Backend держит по одному переиспользуемому HTTP/2
 * предъявлять серверный сертификат, идентичность которого совпадает с
   `certificate_identity` из манифеста ноды — иначе backend классифицирует вызов
   как `IDENTITY_MISMATCH`, поднимает alert и прекращает hot-retry
-  ([outcome.go](../internal/nodeagent/outcome.go));
+  (`internal/nodeagent/outcome.go`);
 * возвращать в `GetNodeStateResponse.node_id` свой сконфигурированный `node_id`.
   Backend сверяет его с тем, к кому подключался, и расхождение трактует как
-  «соединение ведёт не туда» ([usage.go:140](../internal/nodeagent/usage.go:140),
-  [inventory.go:85](../internal/nodeagent/inventory.go:85));
+  «соединение ведёт не туда» (`internal/nodeagent/usage.go:140`,
+  `internal/nodeagent/inventory.go:85`);
 * никогда не принимать `node_id` из тела запроса как авторизационный вход. Нода
   определяется mTLS-идентичностью.
 
@@ -87,9 +87,9 @@ Backend отменяет вызов по своему таймеру, и аге�
 
 | RPC | дедлайн backend | источник |
 |---|---|---|
-| `EnsureUserPresent`, `EnsureUserAbsent` | 5 с | [client.go:19](../internal/nodeagent/client.go:19) |
-| `GetNodeState` | 30 с | [usage.go:15](../internal/nodeagent/usage.go:15) |
-| `ReconcileUsers` | 60 с | [reconcile.go:16](../internal/nodeagent/reconcile.go:16) |
+| `EnsureUserPresent`, `EnsureUserAbsent` | 5 с | `internal/nodeagent/client.go:19` |
+| `GetNodeState` | 30 с | `internal/nodeagent/usage.go:15` |
+| `ReconcileUsers` | 60 с | `internal/nodeagent/reconcile.go:16` |
 
 60 секунд на reconcile рассчитаны на полный набор ноды с `AddUser` и `AddRule` на
 каждого пользователя.
@@ -98,7 +98,7 @@ Backend отменяет вызов по своему таймеру, и аге�
 
 Мутирующие RPC отвечают `OperationResult` с `ApplyStatus`. Backend читает два
 канала независимо — gRPC-код и статус в теле — и сводит их в судьбу операции
-([outcome.go](../internal/nodeagent/outcome.go)):
+(`internal/nodeagent/outcome.go`):
 
 `APPLY_STATUS_APPLIED`
 : состояние изменено и проверено в Xray.
@@ -109,7 +109,7 @@ Backend отменяет вызов по своему таймеру, и аге�
 `APPLY_STATUS_RETRYABLE_ERROR`
 : временный отказ. Backend сохраняет операцию и повторяет с тем же
   `operation_id`. Backoff 1 с → 5 мин, число попыток не ограничено, пока desired
-  state актуален ([domain/dispatch.go:41](../internal/domain/dispatch.go:41)).
+  state актуален (`internal/domain/dispatch.go:41`).
 
 `APPLY_STATUS_PERMANENT_ERROR`
 : вход недопустим. Автоповтор прекращается навсегда, операция остаётся в
@@ -189,7 +189,7 @@ message User {
 
 `accounting_id` — стабильный псевдоним, он же Xray `email` и ключ учёта трафика.
 Формат backend: `u.` плюс 20 символов из `[a-z2-7]`, всего 22
-([crypto/accounting.go:8-27](../internal/crypto/accounting.go:8)). Префикс `u.` —
+(`internal/crypto/accounting.go:8-27`). Префикс `u.` —
 backend namespace: по нему агент отличает свои пользователи от инфраструктурных
 `svc-*`. Значение глобально уникально, не переиспользуется и не содержит ничего
 пользовательского.
@@ -238,7 +238,7 @@ StatsService считает трафик per-email.
 ### 4.3 EnsureUserAbsent
 
 `credential_uuid` здесь не передаётся вовсе — удаление матчится по
-`accounting_id` ([client.go:172-176](../internal/nodeagent/client.go:172)).
+`accounting_id` (`internal/nodeagent/client.go:172-176`).
 
 Под тем же локальным локом:
 
@@ -299,7 +299,7 @@ message ReconcileUsersRequest {
 
 Ревизии на проводе нет. Backend держит `desired_revision` у себя и проверяет
 актуальность guarded-UPDATE после ответа
-([reconcile.go:33-45](../internal/nodeagent/reconcile.go:33)).
+(`internal/nodeagent/reconcile.go:33-45`).
 
 `complete=true` — утверждение, что набор авторитетный и не усечён по дороге.
 Пустой `users` легален и означает, что backend-owned пользователей на ноде нет.
@@ -361,7 +361,7 @@ sequence — монотонно растёт внутри spool_id
 локальная база создаёт новый `spool_id`.
 
 Жёсткие требования, проверяемые backend при разборе ответа
-([usage.go:163-172](../internal/nodeagent/usage.go:163)):
+(`internal/nodeagent/usage.go:163-172`):
 
 * `spool_id` непуст;
 * `sequence` начинается с **единицы**. Ноль отвергается как дефект версии агента
@@ -382,7 +382,7 @@ sequence — монотонно растёт внутри spool_id
 
 `GetNodeState` возвращает неподтверждённые batch по возрастанию `sequence`,
 не больше `max_usage_batches`. Backend просит по 16 за опрос
-([pull_usage.go:20](../internal/app/pull_usage.go:20)).
+(`internal/app/pull_usage.go:20`).
 
 Агент удаляет batch **только** после подтверждения по совпадающему `spool_id`.
 Подтверждение чужого спула игнорируется. Подтверждение выше максимального
@@ -390,7 +390,7 @@ sequence — монотонно растёт внутри spool_id
 
 Отдельно: при сверке инвентаря (§8) backend вызывает тот же `GetNodeState` с
 **пустым** `acknowledged_usage_through` и приехавшие batch игнорирует
-([inventory.go:54-67](../internal/nodeagent/inventory.go:54)). Агент обязан
+(`internal/nodeagent/inventory.go:54-67`). Агент обязан
 трактовать пустой курсор как «не подтверждено ничего» и отдать те же batch
 следующему опросу usage-воркера. Трактовка пустого курсора как разрешения на
 очистку теряет неучтённый трафик.
@@ -420,7 +420,7 @@ sequence — монотонно растёт внутри spool_id
 
 Backend отвергает наблюдение целиком, если `users_complete=false`,
 `users_observed_at` нулевой, наблюдение старше порога или помечено временем из
-будущего ([app/inventory.go:64+](../internal/app/inventory.go:64)). Отвергнутое
+будущего (`internal/app/inventory.go:64+`). Отвергнутое
 наблюдение не даёт вывода «расхождений нет» и не авторизует удаления.
 
 Ключ сравнения — `accounting_id` → `(credential_uuid, flow, egress_key)`.
@@ -440,7 +440,7 @@ backend ноду недавно, не зависит.
 этом состоянии агент **не удаляет** пользователей ни при каких условиях, пока
 backend не пришлёт полный набор через `ReconcileUsers`. Флаг едет в
 `GetNodeStateResponse` и разбирается backend
-([usage.go:57](../internal/nodeagent/usage.go:57)).
+(`internal/nodeagent/usage.go:57`).
 
 `XrayState.uptime_seconds` — источник детекта рестарта для self-heal (§5) и
 liveness ноды для backend.
@@ -530,7 +530,7 @@ Alert'ы: устаревший сбор, растущий или перепол�
 **Подсистема activity.** Поля `ActivityBatch`, `SourceActivity`, `ActivityState` в
 контракте присутствуют и остаются зарезервированными, но агент v1 их не заполняет
 и access-log Xray не читает вовсе. Потребителя нет:
-[internal/nodeagent/usage.go:46](../internal/nodeagent/usage.go:46) явно не
+`internal/nodeagent/usage.go:46` явно не
 переносит `activity_batches` в состояние ноды. Возврат к теме потребует работы в
 агенте и backend, но не изменения `.proto`.
 
@@ -596,4 +596,4 @@ E2E, до заявления жёсткого enforcement квоты:
    исправления агент не сможет выполнять fan-out.
 4. Порог устаревания наблюдения инвентаря на стороне backend и допустимый перекос
    часов ноды — согласовать значения с реализацией
-   [app/inventory.go](../internal/app/inventory.go).
+   `internal/app/inventory.go`.

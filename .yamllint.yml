@@ -1,5 +1,10 @@
 extends: default
 
+# SOPS ciphertext is deliberately emitted as long scalar values. Its decrypted
+# structure is validated by scripts/platform-sops.py instead.
+ignore: |
+  inventories/bootstrap/platform.sops.yml
+
 rules:
   document-start: disable
   line-length:
