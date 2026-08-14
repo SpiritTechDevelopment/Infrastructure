@@ -207,9 +207,14 @@
     owner: root
     group: "1000"
     mode: "0640"
-  loop: [develop, staging, prod]
+  loop: [develop, prod]
   vars:
     policy_environment: "{{ item }}"
+
+- name: Remove the retired staging policy file
+  ansible.builtin.file:
+    path: "{{ platform_vault_dir }}/config/policies/fleet-deployer-staging.hcl"
+    state: absent
 
 - name: Install the manual Vault ceremony command
   ansible.builtin.template:
@@ -221,7 +226,7 @@
   no_log: true
   diff: false
 
-- name: Start uninitialized or existing v1 Vault
+- name: Start new or existing v1 Vault
   ansible.builtin.command:
     argv:
       - docker

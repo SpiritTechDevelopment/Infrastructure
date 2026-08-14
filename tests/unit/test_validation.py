@@ -31,11 +31,16 @@ class DesiredStateValidationTests(unittest.TestCase):
             return {issue.code for issue in raised.exception.issues}
 
     def test_repository_placeholder_environments_are_valid(self) -> None:
-        for environment in ("develop", "staging", "prod"):
+        for environment in ("develop", "prod"):
             with self.subTest(environment=environment):
                 state = validate_environment(REPO_ROOT, environment)
                 self.assertEqual(state.environment.object_id, environment)
                 self.assertEqual(state.fleets, ())
+
+    def test_staging_environment_is_not_supported(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main(["validate", "--environment", "staging"])
+        self.assertFalse((REPO_ROOT / "desired" / "environments" / "staging").exists())
 
     def test_complete_fixture_is_valid(self) -> None:
         desired_root = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"

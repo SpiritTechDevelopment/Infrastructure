@@ -11,8 +11,8 @@ Usage:
   scripts/platform-bootstrap.sh --apply   # validate, confirm, bootstrap, verify
 
 Runs the complete operator-side platform bootstrap gate from one committed
-checkout. Vault is installed and checked but is deliberately not initialized,
-unsealed, configured, or populated by this script.
+checkout. Vault is installed and checked, but this script never changes its
+initialization, seal, policy, authentication, or secret state.
 EOF
 }
 
@@ -93,7 +93,8 @@ cat <<EOF
 
 The next step will modify the management VPS and install the managed local
 WireGuard interface from commit $source_sha.
-Vault will remain uninitialized. Type APPLY to continue.
+Bootstrap will preserve the current Vault initialization and seal state.
+Type APPLY to continue.
 EOF
 read -r confirmation
 [[ "$confirmation" == APPLY ]] || { printf '%s\n' 'bootstrap cancelled'; exit 68; }
@@ -111,6 +112,7 @@ sudo wg show spiritvpn-mgmt
 cat <<'EOF'
 
 Platform bootstrap and convergence verification completed.
-Vault is reachable but uninitialized. Perform the Vault recovery ceremony only
-after external storage for unseal shares and the initial root token is ready.
+Vault is reachable. Bootstrap preserved its initialization and seal state.
+For a new Vault, perform the recovery ceremony only after external storage for
+unseal shares and the initial root token is ready.
 EOF

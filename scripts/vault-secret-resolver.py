@@ -25,7 +25,7 @@ from fleetctl.validation import DesiredStateInvalid, validate_environment
 
 
 REFERENCE = re.compile(
-    r"^secret://kv/(develop|staging|prod)/([A-Za-z0-9._/-]+)#([A-Za-z_][A-Za-z0-9_]*)$"
+    r"^secret://kv/(develop|prod)/([A-Za-z0-9._/-]+)#([A-Za-z_][A-Za-z0-9_]*)$"
 )
 
 
@@ -133,7 +133,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--desired-root", type=Path, help="explicit desired/ fixture (tests only)")
-    parser.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    parser.add_argument("--environment", required=True, choices=("develop", "prod"))
     parser.add_argument("--credentials-dir", type=Path)
     parser.add_argument("--compiled-secrets", type=Path)
     parser.add_argument("--ssh-private-key", type=Path)

@@ -30,7 +30,7 @@
               "display_name": {"type": "string", "minLength": 1, "maxLength": 128},
               "service_credential_ref": {
                 "type": "string",
-                "pattern": "^secret://kv/(develop|staging|prod)/bridges/[a-z0-9.-]+#service_uuid$"
+                "pattern": "^secret://kv/(develop|prod)/bridges/[a-z0-9.-]+#service_uuid$"
               }
             }
           }

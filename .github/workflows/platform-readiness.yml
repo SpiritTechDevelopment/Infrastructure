@@ -7,7 +7,7 @@ on:
         description: Environment whose management foundation is checked
         required: true
         type: choice
-        options: [develop, staging, prod]
+        options: [develop, prod]
 
 permissions:
   contents: read

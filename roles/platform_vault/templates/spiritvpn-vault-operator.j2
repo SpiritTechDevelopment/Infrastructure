@@ -36,8 +36,8 @@ vault_as_root_with_input() {
 
 require_environment() {
   case "${1:-}" in
-    develop|staging|prod) ;;
-    *) printf '%s\n' 'environment must be develop, staging, or prod' >&2; exit 64 ;;
+    develop|prod) ;;
+    *) printf '%s\n' 'environment must be develop or prod' >&2; exit 64 ;;
   esac
 }
 
@@ -117,7 +117,7 @@ case "$command" in
     environment="$2"
     reference="$3"
     require_environment "$environment"
-    if [[ ! "$reference" =~ ^secret://kv/(develop|staging|prod)/([a-zA-Z0-9._/-]+)#([a-zA-Z_][a-zA-Z0-9_]*)$ ]]; then
+    if [[ ! "$reference" =~ ^secret://kv/(develop|prod)/([a-zA-Z0-9._/-]+)#([a-zA-Z_][a-zA-Z0-9_]*)$ ]]; then
       printf '%s\n' 'invalid secret reference' >&2
       exit 64
     fi

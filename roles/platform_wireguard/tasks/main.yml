@@ -5,8 +5,8 @@
       - platform_wireguard_interface is match('^[A-Za-z0-9_.-]{1,15}$')
       - platform_wireguard_addresses | length > 0
       - platform_wireguard_addresses | select('match', '^[0-9.]+/[0-9]{1,2}$') | list | length == platform_wireguard_addresses | length
-      - platform_wireguard_environment_networks.keys() | sort == ['develop', 'prod', 'staging']
-      - platform_wireguard_environment_networks.values() | select('match', '^[0-9.]+/16$') | list | length == 3
+      - platform_wireguard_environment_networks.keys() | sort == ['develop', 'prod']
+      - platform_wireguard_environment_networks.values() | select('match', '^[0-9.]+/16$') | list | length == 2
       - platform_wireguard_listen_port | int >= 1
       - platform_wireguard_listen_port | int <= 65535
       - platform_wireguard_mtu | int >= 1280
@@ -46,8 +46,12 @@
     - "{{ platform_wireguard_state_dir }}"
     - "{{ platform_wireguard_peer_dir }}"
     - "{{ platform_wireguard_peer_dir }}/develop"
-    - "{{ platform_wireguard_peer_dir }}/staging"
     - "{{ platform_wireguard_peer_dir }}/prod"
+
+- name: Remove the retired staging WireGuard peer state
+  ansible.builtin.file:
+    path: "{{ platform_wireguard_peer_dir }}/staging"
+    state: absent
 
 - name: Generate the management WireGuard private key locally once
   ansible.builtin.shell: |

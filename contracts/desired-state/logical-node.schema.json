@@ -41,7 +41,7 @@
           "properties": {
             "public_key": {"type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"},
             "short_id": {"type": "string", "minLength": 2, "maxLength": 16, "pattern": "^[0-9a-f]+$"},
-            "private_key_ref": {"type": "string", "pattern": "^secret://kv/(develop|staging|prod)/nodes/[a-z0-9-]+/reality#private_key$"}
+            "private_key_ref": {"type": "string", "pattern": "^secret://kv/(develop|prod)/nodes/[a-z0-9-]+/reality#private_key$"}
           }
         },
         "mask": {
@@ -51,11 +51,11 @@
           "properties": {
             "certificate_ref": {
               "type": "string",
-              "pattern": "^secret://kv/(develop|staging|prod)/nodes/[a-z0-9-]+/mask#fullchain$"
+              "pattern": "^secret://kv/(develop|prod)/nodes/[a-z0-9-]+/mask#fullchain$"
             },
             "private_key_ref": {
               "type": "string",
-              "pattern": "^secret://kv/(develop|staging|prod)/nodes/[a-z0-9-]+/mask#private_key$"
+              "pattern": "^secret://kv/(develop|prod)/nodes/[a-z0-9-]+/mask#private_key$"
             }
           }
         },

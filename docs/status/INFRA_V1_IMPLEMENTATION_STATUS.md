@@ -1,8 +1,8 @@
 # Состояние реализации инфраструктуры v1
 
-Дата среза: **13 августа 2026 года**
+Дата среза: **14 августа 2026 года**
 Рабочая ветка: `feat/infra-v1-foundation`
-Статус: **инфраструктурный контур до границы backend/node-agent реализован и проверен офлайн**
+Статус: **management foundation развёрнут; fleet-контур готов офлайн до границы backend/node-agent**
 
 ## 1. Где мы сейчас
 
@@ -24,18 +24,23 @@ manifest snapshot с deployment-scoped revision, строгим destructive guar
 локальным payload digest и лимитом 4 MiB. Coordinator уже выделяет и pin'ит
 revision и manifest identity, но намеренно не выполняет gRPC-вызов.
 
-Начат отдельный v1 management-foundation контур. Единственный разрешённый
-ручной bootstrap inventory описывает один management VPS. Операторский playbook
-может установить Vault с immutable image digest и сгенерировать транспортный
-TLS непосредственно на хосте. Vault остаётся loopback-only и намеренно не
-инициализируется и не unseal'ится автоматически. Для GitHub-hosted orchestration
-добавлены отдельный restricted SSH account, forced-command allowlist, ручной
-read-only readiness workflow и защищённый deployment handoff с GitHub
-Environment и concurrency lock. GitHub передаёт только проверенный Git bundle;
-Vault policy/AppRole, `secret://` resolver и Ansible SSH identity остаются на
-management VPS.
+V1 management foundation развёрнут на отдельном management VPS. Двухфазный
+bootstrap автоматически установил WireGuard до hardening, перевёл операторский
+доступ на management overlay, установил Docker, loopback-only Vault с TLS и
+ограниченные executors. Контрольный повтор завершился с `changed=0` и
+`failed=0`, то есть live management-контур сошёлся идемпотентно.
 
-Каталоги `desired/environments/{develop,staging,prod}` по-прежнему содержат
+Vault инициализирован и unsealed вручную. Включены KV v2, AppRole и file audit;
+созданы отдельные `fleet-deployer-develop` и `fleet-deployer-prod` policies и
+локальные AppRole credentials. Secret import, ограниченная operator policy,
+snapshot/restore и reboot/unseal drill ещё не выполнены.
+
+Выделенный self-hosted runner зарегистрирован, GitHub Environment SSH secrets
+подготовлены, а management-хост принимает только environment-bound forced
+commands. End-to-end запуск workflows из `main` ещё не проверен: текущая ветка
+не отправлена в remote и MR не создан.
+
+Поддерживаются ровно две среды: `develop` и `prod`. Их каталоги пока содержат
 только объекты окружений. Реалистичный develop-флот с placeholder-данными и
 только `secret://` references находится в `tests/fixtures/valid/desired`.
 
@@ -43,12 +48,12 @@ management VPS.
 
 ### 2.1. Desired state и схемы
 
-Создана структура `desired/` для трёх изолированных окружений:
+Создана структура `desired/` для двух изолированных окружений:
 
 ```text
 desired/
 ├── common/
-├── environments/{develop,staging,prod}/
+├── environments/{develop,prod}/
 └── fleet-ids.yml
 ```
 
@@ -145,8 +150,8 @@ Canonical representation и digest зависят от effective-значени�
 
 На дату обновления проходят:
 
-- 121 unit-тест;
-- валидация `develop`, `staging` и `prod`;
+- 133 unit-теста;
+- валидация `develop` и `prod`;
 - Python bytecode compilation;
 - проверка JSON Schema;
 - `git diff --check`;
@@ -159,10 +164,9 @@ Canonical representation и digest зависят от effective-значени�
 - offline reference listing, environment-bound Vault policy и `0600` resolver
   output checks.
 
-`ansible-core` в текущей локальной среде не установлен, поэтому
-`ansible-inventory --list` и `ansible-playbook --syntax-check` здесь пропущены.
-Встроенная проверка соответствия inventory/node plans проходит; Makefile
-автоматически запускает parser check, когда Ansible доступен.
+Локальное `ansible-env` содержит `ansible-core`; реальные inventory parsing,
+playbook syntax-check и `ansible-lint` проходят. Management bootstrap дополнительно
+проверен на живом хосте с повторным convergence apply.
 
 Live-, contract-, scenario- и нагрузочные тесты намеренно отложены.
 
@@ -250,10 +254,10 @@ backend-метриками и алертами; manifest v1 не содержи�
 ### 2.12. Operator bootstrap и GitHub handoff
 
 Оператор вручную выполняет Vault init/unseal, environment policy/AppRole setup,
-initial secret import и Raft snapshot через root-owned команду. Root token и
-unseal shares не сохраняются на VPS; auto-unseal без независимого KMS не
-реализован. AppRole разрешает только read под `kv/<environment>/*`, привязан к
-loopback и не получает default policy.
+initial secret import и, когда будет введено резервное копирование, Raft
+snapshot через root-owned команду. Root token и unseal shares не сохраняются на
+VPS; auto-unseal без независимого KMS не реализован. AppRole разрешает только
+read под `kv/<environment>/*`, привязан к loopback и не получает default policy.
 
 `fleet-deploy` workflow принимает полный SHA, достижимый из `main`, и передаёт
 source плюс deployment baseline как Git bundle. Forced command проверяет
@@ -274,8 +278,8 @@ environment binding и строгие аргументы. Management executor п
 - фактическое применение DNS plan и monitoring targets внешними адаптерами;
 - продвижение `candidate → serving`, drain и retire;
 - реальные флоты в `desired/environments/*`;
-- воспроизводимое построение `develop` с чистых машин;
-- продвижение одинаковых component digests в staging и prod.
+- воспроизводимое построение `develop` fleet-нод с чистых машин;
+- продвижение одинаковых component digests из `develop` в `prod`.
 
 Подготовлена отдельная явная операция атомарного `update-ref` с compare-and-swap
 guard, но coordinator намеренно её не вызывает. В целевом контуре ref можно
@@ -305,9 +309,10 @@ authorization wiring и реальный node-agent runtime.
 7. `fleetctl deploy` способен вызвать Ansible только с явным `--apply` и тремя
    читаемыми файлами operator inputs. Без флага выполняются только локальные
    шаги; SSH и mutation помечаются `SKIPPED_DRY_RUN`.
-8. Vault init/unseal, secret import и snapshots намеренно остаются ручной
-   operator ceremony. Auto-unseal без независимого KMS отсутствует; snapshot
-   restore и reboot/unseal ещё не проверены на живом management VPS.
+8. Vault init/unseal и environment AppRole setup выполнены вручную. Secret
+   import остаётся текущей operator ceremony. Snapshots осознанно отложены;
+   auto-unseal без независимого KMS отсутствует, snapshot restore и
+   reboot/unseal ещё не проверены.
 9. Revision state локален management executor и требует резервного копирования.
    До первого реального Apply к уже существующему backend понадобится отдельная
    проверенная процедура seed/recovery от последней принятой backend revision;
@@ -315,22 +320,25 @@ authorization wiring и реальный node-agent runtime.
 
 ## 5. Следующий порядок работ
 
-1. Установить `ansible-core 2.18` в runner/CI и выполнить обязательные
-   `ansible-inventory --list` и syntax-check нового контура.
-2. Получить реальные develop-данные из §6 и заменить только placeholder
-   develop desired state; staging/prod не заполнять догадками.
-3. Провести отдельно разрешённый bootstrap develop VPS, зарегистрировать
+1. Отправить foundation-ветку, провести MR и проверить `platform-readiness` и
+   `platform-deploy` end-to-end из `main` для `develop` и `prod`.
+2. Заменить использование initial root token ограниченной operator policy и
+   отозвать root token до загрузки runtime-секретов.
+3. Реализовать SOPS-encrypted desired state, чтобы fleet topology и public IP
+   не появлялись в Git plaintext.
+4. Получить реальные develop-данные из §6 и заполнить только `develop`.
+5. Провести отдельно разрешённый bootstrap develop VPS, зарегистрировать
    WireGuard peer, подписать CSR и повторить идемпотентный прогон.
-4. Реализовать node-agent runtime и его readiness до публикации ноды backend.
-5. Добавить protobuf/gRPC mTLS adapter, fake backend и контрактный стенд только
+6. Реализовать node-agent runtime и его readiness до публикации ноды backend.
+7. Добавить protobuf/gRPC mTLS adapter, fake backend и контрактный стенд только
    для `ApplyFleetManifest`; до live apply определить seed/recovery revision
    state для непустого backend.
-6. Завершать deployment и guarded deployment-ref update по
+8. Завершать deployment и guarded deployment-ref update по
    `APPLIED`/`IDEMPOTENT`; отдельно реализовать backend materialization alerts.
-7. Добавить защищённый DNS/data-plane promotion замены, drain/retire/rollback;
+9. Добавить защищённый DNS/data-plane promotion замены, drain/retire/rollback;
    до машинного сигнала reconcile эта операция остаётся ручной.
-8. Провести failure/load/reboot tests и затем продвигать те же component
-   digests в staging/prod.
+10. Провести failure/load/reboot tests и затем продвигать те же component
+    digests из `develop` в `prod`.
 
 ## 6. Данные для первого запуска develop
 

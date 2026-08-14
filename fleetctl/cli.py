@@ -34,12 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="repository root (default: current directory)")
     commands = parser.add_subparsers(dest="command", required=True)
     validate = commands.add_parser("validate", help="validate one environment without network access")
-    validate.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    validate.add_argument("--environment", required=True, choices=("develop", "prod"))
     render = commands.add_parser("render", help="render deterministic local artifacts without network access")
-    render.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    render.add_argument("--environment", required=True, choices=("develop", "prod"))
     render.add_argument("--output", required=True, type=Path)
     plan = commands.add_parser("plan", help="compare a Git source with the last deployed baseline")
-    plan.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    plan.add_argument("--environment", required=True, choices=("develop", "prod"))
     baseline_mode = plan.add_mutually_exclusive_group()
     baseline_mode.add_argument("--baseline", type=Path, help="explicit baseline desired/ directory (tests only)")
     baseline_mode.add_argument(
@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
         "manifest",
         help="render a deployment-scoped backend manifest without making an RPC",
     )
-    manifest.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    manifest.add_argument("--environment", required=True, choices=("develop", "prod"))
     manifest_baseline = manifest.add_mutually_exclusive_group()
     manifest_baseline.add_argument("--baseline", type=Path, help="explicit baseline desired/ directory (tests only)")
     manifest_baseline.add_argument(
@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
         "update-deployment-ref",
         help="atomically record a separately verified successful deployment",
     )
-    update_ref.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    update_ref.add_argument("--environment", required=True, choices=("develop", "prod"))
     update_ref.add_argument("--source-git-sha", required=True)
     expected = update_ref.add_mutually_exclusive_group(required=True)
     expected.add_argument("--expected-baseline-git-sha")
@@ -78,18 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
         "ansible-check",
         help="validate generated inventory and node-plan inputs without SSH",
     )
-    ansible_check.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    ansible_check.add_argument("--environment", required=True, choices=("develop", "prod"))
     ansible_check.add_argument("--build-dir", required=True, type=Path)
     provisioning_check = commands.add_parser(
         "provisioning-check",
         help="run provider-neutral manual provisioning preflight without external actions",
     )
-    provisioning_check.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    provisioning_check.add_argument("--environment", required=True, choices=("develop", "prod"))
     deploy = commands.add_parser(
         "deploy",
         help="run infrastructure workflow; dry-run is the default and stops at WAITING_FOR_BACKEND",
     )
-    deploy.add_argument("--environment", required=True, choices=("develop", "staging", "prod"))
+    deploy.add_argument("--environment", required=True, choices=("develop", "prod"))
     deploy.add_argument("--source", default="HEAD")
     deploy.add_argument("--initial", action="store_true")
     deploy.add_argument("--apply", action="store_true", help="explicitly allow Ansible SSH/mutation")

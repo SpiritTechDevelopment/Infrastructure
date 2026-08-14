@@ -6,7 +6,7 @@ It must contain references to secrets, never secret values.
 - `common/` contains shared non-secret defaults.
 - `fleet-ids.yml` is the append-only mapping from fleet identifiers to numeric
   `vpn_fleet_id` values.
-- `environments/` contains isolated `develop`, `staging`, and `prod` objects.
+- `environments/` contains isolated `develop` and `prod` objects.
 
 Validate all environments without network access:
 

@@ -31,7 +31,7 @@ class GitRepository:
 
     @staticmethod
     def deployment_ref(environment: str) -> str:
-        if environment not in {"develop", "staging", "prod"}:
+        if environment not in {"develop", "prod"}:
             raise GitAdapterError(f"unsupported environment: {environment!r}")
         return f"{DEPLOYMENT_REF_PREFIX}/{environment}"
 

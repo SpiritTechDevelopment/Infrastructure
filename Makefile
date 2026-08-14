@@ -16,7 +16,7 @@ help: ## Show targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n",$$1,$$2}'
 
 fleet-validate: ## Validate desired state for all environments without network access
-	@for environment in develop staging prod; do python3 -m fleetctl.cli validate --environment "$$environment" || exit $$?; done
+	@for environment in develop prod; do python3 -m fleetctl.cli validate --environment "$$environment" || exit $$?; done
 
 fleet-test: ## Run offline fleetctl unit tests
 	python3 -m unittest discover -s tests/unit -v
@@ -75,7 +75,7 @@ fleet-platform-bootstrap-check: fleet-platform-check ## CONNECT=1 checks syntax 
 	  python3 scripts/platform-sops.py bootstrap-check --bundle "$(PLATFORM_BUNDLE)"; \
 	else echo 'local platform artifacts valid; no SSH or Vault access attempted (set CONNECT=1 explicitly)'; fi
 
-fleet-platform-bootstrap: fleet-platform-check ## Install uninitialized Vault from SOPS bundle; requires APPLY=1
+fleet-platform-bootstrap: fleet-platform-check ## Reconcile Vault and management foundation from SOPS; requires APPLY=1
 	@test "$(APPLY)" = 1 || (echo 'refusing platform SSH/mutation: set APPLY=1 explicitly' >&2; exit 2)
 	python3 scripts/bootstrap-platform.py --apply --verify-convergence \
 	  --bundle "$(PLATFORM_BUNDLE)" \
@@ -94,7 +94,9 @@ syntax: ## Syntax-check the active v1 playbooks
 	done
 
 lint: ## Run YAML and Ansible lint on the active v1 contour
-	@git ls-files -z -- '*.yml' '*.yaml' | xargs -0 --no-run-if-empty yamllint
+	@git ls-files -- '*.yml' '*.yaml' | while IFS= read -r file; do \
+	  test ! -f "$$file" || printf '%s\0' "$$file"; \
+	done | xargs -0 --no-run-if-empty yamllint
 	ANSIBLE_INVENTORY="$(CURDIR)/tests/fixtures/platform-bootstrap/platform.yml" \
 		ansible-lint playbooks roles
 

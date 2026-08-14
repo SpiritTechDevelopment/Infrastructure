@@ -17,7 +17,7 @@
     that:
       - spiritvpn_node_plan._notice == 'GENERATED — DO NOT EDIT'
       - spiritvpn_node_plan.schema_version | int == 1
-      - spiritvpn_node_plan.environment in ['develop', 'staging', 'prod']
+      - spiritvpn_node_plan.environment in ['develop', 'prod']
       - spiritvpn_node_plan.instance.id == inventory_hostname
       - >-
         ansible_host == (

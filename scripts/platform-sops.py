@@ -97,7 +97,7 @@ def validate_variables(variables: dict[str, Any]) -> None:
         if not isinstance(item, dict) or set(item) != {"environment", "public_key"}:
             raise PlatformBundleError("each platform_github_ssh_keys item has an invalid shape")
         environment = item["environment"]
-        if environment not in {"develop", "staging", "prod"} or environment in environments:
+        if environment not in {"develop", "prod"} or environment in environments:
             raise PlatformBundleError("GitHub key environment bindings must be valid and unique")
         environments.add(environment)
         _validate_ssh_public_key(item["public_key"], "platform_github_ssh_keys")
@@ -109,8 +109,8 @@ def validate_variables(variables: dict[str, Any]) -> None:
         require_one=False,
     )
     wireguard_addresses = variables["platform_wireguard_hub_addresses"]
-    if not isinstance(wireguard_addresses, dict) or set(wireguard_addresses) != {"develop", "staging", "prod"}:
-        raise PlatformBundleError("platform_wireguard_hub_addresses must map every environment")
+    if not isinstance(wireguard_addresses, dict) or set(wireguard_addresses) != {"develop", "prod"}:
+        raise PlatformBundleError("platform_wireguard_hub_addresses must map develop and prod")
     hub_interfaces: list[ipaddress.IPv4Interface] = []
     for address in wireguard_addresses.values():
         if not isinstance(address, str):

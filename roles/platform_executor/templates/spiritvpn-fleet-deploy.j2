@@ -12,7 +12,7 @@ initial="$4"
 resume="$5"
 allow_destructive="$6"
 
-[[ "$environment" =~ ^(develop|staging|prod)$ ]] || exit 64
+[[ "$environment" =~ ^(develop|prod)$ ]] || exit 64
 [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || exit 64
 [[ "$mode" =~ ^(dry-run|apply)$ ]] || exit 64
 [[ "$initial" =~ ^(true|false)$ ]] || exit 64

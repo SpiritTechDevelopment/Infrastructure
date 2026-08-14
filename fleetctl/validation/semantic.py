@@ -12,7 +12,6 @@ from .issues import ValidationIssue
 
 EXPECTED_NETWORKS = {
     "develop": "10.80.0.0/16",
-    "staging": "10.81.0.0/16",
     "prod": "10.82.0.0/16",
 }
 

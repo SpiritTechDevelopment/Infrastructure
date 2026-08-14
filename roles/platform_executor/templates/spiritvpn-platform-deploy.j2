@@ -9,7 +9,7 @@ environment="$1"
 source_git_sha="$2"
 mode="$3"
 
-[[ "$environment" =~ ^(develop|staging|prod)$ ]] || exit 64
+[[ "$environment" =~ ^(develop|prod)$ ]] || exit 64
 [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || exit 64
 [[ "$mode" =~ ^(check|apply)$ ]] || exit 64
 

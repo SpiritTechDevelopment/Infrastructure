@@ -1,7 +1,8 @@
 # Management platform bootstrap
 
-This is a one-time operator procedure. It installs an uninitialized Vault and a
-restricted GitHub SSH command gate. It does not deploy fleet nodes.
+This operator procedure installs or reconciles Vault without changing its
+initialization or seal state and installs a restricted GitHub SSH command gate.
+It does not deploy fleet nodes.
 
 ## 1. Prepare the host
 
@@ -118,7 +119,7 @@ The bootstrap installs `/usr/local/sbin/spiritvpn-vault-operator`. It is the
 only supported manual interface for the initial ceremony; run it from the
 operator account through `sudo`. It never stores an unseal share or root token.
 
-First confirm that the new Vault is reachable and uninitialized:
+For a new installation, first confirm that Vault is reachable and uninitialized:
 
 ```bash
 ssh -t deploy@MANAGEMENT_HOST \

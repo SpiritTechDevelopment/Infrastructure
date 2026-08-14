@@ -13,7 +13,7 @@
       "additionalProperties": false,
       "required": ["id"],
       "properties": {
-        "id": {"enum": ["develop", "staging", "prod"]}
+        "id": {"enum": ["develop", "prod"]}
       }
     },
     "spec": {
@@ -29,8 +29,8 @@
           "additionalProperties": false,
           "required": ["kv", "pki"],
           "properties": {
-            "kv": {"type": "string", "pattern": "^kv/(develop|staging|prod)$"},
-            "pki": {"type": "string", "pattern": "^pki/(develop|staging|prod)$"}
+            "kv": {"type": "string", "pattern": "^kv/(develop|prod)$"},
+            "pki": {"type": "string", "pattern": "^pki/(develop|prod)$"}
           }
         },
         "common_overrides": {"type": "object"}

@@ -23,7 +23,7 @@ case "$operation" in
     environment="$1"
     source_git_sha="$2"
     mode="$3"
-    [[ "$environment" =~ ^(develop|staging|prod)$ ]] || { printf '%s\n' 'invalid environment' >&2; exit 64; }
+    [[ "$environment" =~ ^(develop|prod)$ ]] || { printf '%s\n' 'invalid environment' >&2; exit 64; }
     [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'invalid source Git SHA' >&2; exit 64; }
     [[ "$mode" =~ ^(check|apply)$ ]] || { printf '%s\n' 'invalid platform deployment mode' >&2; exit 64; }
     remote_command="platform-deploy $environment $source_git_sha $mode"
@@ -36,7 +36,7 @@ case "$operation" in
     initial="$4"
     resume="$5"
     allow_destructive="$6"
-    [[ "$environment" =~ ^(develop|staging|prod)$ ]] || { printf '%s\n' 'invalid environment' >&2; exit 64; }
+    [[ "$environment" =~ ^(develop|prod)$ ]] || { printf '%s\n' 'invalid environment' >&2; exit 64; }
     [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'invalid source Git SHA' >&2; exit 64; }
     [[ "$mode" =~ ^(dry-run|apply)$ ]] || { printf '%s\n' 'invalid deployment mode' >&2; exit 64; }
     [[ "$initial" =~ ^(true|false)$ ]] || { printf '%s\n' 'invalid initial flag' >&2; exit 64; }

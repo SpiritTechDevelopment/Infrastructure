@@ -4,7 +4,6 @@ platform_wireguard_hub_addresses: {}
 platform_wireguard_addresses: "{{ platform_wireguard_hub_addresses.values() | list }}"
 platform_wireguard_environment_networks:
   develop: 10.80.0.0/16
-  staging: 10.81.0.0/16
   prod: 10.82.0.0/16
 platform_wireguard_listen_port: 51820
 platform_wireguard_mtu: 1420

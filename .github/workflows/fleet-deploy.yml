@@ -7,7 +7,7 @@ on:
         description: Protected target environment
         required: true
         type: choice
-        options: [develop, staging, prod]
+        options: [develop, prod]
       source_git_sha:
         description: Full 40-character commit SHA reachable from main
         required: true

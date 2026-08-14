@@ -7,7 +7,7 @@ umask 077
 operation="$1"
 environment="$2"
 instance_id="$3"
-[[ "$environment" =~ ^(develop|staging|prod)$ ]] || exit 64
+[[ "$environment" =~ ^(develop|prod)$ ]] || exit 64
 [[ "$instance_id" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || exit 64
 
 peer_dir='{{ platform_wireguard_peer_dir }}'

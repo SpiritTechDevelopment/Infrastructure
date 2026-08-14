@@ -57,7 +57,7 @@ ref не двигается, автоматического удаления с�
 
 ### Environment
 
-Изолированное окружение: `develop`, `staging` или `prod`. У каждого собственные:
+Изолированное окружение: `develop` или `prod`. У каждого собственные:
 
 - management CIDR;
 - DNS-зона;
@@ -569,7 +569,7 @@ Smoke commands должны быть предоставлены оператор
 
 В bootstrap vars входят public WireGuard peers операторов. Management VPS
 считается чистым: роль сама устанавливает WireGuard, локально создаёт hub key,
-настраивает адреса develop/staging/prod и только после этого включает firewall.
+настраивает адреса develop/prod и только после этого включает firewall.
 IP ноутбука не является входным параметром.
 
 Затем с рабочего компьютера запускает platform check и bootstrap. Это единственный

@@ -2,7 +2,7 @@
 - name: Require one reviewed and environment-bound GitHub key
   ansible.builtin.assert:
     that:
-      - item.environment in ['develop', 'staging', 'prod']
+      - item.environment in ['develop', 'prod']
       - item.public_key is match('^(ssh-ed25519|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+(?: .*)?$')
     fail_msg: "A reviewed GitHub Environment SSH public key is required."
   loop: "{{ platform_github_ssh_keys }}"
@@ -44,8 +44,12 @@
     - "{{ platform_executor_config_dir }}"
     - "{{ platform_runtime_config_dir }}"
     - "{{ platform_executor_config_dir }}/develop"
-    - "{{ platform_executor_config_dir }}/staging"
     - "{{ platform_executor_config_dir }}/prod"
+
+- name: Remove the retired staging executor configuration
+  ansible.builtin.file:
+    path: "{{ platform_executor_config_dir }}/staging"
+    state: absent
 
 - name: Inspect the existing executor Python environment
   ansible.builtin.stat:

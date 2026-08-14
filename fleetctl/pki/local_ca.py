@@ -12,7 +12,7 @@ from .model import CertificateBundle, CertificateRequest, PkiError
 
 
 IDENTITY_PATTERN = re.compile(
-    r"^spiffe://spiritvpn/(?P<environment>develop|staging|prod)/instance/[a-z0-9-]{1,63}$"
+    r"^spiffe://spiritvpn/(?P<environment>develop|prod)/instance/[a-z0-9-]{1,63}$"
 )
 
 
@@ -24,7 +24,7 @@ class LocalCertificateAuthorityAdapter:
         match = IDENTITY_PATTERN.fullmatch(request.identity)
         if match is None or match.group("environment") != request.environment:
             raise PkiError("certificate identity does not belong to the requested environment")
-        if request.environment not in {"develop", "staging", "prod"}:
+        if request.environment not in {"develop", "prod"}:
             raise PkiError(f"unsupported PKI environment: {request.environment!r}")
 
         environment_directory = self.state_directory / request.environment

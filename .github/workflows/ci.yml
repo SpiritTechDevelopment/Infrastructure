@@ -32,7 +32,7 @@ jobs:
           FIRST_RENDER: ${{ runner.temp }}/fleetctl-render-first
           SECOND_RENDER: ${{ runner.temp }}/fleetctl-render-second
         run: |
-          for environment in develop staging prod; do
+          for environment in develop prod; do
             python -m fleetctl.cli render --environment "$environment" --output "$FIRST_RENDER/$environment"
             python -m fleetctl.cli render --environment "$environment" --output "$SECOND_RENDER/$environment"
             diff -ru "$FIRST_RENDER/$environment" "$SECOND_RENDER/$environment"

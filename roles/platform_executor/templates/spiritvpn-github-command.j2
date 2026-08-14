@@ -3,7 +3,7 @@ set -euo pipefail
 
 bound_environment="${1:-}"
 case "$bound_environment" in
-  develop|staging|prod) ;;
+  develop|prod) ;;
   *)
     printf '%s\n' 'refusing invalid GitHub environment binding' >&2
     exit 64

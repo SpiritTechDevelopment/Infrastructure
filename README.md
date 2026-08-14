@@ -4,9 +4,9 @@
 Он содержит desired state флотов, компилятор `fleetctl`, Ansible-роли, bootstrap
 management-платформы и GitHub Actions для дальнейших деплоев.
 
-Текущий статус: код bootstrap и Git flow реализован и проходит локальные тесты,
-но management-платформа и реальные VPN-флоты ещё не развёрнуты новым контуром.
-`develop`, `staging` и `prod` пока являются пустыми шаблонами.
+Текущий статус: management-платформа развёрнута, повторный bootstrap сходится
+без изменений, Vault инициализирован и настроен для `develop` и `prod`.
+GitHub deploy flow ещё не проверен end-to-end, а реальные VPN-флоты не созданы.
 
 ## С чего начать?
 
@@ -258,7 +258,6 @@ vars: |
   platform_vault_tls_server_name: vault.management.internal
   platform_wireguard_hub_addresses:
     develop: 10.80.0.1/16
-    staging: 10.81.0.1/16
     prod: 10.82.0.1/16
   platform_wireguard_operator_peers:
     - id: operator-name
@@ -369,7 +368,7 @@ make fleet-platform-check
 
 Она проверяет:
 
-- схемы `develop`, `staging`, `prod`;
+- схемы `develop` и `prod`;
 - unit-тесты `fleetctl` и защитных границ;
 - синтаксис shell и Python;
 - синтаксис активных Ansible playbook;
@@ -524,7 +523,7 @@ Environment
       └── bridges[] ──→ entry → exit
 ```
 
-- `Environment` задаёт границу `develop`, `staging` или `prod`.
+- `Environment` задаёт границу `develop` или `prod`.
 - `Fleet` — продуктовая группа, к которой привязывается клиент.
 - `LogicalNode` — стабильная VPN-идентичность: домен, REALITY и роль.
 - `Instance` — конкретный VPS, исполняющий логическую ноду.
@@ -594,7 +593,6 @@ spec:
 
 ```text
 desired/environments/develop/
-desired/environments/staging/
 desired/environments/prod/
 ```
 
@@ -619,7 +617,6 @@ Management CIDR закреплены валидатором:
 | Среда | CIDR |
 |---|---|
 | `develop` | `10.80.0.0/16` |
-| `staging` | `10.81.0.0/16` |
 | `prod` | `10.82.0.0/16` |
 
 `dns_zone`, `backend_endpoint` и placeholder-домены нужно заменить реальными
@@ -1241,8 +1238,9 @@ inventory и отдельный node plan для каждой instance из пр
 
 `vault operator init` однократно создаёт unseal shares и initial root token.
 Автоматический запуск легко оставил бы их в terminal log, CI artifact или файле.
-Поэтому bootstrap останавливается на работающем неинициализированном Vault, а
-recovery ceremony проводится людьми через отдельную интерактивную команду.
+Поэтому bootstrap никогда не меняет initialization/seal state Vault. На новом
+хосте recovery ceremony проводится людьми через отдельную интерактивную
+команду; повторные bootstrap сохраняют уже инициализированный Vault.
 
 ### Что произойдёт при повторном bootstrap?
 
@@ -1253,8 +1251,10 @@ recovery ceremony проводится людьми через отдельну�
 
 ### Что уже не завершено?
 
-- management bootstrap ещё нужно реально выполнить;
-- Vault нужно init/unseal, настроить и наполнить секретами;
+- workflows `platform-readiness` и `platform-deploy` ещё не проверены
+  end-to-end из `main`;
+- Vault ещё нужно наполнить runtime-секретами; initial root token следует
+  отозвать после настройки ограниченного operator-доступа;
 - реальные `develop` и `prod` topology ещё не описаны;
 - шифрование полного fleet desired state ещё не реализовано;
 - coordinator останавливается на `WAITING_FOR_BACKEND`;
