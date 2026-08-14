@@ -70,15 +70,19 @@ case "$command" in
     require_environment "$environment"
     read_root_token
 
-    if ! vault_as_root secrets list -format=json | grep -q '"kv/"'; then
+    secrets_json="$(vault_as_root secrets list -format=json)"
+    if [[ "$secrets_json" != *'"kv/"'* ]]; then
       vault_as_root secrets enable -path=kv -version=2 kv
     fi
-    if ! vault_as_root auth list -format=json | grep -q '"approle/"'; then
+    auth_json="$(vault_as_root auth list -format=json)"
+    if [[ "$auth_json" != *'"approle/"'* ]]; then
       vault_as_root auth enable approle
     fi
-    if ! vault_as_root audit list -format=json | grep -q '"file/"'; then
+    audit_json="$(vault_as_root audit list -format=json)"
+    if [[ "$audit_json" != *'"file/"'* ]]; then
       vault_as_root audit enable file file_path=/vault/audit/audit.log
     fi
+    unset secrets_json auth_json audit_json
 
     policy="fleet-deployer-$environment"
     vault_as_root policy write "$policy" "/vault/config/policies/$policy.hcl"

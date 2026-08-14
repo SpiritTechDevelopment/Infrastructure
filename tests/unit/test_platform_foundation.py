@@ -336,6 +336,9 @@ all:
         self.assertIn("secret_id_bound_cidrs=127.0.0.1/32", operator)
         self.assertIn("token_no_default_policy=true", operator)
         self.assertNotIn('-e "VAULT_TOKEN=$root_token"', operator)
+        self.assertNotIn("| grep -q", operator)
+        self.assertIn('auth_json="$(vault_as_root auth list -format=json)"', operator)
+        self.assertIn('[[ "$auth_json" != *\'"approle/"\'* ]]', operator)
         self.assertIn('path "kv/data/{{ policy_environment }}/*"', policy)
         self.assertNotIn('capabilities = ["create"', policy)
 
