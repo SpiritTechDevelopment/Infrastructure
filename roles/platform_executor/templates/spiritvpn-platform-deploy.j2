@@ -40,9 +40,12 @@ fi
 git --git-dir="$repository" bundle verify "$bundle" >/dev/null
 
 source_ref=refs/spiritvpn/platform-source
-mapfile -t bundle_heads < <(git bundle list-heads "$bundle")
-test "${#bundle_heads[@]}" -eq 1 || { printf '%s\n' 'platform bundle must contain exactly one ref' >&2; exit 65; }
-read -r head_sha head_ref extra <<< "${bundle_heads[0]}"
+bundle_head="$(git bundle list-heads "$bundle")"
+if test -z "$bundle_head" || test "$(printf '%s\n' "$bundle_head" | wc -l)" -ne 1; then
+  printf '%s\n' 'platform bundle must contain exactly one ref' >&2
+  exit 65
+fi
+read -r head_sha head_ref extra <<< "$bundle_head"
 test -z "${extra:-}" || { printf '%s\n' 'invalid platform Git bundle head' >&2; exit 65; }
 test "$head_ref" = "$source_ref" || { printf '%s\n' 'unexpected platform Git bundle ref' >&2; exit 65; }
 test "$head_sha" = "$source_git_sha" || { printf '%s\n' 'platform bundle SHA mismatch' >&2; exit 65; }

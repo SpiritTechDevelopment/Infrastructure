@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 import yaml
+from jinja2 import Environment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -403,7 +404,9 @@ all:
             REPO_ROOT / "roles" / "platform_wireguard" / "templates" / "spiritvpn-wireguard-peer.j2",
         )
         for path in paths:
-            rendered = re.sub(r"{{[^\n{}]+}}", "fixture", path.read_text(encoding="utf-8"))
+            source = path.read_text(encoding="utf-8")
+            Environment().parse(source)
+            rendered = re.sub(r"{{[^\n{}]+}}", "fixture", source)
             self.assertNotIn("{{", rendered)
             subprocess.run(["bash", "-n"], input=rendered, text=True, check=True)
 
