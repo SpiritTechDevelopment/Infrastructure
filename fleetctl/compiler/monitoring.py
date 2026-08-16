@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
 from fleetctl.model import DesiredState
 
-from .addressing import agent_tls_server_name, management_address
+from .addressing import (
+    CONTROL_BACKEND_METRICS_PORT,
+    agent_tls_server_name,
+    control_management_address,
+    management_address,
+)
+
+
+class MonitoringPlanError(ValueError):
+    """The monitoring projection would describe an unreachable or unsafe target."""
 
 
 def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
@@ -43,10 +53,10 @@ def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
                     "id": f"{instance.object_id}:node-exporter",
                     "service": "node-exporter",
                     "kind": "metrics",
-                    "collection": "node-local",
+                    "collection": "management",
                     "endpoint": {
                         "scheme": "http",
-                        "address": "127.0.0.1",
+                        "address": address,
                         "port": common.observability.node_exporter_port,
                         "path": "/metrics",
                     },
@@ -57,12 +67,30 @@ def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
                     "id": f"{instance.object_id}:xray-metrics",
                     "service": "xray-metrics",
                     "kind": "metrics",
+                    # Xray publishes expvar, not the Prometheus text format, and
+                    # per-user counters would carry client cardinality into the
+                    # time series. It stays node-local until a translating
+                    # exporter exists; `collection` is what keeps it unscraped.
                     "collection": "node-local",
                     "endpoint": {
                         "scheme": "http",
                         "address": "127.0.0.1",
                         "port": common.observability.xray_metrics_port,
                         "path": "/debug/vars",
+                    },
+                    "labels": labels,
+                    **target_state,
+                },
+                {
+                    "id": f"{instance.object_id}:agent-metrics",
+                    "service": "agent-metrics",
+                    "kind": "metrics",
+                    "collection": "management",
+                    "endpoint": {
+                        "scheme": "http",
+                        "address": address,
+                        "port": common.observability.agent_metrics_port,
+                        "path": "/metrics",
                     },
                     "labels": labels,
                     **target_state,
@@ -98,9 +126,66 @@ def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
                 },
             )
         )
+    targets.extend(_control_targets(state))
+    _assert_scraped_targets_stay_on_the_overlay(state, targets)
     return {
         "_notice": "GENERATED — DO NOT EDIT",
         "schema_version": 1,
         "environment": state.environment.object_id,
         "targets": sorted(targets, key=lambda item: item["id"]),
     }
+
+
+def _assert_scraped_targets_stay_on_the_overlay(
+    state: DesiredState, targets: list[dict[str, Any]]
+) -> None:
+    """Prometheus reaches nodes only over WireGuard.
+
+    A scraped target outside the management network is either unreachable or,
+    worse, a public address — which would mean the metrics port is exposed. The
+    executor only has ansible-core and cannot do subnet arithmetic, so this is
+    the one place the invariant can be enforced with real addresses.
+    """
+    network = ipaddress.ip_network(state.environment.management_network, strict=True)
+    for target in targets:
+        if target["kind"] != "metrics" or target["collection"] != "management":
+            continue
+        address = ipaddress.ip_address(target["endpoint"]["address"])
+        if address not in network:
+            raise MonitoringPlanError(
+                f"scrape target {target['id']} resolves to {address}, "
+                f"which is outside the management network {network}"
+            )
+
+
+def _control_targets(state: DesiredState) -> list[dict[str, Any]]:
+    """Backend metrics live on the management host, not on a fleet instance."""
+    if state.environment.control is None:
+        return []
+    environment = state.environment.object_id
+    labels = {
+        "environment": environment,
+        "fleet": "control",
+        "logical_node": "control",
+        "instance": f"control-{environment}",
+        "role": "control",
+        "region": "management",
+        "lifecycle": "serving",
+    }
+    return [
+        {
+            "id": f"control-{environment}:backend-metrics",
+            "service": "backend-metrics",
+            "kind": "metrics",
+            "collection": "management",
+            "endpoint": {
+                "scheme": "http",
+                "address": control_management_address(state.environment),
+                "port": CONTROL_BACKEND_METRICS_PORT,
+                "path": "/metrics",
+            },
+            "labels": labels,
+            "slo_eligible": True,
+            "readiness_expected": True,
+        }
+    ]

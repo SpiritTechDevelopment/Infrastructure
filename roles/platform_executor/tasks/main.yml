@@ -126,6 +126,14 @@
     group: root
     mode: "0755"
 
+- name: Install the root-owned control deployment executor
+  ansible.builtin.template:
+    src: spiritvpn-control-deploy.j2
+    dest: /usr/local/sbin/spiritvpn-control-deploy
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Persist the bounded management runtime configuration
   ansible.builtin.copy:
     content: |
@@ -176,6 +184,19 @@
   diff: false
   when: deploy_mode == 'bootstrap'
 
+- name: Preserve environment-local control deployment settings
+  ansible.builtin.copy:
+    content: |
+      {{ {
+        'control_external_backup_command_argv': []
+      } | to_nice_yaml(indent=2, sort_keys=true) }}
+    dest: "{{ platform_executor_config_dir }}/{{ item.key }}/control.yml"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+  loop: "{{ platform_wireguard_hub_addresses | dict2items }}"
+
 - name: Install the root-owned platform deployment executor
   ansible.builtin.template:
     src: spiritvpn-platform-deploy.j2
@@ -197,6 +218,7 @@
     content: |
       {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-platform-readiness
       {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-platform-deploy *
+      {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-control-deploy *
       {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-fleet-deploy
     dest: "/etc/sudoers.d/91-{{ platform_github_user }}-readiness"
     owner: root

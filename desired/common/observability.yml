@@ -5,6 +5,7 @@ retention:
 ports:
   node_exporter: 9100
   xray_metrics: 11111
+  agent_metrics: 9090
 scrape_interval_seconds: 15
 probe:
   interval_seconds: 30

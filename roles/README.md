@@ -13,6 +13,8 @@
 | `xray` | Compiled Xray runtime configuration |
 | `nginx_mask` | REALITY mask service |
 | `node_exporter` | Node metrics component |
+| `node_agent` | Environment-bound backend agent with persistent SQLite and node-local mTLS |
+| `control_runtime` | Environment-isolated PostgreSQL, migrations, backend and readiness on management |
 | `platform_wireguard` | Create the management WireGuard hub and reconcile operator/node public peers without exporting private keys |
 | `platform_vault` | Install loopback-only TLS Vault and manual ceremony/policy tooling without automatic init or unseal |
 | `platform_executor` | Install the restricted GitHub SSH command gate and local deployment executor |

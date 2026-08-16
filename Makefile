@@ -84,6 +84,7 @@ fleet-platform-bootstrap: fleet-platform-check ## Reconcile Vault and management
 syntax: ## Syntax-check the active v1 playbooks
 	@for playbook in \
 		playbooks/bootstrap/bootstrap.yml \
+		playbooks/control/deploy.yml \
 		playbooks/deploy/configure.yml \
 		playbooks/operations/readiness.yml \
 		playbooks/platform/bootstrap.yml \

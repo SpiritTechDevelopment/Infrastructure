@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any, Iterable
 
 from fleetctl.model import DesiredState
@@ -12,6 +13,7 @@ from .model import ImpactPlan, PlanningError
 
 
 AFFECTED_KEYS = (
+    "control",
     "provision",
     "configure",
     "drain",
@@ -94,8 +96,11 @@ def build_impact_plan(
     if current_data["environment"] != baseline_data["environment"]:
         fields = _changed_fields(current_data["environment"], baseline_data["environment"])
         changes.append({"type": "ENVIRONMENT_CHANGED", "environment": current.environment.object_id, "fields": fields})
-        affected["configure"].update(current_instances)
-        affected["node_runtime"].update(current_instances)
+        if "control" in fields:
+            affected["control"].add(current.environment.object_id)
+        if set(fields) - {"control"}:
+            affected["configure"].update(current_instances)
+            affected["node_runtime"].update(current_instances)
         if "dns_zone" in fields:
             affected["dns_nodes"].update(_node_ids_with_role(current_nodes, "entry"))
         if "management_network" in fields:
@@ -310,7 +315,7 @@ def build_initial_baseline(current: DesiredState) -> DesiredState:
         common=current.common,
         environment_common=current.environment_common,
         node_common={},
-        environment=current.environment,
+        environment=replace(current.environment, control=None),
         fleets=(),
         nodes=(),
         instances=(),

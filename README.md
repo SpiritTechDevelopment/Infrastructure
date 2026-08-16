@@ -6,7 +6,10 @@ management-платформы и GitHub Actions для дальнейших де
 
 Текущий статус: management-платформа развёрнута, повторный bootstrap сходится
 без изменений, Vault инициализирован и настроен для `develop` и `prod`.
-GitHub deploy flow ещё не проверен end-to-end, а реальные VPN-флоты не созданы.
+Реализованы digest-pinned runtime backend/PostgreSQL на management VPS и
+NodeAgent на fleet-нодах, но они ещё не заполнены реальными release/secrets и
+не проверены live. GitHub deploy flow ещё не проверен end-to-end, реальные
+VPN-флоты не созданы.
 
 ## С чего начать?
 
@@ -39,6 +42,12 @@ GitHub deploy flow ещё не проверен end-to-end, а реальные 
 - Vault;
 - защищённые локальные deployment executors;
 - постоянное состояние координатора деплоя.
+
+На этом же VPS могут независимо работать `develop` и `prod` control stacks:
+для каждой среды создаются отдельные Compose project, PostgreSQL data directory,
+секреты и management IP (`10.80.0.1` либо `10.82.0.1`). PostgreSQL наружу не
+публикуется. Процессы backend и PostgreSQL внутри контейнеров непривилегированные;
+отдельный публичный SSH-доступ backend-серверам не нужен.
 
 Его первоначальная установка выполняется оператором с ноутбука. После bootstrap
 обычные изменения management-компонентов должны приходить из GitHub по
@@ -89,6 +98,7 @@ desired state
 | [`fleetctl/`](fleetctl/) | Валидатор, компилятор, planner и deployment coordinator |
 | [`inventories/bootstrap/`](inventories/bootstrap/) | Единственный ручной inventory, целиком закрытый SOPS |
 | [`playbooks/platform/`](playbooks/platform/) | Bootstrap и steady-state management-платформы |
+| [`playbooks/control/`](playbooks/control/) | Локальный deploy backend и PostgreSQL на management VPS |
 | [`playbooks/bootstrap/`](playbooks/bootstrap/) | Первичная установка чистых fleet-нод |
 | [`playbooks/deploy/`](playbooks/deploy/) | Приведение fleet-нод к compiled node plan |
 | [`playbooks/operations/`](playbooks/operations/) | Readiness-проверки fleet-нод |
@@ -102,9 +112,10 @@ desired state
 
 - `platform_wireguard`, `platform_vault`, `platform_executor` — management VPS;
 - `bootstrap_wireguard`, `common`, `docker` — базовая установка машин;
+- `control_runtime` — PostgreSQL, migrations, backend и readiness выбранной среды;
 - `compiled_node_plan`, `compiled_runtime` — применение скомпилированного плана;
-- `xray`, `nginx_mask`, `node_exporter`, `node_limits`, `pki_agent` — компоненты
-  fleet-ноды.
+- `xray`, `nginx_mask`, `node_agent`, `node_exporter`, `node_limits`, `pki_agent`
+  — компоненты fleet-ноды.
 
 ## Как подготовить локальное окружение?
 
@@ -621,6 +632,84 @@ Management CIDR закреплены валидатором:
 
 `dns_zone`, `backend_endpoint` и placeholder-домены нужно заменить реальными
 значениями до эксплуатации.
+
+#### Описать backend и PostgreSQL среды
+
+Control stack задаётся в том же `Environment.spec.control`. В Git хранятся
+только commit SHA, immutable image digests, несекретные имена ролей и
+`secret://`-ссылки. Полный проверяемый пример находится в
+[`tests/fixtures/valid/desired/environments/develop/environment.yml`](tests/fixtures/valid/desired/environments/develop/environment.yml).
+
+Минимальная структура:
+
+```yaml
+spec:
+  # dns_zone, management_network, backend_endpoint и secret_store — как выше
+  control:
+    backend_release:
+      source_git_sha: REPLACE_WITH_40_CHARACTER_BACKEND_COMMIT
+      backend_image:
+        repository: ghcr.io/spirittechdevelopment/spiritvpn-spiritvpnd
+        digest: sha256:REPLACE_WITH_64_HEX_CHARACTERS
+      migration_image:
+        repository: ghcr.io/spirittechdevelopment/spiritvpn-migrate
+        digest: sha256:REPLACE_WITH_64_HEX_CHARACTERS
+    postgres:
+      image:
+        repository: docker.io/library/postgres
+        digest: sha256:REPLACE_WITH_REVIEWED_POSTGRES_DIGEST
+      major_version: 17
+      database: spiritvpn
+      owner_user: spiritvpn_owner
+      runtime_user: spiritvpn_runtime
+      backup_required: false # для prod должно быть true
+    secrets:
+      postgres_owner_password_ref: secret://kv/develop/control/postgres#owner_password
+      postgres_runtime_password_ref: secret://kv/develop/control/postgres#runtime_password
+      migration_database_url_ref: secret://kv/develop/control/postgres#migration_database_url
+      runtime_database_url_ref: secret://kv/develop/control/postgres#runtime_database_url
+      client_uuid_key_ref: secret://kv/develop/control/backend#client_uuid_key
+      grpc_tls_certificate_ref: secret://kv/develop/control/backend-tls#server_certificate
+      grpc_tls_private_key_ref: secret://kv/develop/control/backend-tls#server_private_key
+      grpc_tls_client_ca_ref: secret://kv/develop/control/backend-tls#clients_ca
+      agent_tls_certificate_ref: secret://kv/develop/control/backend-tls#agent_client_certificate
+      agent_tls_private_key_ref: secret://kv/develop/control/backend-tls#agent_client_private_key
+      agent_tls_ca_ref: secret://kv/develop/control/backend-tls#agents_ca
+    authorization:
+      customer_access_writers: [spiffe://spiritvpn/develop/service/product]
+      customer_access_readers: [spiffe://spiritvpn/develop/service/product]
+```
+
+`backend_image` и `migration_image` обязаны быть собраны из одного
+`source_git_sha`. Digest — это неизменяемый SHA-256 идентификатор содержимого
+образа, а не тег. `prod` и `develop` могут использовать одинаковый порт 9443:
+Compose привязывает их к разным WireGuard-адресам management VPS.
+
+Список требуемых значений Vault выводится без обращения к Vault:
+
+```bash
+python3 scripts/vault-secret-resolver.py \
+  --root . \
+  --environment develop \
+  --scope control \
+  --list-references
+```
+
+Каждое значение загружается интерактивно; оно не попадает в аргументы процесса
+или Git:
+
+```bash
+ssh -t deploy@10.80.0.1 \
+  'sudo /usr/local/sbin/spiritvpn-vault-operator put develop secret://kv/develop/control/postgres#owner_password'
+```
+
+Для PostgreSQL нужны два независимых пароля и две DSN на Compose hostname
+`postgres:5432`: migration DSN использует `owner_user`, runtime DSN —
+`runtime_user`. Для backend также нужны его UUID encryption key и две стороны
+mTLS: server identity для manifest clients и client identity для NodeAgent.
+CA/certificate issuance пока не автоматизированы этим инкрементом; готовые PEM
+значения должны быть выпущены доверенным environment-scoped CA и помещены в
+указанные поля Vault.
 
 Создайте каталоги объектов:
 
@@ -1145,12 +1234,47 @@ gh secret set PLATFORM_SSH_KNOWN_HOSTS --env develop < /protected/known-hosts
 | `ci.yml` | Локально воспроизводимые тесты, render, inventory parse и lint без секретов |
 | `platform-readiness.yml` | Read-only проверка management-платформы |
 | `platform-deploy.yml` | Check/apply management state из точного SHA |
+| `control-deploy.yml` | Check/apply PostgreSQL, migrations и backend выбранной среды |
 | `fleet-deploy.yml` | Dry-run/apply desired state выбранной среды |
 
 Deploy workflows используют GitHub Environments и self-hosted runner с label
 `spiritvpn-deploy`. Один общий persistent runner для `develop` и `prod` —
 временный компромисс; в дальнейшем среды лучше разделить или использовать
 ephemeral runners.
+
+### Как выкатывается новая версия backend?
+
+Backend repository публикует два образа из одного commit: `spiritvpnd` и
+`migrate`. После публикации в infrastructure PR меняются `source_git_sha` и два
+digest в `Environment.spec.control.backend_release`. После merge запускается
+`control-deploy` сначала в режиме `check`, затем `apply`.
+
+Management executor сам получает control-секреты из Vault. Он не требует SSH к
+отдельному backend host, потому что stack локален management VPS. Apply:
+
+1. проверяет точный Git bundle и рендерит `control-plan.json`;
+2. поднимает pinned PostgreSQL;
+3. при изменении release создаёт pre-migration dump (для `prod` дополнительно
+   требует настроенный внешний backup adapter);
+4. запускает pinned migration image;
+5. приводит restricted runtime DB role и backend к desired state;
+6. ждёт `/health/ready` и только после этого записывает successful release.
+
+Повторный apply того же release не запускает миграции заново и не использует
+`--force-recreate`. Неявная смена major version существующего PostgreSQL
+отклоняется: такой upgrade требует отдельного backup/restore runbook.
+
+### Как выкатывается новая версия NodeAgent?
+
+Agent repository публикует multi-architecture image. В infrastructure PR
+меняется `desired/common/components.yml:components.node_agent.digest` (или
+environment/node override). Planner отмечает только затронутые instance, а
+`fleet-deploy` применяет к ним digest-pinned service с persistent SQLite и
+node-local mTLS. Readiness требует running container, HTTP `/health/ready` и
+gRPC listener. При совпадающем digest и конфигурации контейнер не пересоздаётся.
+
+Пока `desired/` не содержит реальных нод и digests, эти workflows корректно
+не смогут выполнить live rollout.
 
 ## FAQ
 
@@ -1253,6 +1377,7 @@ inventory и отдельный node plan для каждой instance из пр
 
 - workflows `platform-readiness` и `platform-deploy` ещё не проверены
   end-to-end из `main`;
+- новый `control-deploy` и NodeAgent runtime ещё не проверены на live-машинах;
 - Vault ещё нужно наполнить runtime-секретами; initial root token следует
   отозвать после настройки ограниченного operator-доступа;
 - реальные `develop` и `prod` topology ещё не описаны;

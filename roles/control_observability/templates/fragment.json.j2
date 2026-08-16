@@ -1,0 +1,28 @@
+{#
+  One Prometheus file_sd fragment: the targets of a single job in a single
+  environment. Written only by that environment's control deployment.
+
+  Label values go through `to_json` rather than being quoted by hand, so an
+  identifier that ever grows a character needing escaping cannot silently
+  produce a broken fragment.
+
+  `instance` is deliberately not used as a label name: Prometheus assigns it
+  itself from the scrape address, and overriding it would hide the address.
+#}
+[
+{% for target in _control_observability_scraped | selectattr('service', 'equalto', item) | sort(attribute='id') %}
+  {
+    "targets": {{ [target.endpoint.address ~ ':' ~ (target.endpoint.port | string)] | to_json }},
+    "labels": {{ {
+      "environment": control_plan.environment,
+      "instance_id": target.labels.instance,
+      "logical_node": target.labels.logical_node,
+      "fleet": target.labels.fleet,
+      "node_role": target.labels.role,
+      "region": target.labels.region,
+      "lifecycle": target.labels.lifecycle,
+      "slo_eligible": target.slo_eligible | string | lower,
+    } | to_json }}
+  }{{ "," if not loop.last else "" }}
+{% endfor %}
+]

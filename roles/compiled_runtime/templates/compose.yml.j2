@@ -36,6 +36,34 @@ services:
     restart: unless-stopped
     network_mode: host
     pid: host
-    command: ["--path.rootfs=/host", "--web.listen-address=127.0.0.1:{{ node_exporter_port }}"]
+    command: ["--path.rootfs=/host", "--web.listen-address={{ node_exporter_listen }}"]
     volumes:
       - /:/host:ro,rslave
+
+  node-agent:
+    image: {{ node_agent_image }}
+    user: "{{ node_agent_uid }}:{{ node_agent_gid }}"
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      xray:
+        condition: service_healthy
+    environment:
+      SPIRIT_NODE_ID: "{{ spiritvpn_node_plan.logical_node.id }}"
+      SPIRIT_GRPC_LISTEN: "{{ node_agent_grpc_listen }}"
+      SPIRIT_HTTP_LISTEN: "{{ node_agent_http_listen }}"
+      SPIRIT_GRPC_TLS_CERT_FILE: /run/spiritvpn-pki/server-chain.pem
+      SPIRIT_GRPC_TLS_KEY_FILE: /run/spiritvpn-pki/server.key
+      SPIRIT_GRPC_TLS_CLIENT_CA_FILE: /run/spiritvpn-pki/server-chain.pem
+      SPIRIT_GRPC_ALLOWED_CLIENT_IDENTITIES: "{{ node_agent_allowed_client_identities | join(',') }}"
+      SPIRIT_XRAY_API_ADDRESS: "{{ node_agent_xray_api_address }}"
+      SPIRIT_XRAY_INBOUND_TAG: "{{ node_agent_xray_inbound_tag }}"
+      SPIRIT_XRAY_LOCAL_OUTBOUND_TAG: "{{ node_agent_local_outbound_tag }}"
+      SPIRIT_XRAY_FALLBACK_OUTBOUND_TAG: "{{ node_agent_fallback_outbound_tag }}"
+      SPIRIT_STATE_DB_PATH: /var/lib/spirit-agent/state.db
+      SPIRIT_MAX_INVENTORY_USERS: "{{ node_agent_max_inventory_users }}"
+      SPIRIT_SHUTDOWN_TIMEOUT: "{{ node_agent_shutdown_timeout }}"
+      SPIRIT_LOG_LEVEL: "{{ node_agent_log_level }}"
+    volumes:
+      - {{ node_agent_state_dir }}:/var/lib/spirit-agent
+      - {{ node_agent_tls_dir }}:/run/spiritvpn-pki:ro

@@ -220,8 +220,8 @@ For each GitHub Environment set all three values as secrets:
 Run `platform-readiness` manually. GitHub connects with the tracked pinned host
 key and that workflow can execute only the root-owned readiness command. A
 sealed or uninitialized Vault returns a non-zero job result; no secret values
-are returned. The `platform-deploy` and `fleet-deploy` workflows are restricted
-to their environment-bound commands.
+are returned. The `platform-deploy`, `control-deploy` and `fleet-deploy`
+workflows are restricted to their environment-bound commands.
 
 After the first bootstrap, management component changes use the normal Git
 flow. Merge the reviewed pull request to `main`, copy the resulting full
@@ -230,6 +230,14 @@ flow. Merge the reviewed pull request to `main`, copy the resulting full
 bundle. The management host runs `playbooks/platform/steady.yml` locally with
 the root-owned runtime variables persisted during bootstrap; GitHub receives
 no SOPS identity or Vault credential.
+
+After `Environment.spec.control` contains reviewed image digests and all listed
+control references exist in Vault, dispatch `control-deploy` for the same exact
+infrastructure SHA: first `mode=check`, then `mode=apply`. The management host
+locally reconciles the environment-specific PostgreSQL, migrations and backend;
+no direct backend SSH is involved. For an existing production database, put a
+reviewed external backup command argv in root-owned
+`/etc/spiritvpn/deploy/prod/control.yml` before a changed release.
 
 `inventories/bootstrap/platform.sops.yml` is intentionally not consumed by
 that steady-state command. If operator keys, the runner address, management

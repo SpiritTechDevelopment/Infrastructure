@@ -482,9 +482,11 @@ CAKE ограничивает суммарный egress машины и даёт
 
 ### Backend
 
-Backend будет принимать полный fleet manifest. Infrastructure уже умеет
-детерминированно собрать request и назначить revision, но gRPC adapter пока не
-реализован.
+Backend/PostgreSQL runtime уже описывается в `Environment.spec.control` и
+разворачивается workflow `control-deploy` локально на management VPS. Образы
+backend, migrations и PostgreSQL фиксируются digest; среды изолированы Compose
+project, data path, secrets и WireGuard management address. Runtime существует,
+но gRPC adapter отправки fleet manifest пока не реализован.
 
 Будущая успешная граница deployment:
 
@@ -509,9 +511,11 @@ runtime customer users Xray. Он должен:
 - хранить durable usage spool при недоступном backend;
 - отдавать health, inventory и Prometheus metrics.
 
-Agent пока разрабатывается отдельно. В infra уже подготовлены endpoint,
-management addressing, machine identity, certificate scaffolding и monitoring
-target, но самого runtime/service/readiness ещё нет.
+Agent реализован в отдельном репозитории и подключён в infra как digest-pinned
+Compose service. State хранится в `/var/lib/spirit-agent`, TLS private key
+остаётся node-local, а readiness проверяет running service, `/health/ready` и
+gRPC listener. Live rollout пока не выполнен: реальные ноды, image digest и
+подписанные machine certificates ещё нужно подготовить.
 
 ## 11. Readiness, мониторинг и alerts
 
@@ -538,7 +542,7 @@ Smoke commands должны быть предоставлены оператор
 
 - generated `monitoring-targets.json` ещё не применяется внешним adapter;
 - v1 observability stack не развёртывается новым coordinator;
-- agent metrics отсутствуют вместе с agent;
+- agent metrics target генерируется, но центральный scraper ещё не применён;
 - backend materialization/operation dashboards и alerts не применены;
 - DNS/data-plane probes не включены в автоматическое promotion.
 
@@ -715,8 +719,9 @@ Fail-closed означает, что отсутствие доказательс
 | Vault installation/TLS/manual ceremony | Готово офлайн, нужен живой bootstrap/restore drill |
 | Vault secret resolver/AppRole | Готово офлайн |
 | GitHub protected handoff | Готово офлайн, GitHub Environments ещё нужно настроить |
+| Backend/PostgreSQL runtime | Готово офлайн; нужны digests, Vault secrets и live apply |
 | Backend manifest compiler/revisions | Готово, RPC не отправляется |
-| Node-agent runtime | Не готов |
+| Node-agent runtime | Готово офлайн; нужен live rollout |
 | Machine PKI issuance/renewal automation | Только scaffolding |
 | Xray `RoutingService` | Ещё не включён |
 | Central monitoring/alerts | Plans есть, применение не готово |

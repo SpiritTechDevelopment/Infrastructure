@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  printf '%s\n' 'usage: platform-remote.sh <management-host> <platform-readiness|platform-deploy ...|fleet-deploy ...>' >&2
+  printf '%s\n' 'usage: platform-remote.sh <management-host> <platform-readiness|platform-deploy ...|control-deploy ...|fleet-deploy ...>' >&2
   exit 64
 fi
 
@@ -27,6 +27,16 @@ case "$operation" in
     [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'invalid source Git SHA' >&2; exit 64; }
     [[ "$mode" =~ ^(check|apply)$ ]] || { printf '%s\n' 'invalid platform deployment mode' >&2; exit 64; }
     remote_command="platform-deploy $environment $source_git_sha $mode"
+    ;;
+  control-deploy)
+    [[ $# -eq 3 ]] || { printf '%s\n' 'control-deploy requires environment, SHA and mode' >&2; exit 64; }
+    environment="$1"
+    source_git_sha="$2"
+    mode="$3"
+    [[ "$environment" =~ ^(develop|prod)$ ]] || { printf '%s\n' 'invalid environment' >&2; exit 64; }
+    [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'invalid source Git SHA' >&2; exit 64; }
+    [[ "$mode" =~ ^(check|apply)$ ]] || { printf '%s\n' 'invalid control deployment mode' >&2; exit 64; }
+    remote_command="control-deploy $environment $source_git_sha $mode"
     ;;
   fleet-deploy)
     [[ $# -eq 6 ]] || { printf '%s\n' 'fleet-deploy requires environment, SHA, mode and three boolean flags' >&2; exit 64; }

@@ -60,6 +60,13 @@ call provider or DNS APIs, apply the backend manifest, or move
 `refs/deployments/*`. Until the backend adapter exists the final coordinator
 state remains `WAITING_FOR_BACKEND` even after successful infrastructure apply.
 
+`.github/workflows/control-deploy.yml` sends one reviewed infrastructure commit
+to an environment-bound root executor. The executor renders `control-plan.json`,
+resolves only `control` Vault references and reconciles the local PostgreSQL,
+migrations and backend stack. GitHub receives neither Vault credentials nor
+resolved application secrets. The local successful control release ref is not
+the fleet deployment baseline and does not bypass `ApplyFleetManifest`.
+
 GitHub transfers source objects rather than giving the management VPS a GitHub
 token or repository deploy key. Environment protection and review of the exact
 SHA remain part of the authorization boundary.

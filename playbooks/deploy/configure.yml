@@ -16,4 +16,5 @@
     - role: xray
     - role: nginx_mask
     - role: node_exporter
+    - role: node_agent
     - role: compiled_runtime

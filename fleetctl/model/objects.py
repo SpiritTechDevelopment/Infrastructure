@@ -20,6 +20,32 @@ class Component:
 
 
 @dataclass(frozen=True, slots=True)
+class ImmutableImage:
+    repository: str
+    digest: str
+
+    @property
+    def image(self) -> str:
+        return f"{self.repository}@{self.digest}"
+
+
+@dataclass(frozen=True, slots=True)
+class ControlPlane:
+    backend_source_git_sha: str
+    backend_image: ImmutableImage
+    migration_image: ImmutableImage
+    postgres_image: ImmutableImage
+    postgres_major_version: int
+    postgres_database: str
+    postgres_owner_user: str
+    postgres_runtime_user: str
+    backup_required: bool
+    secret_refs: dict[str, str]
+    customer_access_writers: tuple[str, ...]
+    customer_access_readers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ComponentsConfig:
     components: dict[str, Component]
     source: Path
@@ -43,6 +69,7 @@ class ObservabilityConfig:
     activity_retention_days: int
     node_exporter_port: int
     xray_metrics_port: int
+    agent_metrics_port: int
     scrape_interval_seconds: int
     probe_interval_seconds: int
     probe_timeout_seconds: int
@@ -113,6 +140,7 @@ class Environment:
     backend_endpoint: str
     secret_kv: str
     secret_pki: str
+    control: ControlPlane | None
     common_overrides: dict[str, Any]
     source: Path
 

@@ -19,10 +19,11 @@
     "ports": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["node_exporter", "xray_metrics"],
+      "required": ["node_exporter", "xray_metrics", "agent_metrics"],
       "properties": {
         "node_exporter": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "xray_metrics": {"type": "integer", "minimum": 1, "maximum": 65535}
+        "xray_metrics": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "agent_metrics": {"type": "integer", "minimum": 1, "maximum": 65535}
       }
     },
     "scrape_interval_seconds": {"type": "integer", "minimum": 1},

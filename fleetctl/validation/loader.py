@@ -13,9 +13,11 @@ from jsonschema import Draft202012Validator, FormatChecker
 from fleetctl.model import (
     BridgeRelation,
     CommonConfig,
+    ControlPlane,
     Environment,
     Fleet,
     Instance,
+    ImmutableImage,
     LogicalNode,
     common_from_values,
 )
@@ -205,6 +207,27 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
     spec = document["spec"]
     match document["kind"]:
         case "Environment":
+            control_spec = spec.get("control")
+            control = None
+            if control_spec is not None:
+                control = ControlPlane(
+                    backend_source_git_sha=control_spec["backend_release"]["source_git_sha"],
+                    backend_image=ImmutableImage(**control_spec["backend_release"]["backend_image"]),
+                    migration_image=ImmutableImage(**control_spec["backend_release"]["migration_image"]),
+                    postgres_image=ImmutableImage(**control_spec["postgres"]["image"]),
+                    postgres_major_version=control_spec["postgres"]["major_version"],
+                    postgres_database=control_spec["postgres"]["database"],
+                    postgres_owner_user=control_spec["postgres"]["owner_user"],
+                    postgres_runtime_user=control_spec["postgres"]["runtime_user"],
+                    backup_required=control_spec["postgres"]["backup_required"],
+                    secret_refs=dict(control_spec["secrets"]),
+                    customer_access_writers=tuple(
+                        control_spec["authorization"]["customer_access_writers"]
+                    ),
+                    customer_access_readers=tuple(
+                        control_spec["authorization"]["customer_access_readers"]
+                    ),
+                )
             return Environment(
                 object_id=object_id,
                 dns_zone=spec["dns_zone"],
@@ -212,6 +235,7 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 backend_endpoint=spec["backend_endpoint"],
                 secret_kv=spec["secret_store"]["kv"],
                 secret_pki=spec["secret_store"]["pki"],
+                control=control,
                 common_overrides=spec.get("common_overrides", {}),
                 source=path,
             )

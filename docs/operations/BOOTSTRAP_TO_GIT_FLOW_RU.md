@@ -68,7 +68,7 @@ Bootstrap устанавливает и настраивает:
 - незапущенный в эксплуатацию, но работающий процесс Vault;
 - ограниченного пользователя `github-deploy`;
 - локальные исполнители `platform-readiness`, `platform-deploy` и
-  `fleet-deploy`.
+  `control-deploy`, `fleet-deploy`.
 
 После этого оператор вручную выполняет ceremony Vault: initialize, разносит
 unseal shares во внешнее recovery-хранилище, unseal, создаёт environment policy
@@ -104,6 +104,19 @@ desired/prod    -> PR -> merge -> fleet-deploy(prod, dry-run)    -> approval -> 
 
 Обе среды пока используют один выделенный self-hosted runner и один management
 VPS, но разные GitHub Environment secrets и разные forced-command SSH keys.
+
+Backend и PostgreSQL выкатываются отдельным защищённым шагом до fleet apply:
+
+```text
+backend build -> immutable backend+migrate digests -> infrastructure PR
+              -> control-deploy(check) -> approval -> control-deploy(apply)
+```
+
+`control-deploy` выполняется на management VPS, читает секреты только из
+loopback Vault и не требует прямого SSH к backend. Для новой версии migrations
+запускаются один раз перед backend; повторный apply того же release сходится без
+повторной миграции. NodeAgent digest меняется через infrastructure PR и
+применяется обычным `fleet-deploy` только к затронутым нодам.
 
 `fleetctl` вычисляет `impact-plan`. Bootstrap запускается только для новых
 инстансов; configure и readiness — только для `affected` инстансов. Если desired

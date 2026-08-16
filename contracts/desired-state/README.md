@@ -12,6 +12,11 @@ singleton files under `desired/common/`:
 - `xray.yml` — stable tag conventions and access-log policy;
 - `limits.yml` — named VPS bandwidth/CAKE profiles and degradation threshold.
 
+The optional strict `Environment.spec.control` contract binds one environment
+to the matching backend source SHA, immutable backend/migration/PostgreSQL
+digests, database roles, backup policy, service identities and `secret://`
+references. It never accepts secret values.
+
 `common-overrides.schema.json` is the strict partial schema used for
 `Environment.spec.common_overrides` and `LogicalNode.spec.common_overrides`.
 Overrides use deterministic precedence `common < Environment < LogicalNode`;

@@ -1,0 +1,10 @@
+---
+control_plan_file: ""
+control_secret_values: "{{ spiritvpn_secret_values | default({}) }}"
+control_postgres_uid: "999"
+control_postgres_gid: "999"
+control_backend_uid: "10001"
+control_backend_gid: "10001"
+control_external_backup_command_argv: []
+control_compose_pull_policy: missing
+control_tls_minimum_validity_seconds: 604800

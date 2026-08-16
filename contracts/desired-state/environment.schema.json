@@ -33,8 +33,92 @@
             "pki": {"type": "string", "pattern": "^pki/(develop|prod)$"}
           }
         },
+        "control": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backend_release", "postgres", "secrets", "authorization"],
+          "properties": {
+            "backend_release": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source_git_sha", "backend_image", "migration_image"],
+              "properties": {
+                "source_git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                "backend_image": {"$ref": "#/$defs/immutableImage"},
+                "migration_image": {"$ref": "#/$defs/immutableImage"}
+              }
+            },
+            "postgres": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["image", "major_version", "database", "owner_user", "runtime_user", "backup_required"],
+              "properties": {
+                "image": {"$ref": "#/$defs/immutableImage"},
+                "major_version": {"type": "integer", "minimum": 14, "maximum": 20},
+                "database": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
+                "owner_user": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
+                "runtime_user": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
+                "backup_required": {"type": "boolean"}
+              }
+            },
+            "secrets": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "postgres_owner_password_ref",
+                "postgres_runtime_password_ref",
+                "migration_database_url_ref",
+                "runtime_database_url_ref",
+                "client_uuid_key_ref",
+                "grpc_tls_certificate_ref",
+                "grpc_tls_private_key_ref",
+                "grpc_tls_client_ca_ref",
+                "agent_tls_certificate_ref",
+                "agent_tls_private_key_ref",
+                "agent_tls_ca_ref"
+              ],
+              "properties": {
+                "postgres_owner_password_ref": {"$ref": "#/$defs/secretRef"},
+                "postgres_runtime_password_ref": {"$ref": "#/$defs/secretRef"},
+                "migration_database_url_ref": {"$ref": "#/$defs/secretRef"},
+                "runtime_database_url_ref": {"$ref": "#/$defs/secretRef"},
+                "client_uuid_key_ref": {"$ref": "#/$defs/secretRef"},
+                "grpc_tls_certificate_ref": {"$ref": "#/$defs/secretRef"},
+                "grpc_tls_private_key_ref": {"$ref": "#/$defs/secretRef"},
+                "grpc_tls_client_ca_ref": {"$ref": "#/$defs/secretRef"},
+                "agent_tls_certificate_ref": {"$ref": "#/$defs/secretRef"},
+                "agent_tls_private_key_ref": {"$ref": "#/$defs/secretRef"},
+                "agent_tls_ca_ref": {"$ref": "#/$defs/secretRef"}
+              }
+            },
+            "authorization": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["customer_access_writers", "customer_access_readers"],
+              "properties": {
+                "customer_access_writers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 253}},
+                "customer_access_readers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 253}}
+              }
+            }
+          }
+        },
         "common_overrides": {"type": "object"}
       }
+    }
+  },
+  "$defs": {
+    "immutableImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "digest"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      }
+    },
+    "secretRef": {
+      "type": "string",
+      "pattern": "^secret://kv/(develop|prod)/control/[A-Za-z0-9._/-]+#[A-Za-z_][A-Za-z0-9_]*$"
     }
   }
 }

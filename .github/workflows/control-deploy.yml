@@ -1,0 +1,99 @@
+name: control-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Protected target environment
+        required: true
+        type: choice
+        options: [develop, prod]
+      source_git_sha:
+        description: Full 40-character infrastructure commit SHA reachable from main
+        required: true
+        type: string
+      mode:
+        description: Check previews changes; apply reconciles PostgreSQL and backend
+        required: true
+        default: check
+        type: choice
+        options: [check, apply]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: control-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, spiritvpn-deploy]
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.source_git_sha }}
+          fetch-depth: 0
+
+      - name: Validate reviewed source
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          git merge-base --is-ancestor "$REQUESTED_SHA" refs/remotes/origin/main
+          git config --local --unset-all http.https://github.com/.extraheader || true
+
+      - name: Build the exact non-secret Git handoff bundle
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+        run: |
+          set -euo pipefail
+          source_ref=refs/spiritvpn/control-source
+          git update-ref "$source_ref" "$REQUESTED_SHA"
+          git bundle create "$RUNNER_TEMP/control-deploy.bundle" "$source_ref"
+          git update-ref -d "$source_ref"
+          git bundle verify "$RUNNER_TEMP/control-deploy.bundle"
+
+      - name: Install the environment-protected SSH identity
+        shell: bash
+        env:
+          PLATFORM_SSH_PRIVATE_KEY: ${{ secrets.PLATFORM_SSH_PRIVATE_KEY }}
+          PLATFORM_SSH_KNOWN_HOSTS: ${{ secrets.PLATFORM_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$PLATFORM_SSH_PRIVATE_KEY"
+          test -n "$PLATFORM_SSH_KNOWN_HOSTS"
+          umask 077
+          printf '%s\n' "$PLATFORM_SSH_PRIVATE_KEY" > "$RUNNER_TEMP/platform-ssh-key"
+          printf '%s\n' "$PLATFORM_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/platform-known-hosts"
+
+      - name: Invoke the restricted management control reconciler
+        shell: bash
+        env:
+          PLATFORM_SSH_PRIVATE_KEY_FILE: ${{ runner.temp }}/platform-ssh-key
+          PLATFORM_SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/platform-known-hosts
+          PLATFORM_SSH_HOST: ${{ secrets.PLATFORM_SSH_HOST }}
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          test -n "$PLATFORM_SSH_HOST"
+          scripts/platform-remote.sh \
+            "$PLATFORM_SSH_HOST" control-deploy \
+            "$REQUESTED_ENVIRONMENT" "$REQUESTED_SHA" "$REQUESTED_MODE" \
+            < "$RUNNER_TEMP/control-deploy.bundle"
+
+      - name: Remove temporary SSH material
+        if: always()
+        shell: bash
+        run: >-
+          rm -f -- "$RUNNER_TEMP/platform-ssh-key"
+          "$RUNNER_TEMP/platform-known-hosts"
+          "$RUNNER_TEMP/control-deploy.bundle"

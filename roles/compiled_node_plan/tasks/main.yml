@@ -29,6 +29,7 @@
       - spiritvpn_node_plan.instance.target_state in ['provisioning', 'candidate', 'serving', 'draining', 'retired']
       - spiritvpn_node_plan.infrastructure.components.xray.digest is match('^sha256:[0-9a-f]{64}$')
       - spiritvpn_node_plan.infrastructure.components.nginx_mask.digest is match('^sha256:[0-9a-f]{64}$')
+      - spiritvpn_node_plan.infrastructure.components.node_agent.digest is match('^sha256:[0-9a-f]{64}$')
       - spiritvpn_node_plan.infrastructure.components.node_exporter.digest is match('^sha256:[0-9a-f]{64}$')
       - spiritvpn_node_plan.logical_node.reality.private_key_ref is match('^secret://')
       - spiritvpn_node_plan.logical_node.mask.certificate_ref is match('^secret://')
@@ -78,6 +79,15 @@
       - ports: ["{{ spiritvpn_node_plan.infrastructure.networking.agent.port }}"]
         cidrs: ["{{ spiritvpn_node_plan.instance.management_network }}"]
         interface: "{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}"
+      # Prometheus scrapes from the management host over the same overlay. The
+      # listeners already bind only the overlay address; this rule keeps the
+      # firewall from being the single thing standing between /metrics and the
+      # internet if a bind address is ever loosened.
+      - ports:
+          - "{{ spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}"
+          - "{{ spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}"
+        cidrs: ["{{ spiritvpn_node_plan.instance.management_network }}"]
+        interface: "{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}"
     common_fail2ban_ignoreip: >-
       127.0.0.1/8 ::1 {{ spiritvpn_node_plan.instance.management_network }}
     xray_image: >-
@@ -89,6 +99,17 @@
     node_exporter_image: >-
       {{ spiritvpn_node_plan.infrastructure.components.node_exporter.repository
          ~ '@' ~ spiritvpn_node_plan.infrastructure.components.node_exporter.digest }}
+    node_agent_image: >-
+      {{ spiritvpn_node_plan.infrastructure.components.node_agent.repository
+         ~ '@' ~ spiritvpn_node_plan.infrastructure.components.node_agent.digest }}
+    node_agent_grpc_listen: "{{ spiritvpn_node_plan.instance.agent.endpoint }}"
+    node_agent_allowed_client_identities:
+      - >-
+        spiffe://spiritvpn/{{ spiritvpn_node_plan.environment }}/service/backend
+    node_agent_xray_api_address: 127.0.0.1:10085
+    node_agent_xray_inbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.inbound }}"
+    node_agent_local_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.direct_outbound }}"
+    node_agent_fallback_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.block_outbound }}"
     public_port: "{{ spiritvpn_node_plan.logical_node.public.port }}"
     xray_listen_port: "{{ spiritvpn_node_plan.logical_node.public.port }}"
     xray_inbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.inbound }}"
@@ -114,7 +135,15 @@
     mask_tls_private_key: >-
       {{ spiritvpn_secret_values.get(
            spiritvpn_node_plan.logical_node.mask.private_key_ref, '') }}
+    # Metrics bind the management overlay, never loopback and never a wildcard:
+    # Prometheus runs on the management host, and node-exporter plus the agent
+    # expose fleet composition and traffic volumes that must not reach the
+    # public interface even if a firewall rule is later wrong.
+    node_exporter_bind_address: "{{ spiritvpn_node_plan.instance.management_address }}"
     node_exporter_port: "{{ spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}"
+    node_agent_http_listen: >-
+      {{ spiritvpn_node_plan.instance.management_address
+         ~ ':' ~ spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}
     node_limits_egress_enabled: "{{ spiritvpn_node_plan.instance.target_state != 'retired' }}"
     node_limits_bandwidth_profile: "{{ spiritvpn_node_plan.instance.bandwidth.profile }}"
     node_limits_port_capacity_mbps: "{{ spiritvpn_node_plan.instance.bandwidth.port_capacity_mbps }}"

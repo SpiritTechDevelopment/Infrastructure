@@ -113,6 +113,7 @@ if test "$mode" = apply; then
   "$python" "$worktree/scripts/vault-secret-resolver.py" \
     --root "$worktree" \
     --environment "$environment" \
+    --scope fleet \
     --credentials-dir "$config_dir/vault-approle" \
     --compiled-secrets "$secrets_file" \
     --ssh-private-key "$ssh_key_file" \

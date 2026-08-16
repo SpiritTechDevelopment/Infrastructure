@@ -16,3 +16,7 @@ components:
     repository: example.invalid/node-exporter
     tag: fixture
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000004
+  node_agent:
+    repository: example.invalid/node-agent
+    tag: fixture
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000005

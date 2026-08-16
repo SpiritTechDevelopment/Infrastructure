@@ -19,6 +19,7 @@ def canonical_state(state: DesiredState) -> dict[str, Any]:
             "backend_endpoint": state.environment.backend_endpoint,
             "secret_kv": state.environment.secret_kv,
             "secret_pki": state.environment.secret_pki,
+            "control": _control_values(state),
         },
         "fleet_ids": dict(sorted(state.fleet_ids.items())),
         "fleets": [
@@ -72,6 +73,35 @@ def canonical_state(state: DesiredState) -> dict[str, Any]:
             }
             for instance in sorted(state.instances, key=lambda item: item.object_id)
         ],
+    }
+
+
+def _control_values(state: DesiredState) -> dict[str, Any] | None:
+    control = state.environment.control
+    if control is None:
+        return None
+    return {
+        "backend_source_git_sha": control.backend_source_git_sha,
+        "backend_image": {
+            "repository": control.backend_image.repository,
+            "digest": control.backend_image.digest,
+        },
+        "migration_image": {
+            "repository": control.migration_image.repository,
+            "digest": control.migration_image.digest,
+        },
+        "postgres_image": {
+            "repository": control.postgres_image.repository,
+            "digest": control.postgres_image.digest,
+        },
+        "postgres_major_version": control.postgres_major_version,
+        "postgres_database": control.postgres_database,
+        "postgres_owner_user": control.postgres_owner_user,
+        "postgres_runtime_user": control.postgres_runtime_user,
+        "backup_required": control.backup_required,
+        "secret_refs": dict(sorted(control.secret_refs.items())),
+        "customer_access_writers": list(control.customer_access_writers),
+        "customer_access_readers": list(control.customer_access_readers),
     }
 
 

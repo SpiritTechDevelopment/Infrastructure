@@ -47,6 +47,7 @@ def common_source_values(common: CommonConfig) -> dict[str, Any]:
             "ports": {
                 "node_exporter": common.observability.node_exporter_port,
                 "xray_metrics": common.observability.xray_metrics_port,
+                "agent_metrics": common.observability.agent_metrics_port,
             },
             "scrape_interval_seconds": common.observability.scrape_interval_seconds,
             "probe": {

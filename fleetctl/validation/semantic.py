@@ -51,7 +51,7 @@ def _validate_required_components(
     *,
     require_digests: bool,
 ) -> None:
-    required_node_components = {"xray", "nginx_mask", "alloy", "node_exporter"}
+    required_node_components = {"xray", "nginx_mask", "alloy", "node_agent", "node_exporter"}
     missing_components = sorted(required_node_components - set(common.components.components))
     if missing_components:
         issues.append(
@@ -158,6 +158,43 @@ def _validate_environment(environment: Environment, issues: list[ValidationIssue
                 f"secret_store paths must belong to environment {env}",
             )
         )
+    control = environment.control
+    if control is None:
+        return
+    if control.postgres_owner_user == control.postgres_runtime_user:
+        issues.append(
+            ValidationIssue.at(
+                environment.source,
+                "CONTROL_DB_ROLES",
+                "control PostgreSQL owner and runtime users must be distinct",
+            )
+        )
+    if env == "prod" and not control.backup_required:
+        issues.append(
+            ValidationIssue.at(
+                environment.source,
+                "CONTROL_BACKUP_REQUIRED",
+                "prod control deployment must require a pre-migration backup",
+            )
+        )
+    for reference in control.secret_refs.values():
+        if not reference.startswith(f"secret://kv/{env}/control/"):
+            issues.append(
+                ValidationIssue.at(
+                    environment.source,
+                    "CONTROL_SECRET_ENV",
+                    f"control secret reference must belong to environment {env}",
+                )
+            )
+    for identity in (*control.customer_access_writers, *control.customer_access_readers):
+        if "," in identity or identity != identity.strip():
+            issues.append(
+                ValidationIssue.at(
+                    environment.source,
+                    "CONTROL_IDENTITY",
+                    "control client identities must be trimmed and must not contain commas",
+                )
+            )
 
 
 def _validate_identifiers(state: DesiredState, issues: list[ValidationIssue]) -> None:

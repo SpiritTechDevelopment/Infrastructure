@@ -46,23 +46,30 @@ def parse_reference(reference: str, environment: str) -> tuple[str, str]:
 
 
 def desired_references(
-    root: Path, environment: str, desired_root: Path | None = None
+    root: Path,
+    environment: str,
+    desired_root: Path | None = None,
+    scope: str = "all",
 ) -> list[str]:
     state = validate_environment(root, environment, desired_root=desired_root)
-    references = {
-        reference
-        for node in state.nodes
-        for reference in (
-            node.private_key_ref,
-            node.mask_certificate_ref,
-            node.mask_private_key_ref,
+    references: set[str] = set()
+    if scope in {"all", "fleet"}:
+        references.update(
+            reference
+            for node in state.nodes
+            for reference in (
+                node.private_key_ref,
+                node.mask_certificate_ref,
+                node.mask_private_key_ref,
+            )
         )
-    }
-    references.update(
-        bridge.service_credential_ref
-        for fleet in state.fleets
-        for bridge in fleet.bridges
-    )
+        references.update(
+            bridge.service_credential_ref
+            for fleet in state.fleets
+            for bridge in fleet.bridges
+        )
+    if scope in {"all", "control"} and state.environment.control is not None:
+        references.update(state.environment.control.secret_refs.values())
     return sorted(references)
 
 
@@ -137,6 +144,7 @@ def main() -> int:
     parser.add_argument("--credentials-dir", type=Path)
     parser.add_argument("--compiled-secrets", type=Path)
     parser.add_argument("--ssh-private-key", type=Path)
+    parser.add_argument("--scope", choices=("all", "fleet", "control"), default="all")
     parser.add_argument("--list-references", action="store_true")
     parser.add_argument("--vault-address", default="https://127.0.0.1:8200")
     parser.add_argument(
@@ -146,15 +154,23 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        references = desired_references(args.root, args.environment, args.desired_root)
+        references = desired_references(
+            args.root,
+            args.environment,
+            args.desired_root,
+            args.scope,
+        )
         ssh_reference = f"secret://kv/{args.environment}/executor/ansible#private_key"
         if args.list_references:
-            for reference in (*references, ssh_reference):
+            listed_references = references
+            if args.scope in {"all", "fleet"}:
+                listed_references = [*references, ssh_reference]
+            for reference in listed_references:
                 print(reference)
             return 0
-        if args.credentials_dir is None or args.compiled_secrets is None or args.ssh_private_key is None:
+        if args.credentials_dir is None or args.compiled_secrets is None:
             raise ResolverError(
-                "resolution requires --credentials-dir, --compiled-secrets, and --ssh-private-key"
+                "resolution requires --credentials-dir and --compiled-secrets"
             )
         role_id = (args.credentials_dir / "role-id").read_text(encoding="utf-8").strip()
         secret_id = (args.credentials_dir / "secret-id").read_text(encoding="utf-8").strip()
@@ -165,17 +181,18 @@ def main() -> int:
         for reference in references:
             path, field = parse_reference(reference, args.environment)
             resolved[reference] = client.read(path, field)
-        ssh_path, ssh_field = parse_reference(ssh_reference, args.environment)
-        ssh_private_key = client.read(ssh_path, ssh_field)
-        if "PRIVATE KEY" not in ssh_private_key:
-            raise ResolverError("executor Ansible private key has an invalid format")
         payload = yaml.safe_dump(
             {"spiritvpn_secret_values": resolved},
             allow_unicode=True,
             sort_keys=True,
         )
         write_private(args.compiled_secrets, payload)
-        write_private(args.ssh_private_key, ssh_private_key.rstrip("\n") + "\n")
+        if args.ssh_private_key is not None:
+            ssh_path, ssh_field = parse_reference(ssh_reference, args.environment)
+            ssh_private_key = client.read(ssh_path, ssh_field)
+            if "PRIVATE KEY" not in ssh_private_key:
+                raise ResolverError("executor Ansible private key has an invalid format")
+            write_private(args.ssh_private_key, ssh_private_key.rstrip("\n") + "\n")
     except (OSError, ResolverError, DesiredStateInvalid, ValueError) as exc:
         print(f"secret resolution failed: {exc}", file=sys.stderr)
         return 2

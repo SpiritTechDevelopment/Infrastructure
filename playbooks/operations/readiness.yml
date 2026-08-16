@@ -70,6 +70,28 @@
         that:
           - "'xray' in _readiness_xray_service.stdout_lines"
 
+    - name: Require NodeAgent container to be running
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/vpn/compose.yml, ps, --status, running, --services, node-agent]
+      register: _readiness_node_agent_service
+      changed_when: false
+
+    - name: Validate NodeAgent running result
+      ansible.builtin.assert:
+        that:
+          - "'node-agent' in _readiness_node_agent_service.stdout_lines"
+
+    - name: Require local NodeAgent readiness
+      ansible.builtin.uri:
+        url: >-
+          http://{{ spiritvpn_node_plan.instance.management_address }}:{{
+          spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}/health/ready
+        method: GET
+        status_code: 200
+        return_content: false
+        timeout: "{{ spiritvpn_node_plan.infrastructure.observability.probe.timeout_seconds }}"
+      changed_when: false
+
     - name: Read listening TCP sockets
       ansible.builtin.command:
         argv: [ss, -H, -lnt]
@@ -80,6 +102,25 @@
       ansible.builtin.assert:
         that:
           - "(':' ~ (spiritvpn_node_plan.logical_node.public.port | string)) in _readiness_listeners.stdout"
+          - "(':' ~ (spiritvpn_node_plan.infrastructure.networking.agent.port | string)) in _readiness_listeners.stdout"
+
+    # A wildcard bind would serve node-exporter and the agent's /metrics on the
+    # public interface. Both disclose fleet composition and traffic volumes, so
+    # readiness treats a wildcard as a failure rather than a warning.
+    - name: Require metrics listeners bound to the management overlay only
+      ansible.builtin.assert:
+        that:
+          - >-
+            (spiritvpn_node_plan.instance.management_address ~ ':' ~ (item | string))
+            in _readiness_listeners.stdout
+          - "('0.0.0.0:' ~ (item | string)) not in _readiness_listeners.stdout"
+          - "('*:' ~ (item | string)) not in _readiness_listeners.stdout"
+        fail_msg: >-
+          Metrics port {{ item }} is missing or bound outside the management
+          overlay.
+      loop:
+        - "{{ spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}"
+        - "{{ spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}"
 
     - name: Read active CAKE qdisc
       ansible.builtin.command:
@@ -164,7 +205,8 @@
     - name: Require node exporter metrics response
       ansible.builtin.uri:
         url: >-
-          http://127.0.0.1:{{ spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}/metrics
+          http://{{ spiritvpn_node_plan.instance.management_address }}:{{
+          spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}/metrics
         method: GET
         status_code: 200
         return_content: false

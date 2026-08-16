@@ -18,6 +18,7 @@ class BootstrapContourTests(unittest.TestCase):
         self.assertIn("pki_agent", bootstrap)
         self.assertNotIn("compiled_runtime", bootstrap)
         self.assertIn("compiled_runtime", configure)
+        self.assertIn("node_agent", configure)
         self.assertNotIn("bootstrap_wireguard", configure)
         wireguard = (REPO_ROOT / "roles" / "bootstrap_wireguard" / "tasks" / "main.yml").read_text(
             encoding="utf-8"
@@ -53,6 +54,38 @@ class BootstrapContourTests(unittest.TestCase):
         self.assertIn("_compiled_runtime_definition.changed", tasks)
         self.assertNotIn("--force-recreate", tasks)
         self.assertNotIn("compose\n      - down", tasks)
+
+    def test_node_agent_uses_pinned_image_persistent_state_and_node_local_pki(self) -> None:
+        compose = (
+            REPO_ROOT / "roles" / "compiled_runtime" / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        tasks = (REPO_ROOT / "roles" / "node_agent" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        readiness = (REPO_ROOT / "playbooks" / "operations" / "readiness.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("image: {{ node_agent_image }}", compose)
+        self.assertIn("network_mode: host", compose)
+        self.assertIn("SPIRIT_STATE_DB_PATH", compose)
+        self.assertIn("/var/lib/spirit-agent", compose)
+        self.assertIn("remote_src: true", tasks)
+        self.assertIn('node_agent_uid: "65532"', (
+            REPO_ROOT / "roles" / "node_agent" / "defaults" / "main.yml"
+        ).read_text(encoding="utf-8"))
+        self.assertNotIn("ansible.builtin.slurp", tasks)
+        # Readiness must probe the same overlay address the agent binds. A
+        # loopback probe would pass while Prometheus saw nothing.
+        self.assertIn("/health/ready", readiness)
+        self.assertNotIn("http://127.0.0.1:", readiness)
+        self.assertIn(
+            "node_agent_http_listen.split(':')[0]\n        == spiritvpn_node_plan.instance.management_address",
+            tasks,
+        )
+        xray_defaults = (REPO_ROOT / "roles" / "xray" / "defaults" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("RoutingService", xray_defaults)
 
 
 if __name__ == "__main__":

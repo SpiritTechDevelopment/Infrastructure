@@ -37,6 +37,7 @@
   register: _compiled_runtime_apply
   changed_when: >-
     _compiled_runtime_definition.changed
+    or node_agent_runtime_inputs_changed | bool
     or 'Created' in _compiled_runtime_apply.stderr
     or 'Started' in _compiled_runtime_apply.stderr
     or 'Recreated' in _compiled_runtime_apply.stderr

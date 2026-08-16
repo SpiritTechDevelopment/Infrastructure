@@ -19,6 +19,7 @@ xray_api_bind: 127.0.0.1
 xray_api_port: 10085
 xray_api_services:
   - HandlerService
+  - RoutingService
   - StatsService
   - ReflectionService
 

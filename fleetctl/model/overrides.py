@@ -62,6 +62,7 @@ def common_from_values(
                 activity_retention_days=observability["retention"]["activity_days"],
                 node_exporter_port=observability["ports"]["node_exporter"],
                 xray_metrics_port=observability["ports"]["xray_metrics"],
+                agent_metrics_port=observability["ports"]["agent_metrics"],
                 scrape_interval_seconds=observability["scrape_interval_seconds"],
                 probe_interval_seconds=observability["probe"]["interval_seconds"],
                 probe_timeout_seconds=observability["probe"]["timeout_seconds"],

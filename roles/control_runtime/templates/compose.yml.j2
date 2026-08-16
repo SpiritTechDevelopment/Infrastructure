@@ -1,0 +1,55 @@
+name: spiritvpn-control-{{ control_plan.environment }}
+services:
+  postgres:
+    image: {{ control_plan.postgres.image }}
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      POSTGRES_DB: "{{ control_plan.postgres.database }}"
+      POSTGRES_USER: "{{ control_plan.postgres.owner_user }}"
+      POSTGRES_PASSWORD_FILE: /run/spiritvpn-secrets/postgres-owner-password
+    volumes:
+      - {{ control_plan.paths.postgres_data }}:/var/lib/postgresql/data
+      - {{ control_plan.paths.secrets }}/postgres-owner-password:/run/spiritvpn-secrets/postgres-owner-password:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U {{ control_plan.postgres.owner_user }} -d {{ control_plan.postgres.database }}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [control]
+
+  migrate:
+    image: {{ control_plan.backend.migration_image }}
+    profiles: [migration]
+    env_file: [{{ control_plan.paths.root }}/migration.env]
+    networks: [control]
+
+  backend:
+    image: {{ control_plan.backend.image }}
+    restart: unless-stopped
+    stop_grace_period: 30s
+    env_file: [{{ control_plan.paths.root }}/backend.env]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "{{ control_plan.network.management_address }}:{{ control_plan.network.backend_host_port }}:{{ control_plan.network.backend_container_port }}"
+      # The service port has neither TLS nor caller checks, and /metrics
+      # discloses fleet composition, traffic volumes and queue depths. It is
+      # bound to the management address so Prometheus can reach it and nothing
+      # else can; it must never be published on a wildcard.
+      - "{{ control_plan.network.management_address }}:{{ control_plan.network.backend_metrics_port }}:{{ control_plan.network.backend_metrics_port }}"
+    volumes:
+      - {{ control_plan.paths.secrets }}:/secrets:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks: [control]
+
+networks:
+  control:
+    internal: false

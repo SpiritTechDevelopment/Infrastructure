@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import shutil
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import yaml
 
 from fleetctl.adapters import OutputDirectoryError, write_rendered_files
-from fleetctl.compiler import render_files
+from fleetctl.compiler import (
+    MonitoringPlanError,
+    compile_monitoring_targets,
+    render_files,
+)
 from fleetctl.validation import validate_environment
 
 
@@ -30,6 +36,20 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("dns-plan.json", files)
         self.assertIn("monitoring-targets.json", files)
         self.assertIn("bootstrap-inventory.json", files)
+        self.assertIn("control-plan.json", files)
+
+    def test_control_plan_pins_backend_migrations_and_postgres(self) -> None:
+        plan = json.loads(render_files(self.state)["control-plan.json"])
+        self.assertEqual(plan["environment"], "develop")
+        self.assertEqual(plan["network"]["management_address"], "10.80.0.1")
+        self.assertEqual(plan["network"]["backend_host_port"], 9443)
+        self.assertEqual(plan["backend"]["source_git_sha"], "a" * 40)
+        self.assertIn("@sha256:", plan["backend"]["image"])
+        self.assertIn("@sha256:", plan["backend"]["migration_image"])
+        self.assertIn("@sha256:", plan["postgres"]["image"])
+        self.assertTrue(
+            all(reference.startswith("secret://") for reference in plan["secret_refs"].values())
+        )
 
     def test_dns_plan_publishes_only_serving_entries(self) -> None:
         plan = json.loads(render_files(self.state)["dns-plan.json"])
@@ -46,7 +66,9 @@ class RenderingTests(unittest.TestCase):
 
     def test_monitoring_targets_distinguish_instance_lifecycle_and_slo(self) -> None:
         plan = json.loads(render_files(self.state)["monitoring-targets.json"])
-        self.assertEqual(len(plan["targets"]), 8)
+        # Two instances contribute five targets each; the control plane's
+        # backend adds one that belongs to no fleet instance.
+        self.assertEqual(len(plan["targets"]), 11)
         entry_targets = [
             target
             for target in plan["targets"]
@@ -54,13 +76,66 @@ class RenderingTests(unittest.TestCase):
         ]
         self.assertEqual(
             {target["service"] for target in entry_targets},
-            {"agent", "node-exporter", "public-vless", "xray-metrics"},
+            {"agent", "agent-metrics", "node-exporter", "public-vless", "xray-metrics"},
         )
         self.assertTrue(all(target["slo_eligible"] for target in entry_targets))
         self.assertTrue(all(target["labels"]["lifecycle"] == "serving" for target in entry_targets))
         agent = next(target for target in entry_targets if target["service"] == "agent")
         self.assertEqual(agent["endpoint"]["address"], "10.80.1.11")
         self.assertEqual(agent["endpoint"]["port"], 9443)
+
+    def test_scraped_metrics_targets_only_ever_use_the_management_overlay(self) -> None:
+        plan = json.loads(render_files(self.state)["monitoring-targets.json"])
+        scraped = [
+            target
+            for target in plan["targets"]
+            if target["kind"] == "metrics" and target["collection"] == "management"
+        ]
+        self.assertEqual(
+            {target["id"] for target in scraped},
+            {
+                "control-develop:backend-metrics",
+                "develop-entry-nl-01:agent-metrics",
+                "develop-entry-nl-01:node-exporter",
+                "develop-exit-de-01:agent-metrics",
+                "develop-exit-de-01:node-exporter",
+            },
+        )
+        # A scrape target that resolved to loopback would be unreachable from
+        # the management host and would silently monitor nothing.
+        management_network = ipaddress.ip_network("10.80.0.0/16")
+        for target in scraped:
+            address = ipaddress.ip_address(target["endpoint"]["address"])
+            self.assertIn(address, management_network, target["id"])
+        self.assertEqual(
+            next(
+                target["endpoint"]
+                for target in scraped
+                if target["id"] == "control-develop:backend-metrics"
+            ),
+            {"scheme": "http", "address": "10.80.0.1", "port": 8080, "path": "/metrics"},
+        )
+
+    def test_scrape_target_outside_the_overlay_is_refused(self) -> None:
+        # Only reachable if the address derivation itself regresses, which is
+        # exactly when a silent public metrics endpoint would be introduced.
+        with unittest.mock.patch(
+            "fleetctl.compiler.monitoring.control_management_address",
+            return_value="203.0.113.7",
+        ):
+            with self.assertRaises(MonitoringPlanError) as caught:
+                compile_monitoring_targets(self.state)
+        self.assertIn("203.0.113.7", str(caught.exception))
+        self.assertIn("outside the management network", str(caught.exception))
+
+    def test_xray_expvar_stays_node_local_and_unscraped(self) -> None:
+        plan = json.loads(render_files(self.state)["monitoring-targets.json"])
+        xray = next(
+            target for target in plan["targets"] if target["id"] == "develop-entry-nl-01:xray-metrics"
+        )
+        self.assertEqual(xray["collection"], "node-local")
+        self.assertEqual(xray["endpoint"]["address"], "127.0.0.1")
+        self.assertEqual(xray["endpoint"]["path"], "/debug/vars")
 
     def test_candidate_is_monitored_but_not_published_or_slo_eligible(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -89,7 +164,7 @@ class RenderingTests(unittest.TestCase):
             for target in monitoring["targets"]
             if target["labels"]["instance"] == "develop-entry-nl-02"
         ]
-        self.assertEqual(len(candidate_targets), 4)
+        self.assertEqual(len(candidate_targets), 5)
         self.assertTrue(all(not target["slo_eligible"] for target in candidate_targets))
         self.assertTrue(all(target["readiness_expected"] for target in candidate_targets))
 
@@ -118,7 +193,7 @@ class RenderingTests(unittest.TestCase):
             for target in monitoring["targets"]
             if target["labels"]["logical_node"] == "develop-entry-nl"
         ]
-        self.assertEqual(len(entry_targets), 4)
+        self.assertEqual(len(entry_targets), 5)
         self.assertTrue(all(target["labels"]["fleet"] == "unassigned" for target in entry_targets))
         self.assertTrue(all(not target["slo_eligible"] for target in entry_targets))
         self.assertTrue(all(target["readiness_expected"] for target in entry_targets))

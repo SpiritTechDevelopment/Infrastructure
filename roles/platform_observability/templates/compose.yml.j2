@@ -1,0 +1,24 @@
+name: spiritvpn-observability
+services:
+  prometheus:
+    image: {{ platform_prometheus_image }}
+    user: "{{ platform_prometheus_uid }}:{{ platform_prometheus_gid }}"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # Host networking so scrapes leave through the WireGuard hub directly and
+    # arrive at the nodes with a management-network source address, which is
+    # what their nftables rules allow.
+    network_mode: host
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time={{ platform_prometheus_retention_days }}d
+      - --web.listen-address={{ platform_prometheus_bind_address }}:{{ platform_prometheus_port }}
+      # The admin API can delete series and the lifecycle API can reload or
+      # shut down the process over plain HTTP. Target changes arrive through
+      # file_sd, which needs neither.
+      - --web.enable-lifecycle=false
+    volumes:
+      - {{ platform_observability_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - {{ platform_observability_targets_dir }}:{{ platform_prometheus_targets_container_dir }}:ro
+      - {{ platform_observability_state_dir }}:/prometheus

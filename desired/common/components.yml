@@ -16,6 +16,10 @@ components:
     repository: quay.io/prometheus/node-exporter
     tag: v1.9.1
     digest: null
+  node_agent:
+    repository: ghcr.io/spirittechdevelopment/node-agent
+    tag: unpinned
+    digest: null
   vault:
     repository: docker.io/hashicorp/vault
     tag: 2.0.3

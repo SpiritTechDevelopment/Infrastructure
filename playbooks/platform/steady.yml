@@ -38,6 +38,10 @@
     - role: common
     - role: platform_vault
     - role: platform_executor
+    # One shared collector for every environment, like one shared Vault.
+    # Isolation is by write surface: each environment's control deployment
+    # writes only its own file_sd fragments.
+    - role: platform_observability
 
 - name: Verify Vault after management reconciliation
   ansible.builtin.import_playbook: readiness.yml

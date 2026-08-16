@@ -9,6 +9,17 @@ from fleetctl.model import Environment, Instance, LogicalNode
 
 ROLE_SUBNET = {"entry": 1, "exit": 2}
 
+# The backend's service HTTP port inside its container. It carries /metrics and
+# the health endpoints, has neither TLS nor caller checks, and therefore only
+# ever binds the management overlay.
+CONTROL_BACKEND_METRICS_PORT = 8080
+
+
+def control_management_address(environment: Environment) -> str:
+    """The management hub's own overlay address: the first host in the network."""
+    network = ipaddress.ip_network(environment.management_network, strict=True)
+    return str(network.network_address + 1)
+
 
 def instance_slot(instance: Instance) -> int:
     return int(instance.object_id.rsplit("-", 1)[1])

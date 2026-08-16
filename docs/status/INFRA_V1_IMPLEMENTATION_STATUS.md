@@ -1,8 +1,8 @@
 # Состояние реализации инфраструктуры v1
 
-Дата среза: **14 августа 2026 года**
+Дата среза: **15 августа 2026 года**
 Рабочая ветка: `feat/infra-v1-foundation`
-Статус: **management foundation развёрнут; fleet-контур готов офлайн до границы backend/node-agent**
+Статус: **management foundation развёрнут; control runtime и NodeAgent готовы офлайн, live rollout не выполнен**
 
 ## 1. Где мы сейчас
 
@@ -43,6 +43,13 @@ commands. End-to-end запуск workflows из `main` ещё не провер
 Поддерживаются ровно две среды: `develop` и `prod`. Их каталоги пока содержат
 только объекты окружений. Реалистичный develop-флот с placeholder-данными и
 только `secret://` references находится в `tests/fixtures/valid/desired`.
+
+Добавлен отдельный environment-bound `control-deploy`: на одном management VPS
+он изолирует `develop` и `prod`, запускает digest-pinned PostgreSQL, matching
+migration image и backend, проверяет readiness и хранит successful release
+marker. Добавлена роль NodeAgent с immutable image, persistent SQLite,
+node-local mTLS и readiness. Реальные digests, control secrets и certificates
+ещё не внесены, поэтому live deployment этих компонентов не выполнялся.
 
 ## 2. Что реализовано
 
@@ -104,6 +111,7 @@ merge. No-op override не меняет canonical digest и не создаёт 
 ```text
 build/<environment>/
 ├── ansible-inventory.json
+├── control-plan.json        # только если Environment.spec.control задан
 ├── dns-plan.json
 ├── monitoring-targets.json
 └── node-plans/<instance_id>.json
@@ -150,7 +158,7 @@ Canonical representation и digest зависят от effective-значени�
 
 На дату обновления проходят:
 
-- 133 unit-теста;
+- 138 unit-тестов;
 - валидация `develop` и `prod`;
 - Python bytecode compilation;
 - проверка JSON Schema;
@@ -266,13 +274,35 @@ environment binding и строгие аргументы. Management executor п
 запускает coordinator с pinned host keys и удаляет временные значения. GitHub не
 получает Vault token, AppRole, fleet SSH key или resolved secrets.
 
+### 2.13. Backend/PostgreSQL и NodeAgent runtime
+
+`Environment.spec.control` типизированно фиксирует backend source SHA, точные
+digests backend/migration/PostgreSQL, DB roles, backup policy, authorization и
+только environment-scoped Vault references. Compiler выпускает локальный
+`control-plan.json`; изменение control release попадает только в
+`impact-plan.affected.control` и не вызывает передеплой fleet-нод.
+
+`control-deploy` принимает только SHA из `main`, проверяет одно-refовый Git
+bundle и выполняется root-owned executor на management VPS. Секреты разрешаются
+из loopback Vault во временный `0600` файл и удаляются после запуска. PostgreSQL
+не публикует host port; среды используют разные Compose projects и data paths.
+Migration запускается только при изменении release. Для существующего prod DB
+перед миграцией обязательны локальный dump и настроенный внешний backup adapter;
+неявная смена PostgreSQL major version запрещена.
+
+NodeAgent включён в compiled runtime на fleet-нодах. Он использует pinned image,
+host networking, постоянный `/var/lib/spirit-agent`, node-local private key и
+environment-bound backend SPIFFE identity. Readiness проверяет service,
+`/health/ready` и TCP listener. Совпадающий Compose definition не
+пересоздаётся принудительно.
+
 ## 3. Что пока отсутствует
 
 Следующие части целевой системы ещё не реализованы:
 
 - protobuf/gRPC mTLS adapter для `ApplyFleetManifest` и его интеграция с
   coordinator;
-- `infraagent.v1` и реальный node agent;
+- автоматическая выдача/ротация backend↔client и backend↔NodeAgent mTLS;
 - применение materialization/agent-operation dashboards и alerts из
   нормативного backend observability contract;
 - фактическое применение DNS plan и monitoring targets внешними адаптерами;
@@ -288,8 +318,8 @@ guard, но coordinator намеренно её не вызывает. В цел
 
 Нормативное инфраструктурное ТЗ, backend agreement, точный `manifest.v1` и
 baseline `nodeagent.v1` зафиксированы вместе с этим срезом. Для исполняемого
-контрактного стенда всё ещё отсутствуют `infraagent.v1`, manifest gRPC adapter,
-authorization wiring и реальный node-agent runtime.
+контрактного стенда всё ещё отсутствуют `infraagent.v1`, manifest gRPC adapter
+и автоматизированная PKI/authorization ceremony.
 
 ## 4. Известные ограничения текущего инкремента
 
@@ -329,7 +359,8 @@ authorization wiring и реальный node-agent runtime.
 4. Получить реальные develop-данные из §6 и заполнить только `develop`.
 5. Провести отдельно разрешённый bootstrap develop VPS, зарегистрировать
    WireGuard peer, подписать CSR и повторить идемпотентный прогон.
-6. Реализовать node-agent runtime и его readiness до публикации ноды backend.
+6. Заполнить control desired state/digests, выпустить mTLS и проверить сначала
+   `control-deploy(check)`, затем live `develop` apply.
 7. Добавить protobuf/gRPC mTLS adapter, fake backend и контрактный стенд только
    для `ApplyFleetManifest`; до live apply определить seed/recovery revision
    state для непустого backend.

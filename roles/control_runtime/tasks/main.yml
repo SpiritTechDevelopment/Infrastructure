@@ -1,0 +1,546 @@
+---
+- name: Require one generated control plan
+  ansible.builtin.assert:
+    that:
+      - control_plan_file | length > 0
+      - control_plan_file is file
+    fail_msg: "A generated control-plan.json is required."
+
+- name: Load the generated control plan
+  ansible.builtin.include_vars:
+    file: "{{ control_plan_file }}"
+    name: control_plan
+
+- name: Validate the generated control plan boundary
+  ansible.builtin.assert:
+    that:
+      - control_plan._notice == 'GENERATED — DO NOT EDIT'
+      - control_plan.schema_version | int == 1
+      - control_plan.environment in ['develop', 'prod']
+      - control_plan.backend.source_git_sha is match('^[0-9a-f]{40}$')
+      - control_plan.backend.image is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - control_plan.backend.migration_image is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - control_plan.postgres.image is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - control_plan.network.management_address in ansible_all_ipv4_addresses
+      - control_plan.network.backend_metrics_port | int > 0
+      - >-
+        control_plan.network.backend_metrics_port | int
+        != control_plan.network.backend_host_port | int
+      - control_plan.postgres.owner_user != control_plan.postgres.runtime_user
+      - >-
+        control_plan.backend.manifest_writer_identity
+        == 'spiffe://spiritvpn/' ~ control_plan.environment ~ '/service/manifest-writer'
+      - >-
+        control_plan.backend.agent_client_identity
+        == 'spiffe://spiritvpn/' ~ control_plan.environment ~ '/service/backend'
+    fail_msg: "The control plan is incomplete, unpinned, or does not belong to this management host."
+
+- name: Require every control secret reference to be resolved
+  ansible.builtin.assert:
+    that:
+      - item.value in control_secret_values
+      - control_secret_values[item.value] | string | length > 0
+    fail_msg: "A required control secret was not resolved: {{ item.value }}"
+  loop: "{{ control_plan.secret_refs | dict2items }}"
+  no_log: true
+
+- name: Refuse multiline values in control scalar secrets
+  ansible.builtin.assert:
+    that:
+      - "'\n' not in control_secret_values[item]"
+      - "'\r' not in control_secret_values[item]"
+    fail_msg: "A scalar control secret contains a line break."
+  loop:
+    - "{{ control_plan.secret_refs.postgres_owner_password_ref }}"
+    - "{{ control_plan.secret_refs.postgres_runtime_password_ref }}"
+    - "{{ control_plan.secret_refs.migration_database_url_ref }}"
+    - "{{ control_plan.secret_refs.runtime_database_url_ref }}"
+    - "{{ control_plan.secret_refs.client_uuid_key_ref }}"
+  no_log: true
+
+- name: Validate control database URLs and the UUID encryption key shape
+  ansible.builtin.assert:
+    that:
+      - >-
+        control_secret_values[control_plan.secret_refs.migration_database_url_ref]
+        is match('^postgres(?:ql)?://[^ ]+$')
+      - >-
+        control_secret_values[control_plan.secret_refs.runtime_database_url_ref]
+        is match('^postgres(?:ql)?://[^ ]+$')
+      - >-
+        control_secret_values[control_plan.secret_refs.client_uuid_key_ref]
+        is match('^[A-Za-z0-9._-]{1,64}:[A-Za-z0-9+/]{43}=$')
+    fail_msg: "A control database URL or UUID encryption key has an invalid format."
+  no_log: true
+
+- name: Inspect existing PostgreSQL state
+  ansible.builtin.stat:
+    path: "{{ control_plan.paths.postgres_data }}/PG_VERSION"
+  register: _control_postgres_state
+
+- name: Read the existing PostgreSQL major version
+  ansible.builtin.slurp:
+    src: "{{ control_plan.paths.postgres_data }}/PG_VERSION"
+  register: _control_postgres_version
+  when: _control_postgres_state.stat.exists
+
+- name: Refuse an implicit PostgreSQL major-version upgrade
+  ansible.builtin.assert:
+    that:
+      - >-
+        (_control_postgres_version.content | b64decode | trim)
+        == (control_plan.postgres.major_version | string)
+    fail_msg: >-
+      Existing PostgreSQL data has another major version. Perform a reviewed
+      backup/restore upgrade instead of changing the container image in place.
+  when: _control_postgres_state.stat.exists
+
+- name: Create protected control runtime directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ control_plan.paths.root }}"
+      owner: root
+      group: root
+      mode: "0700"
+    - path: "{{ control_plan.paths.secrets }}"
+      owner: root
+      group: "{{ control_backend_gid }}"
+      mode: "0750"
+    - path: "{{ control_plan.paths.postgres_data }}"
+      owner: "{{ control_postgres_uid }}"
+      group: "{{ control_postgres_gid }}"
+      mode: "0700"
+    - path: "{{ control_plan.paths.backups }}"
+      owner: root
+      group: root
+      mode: "0700"
+
+- name: Install the protected PostgreSQL owner password file
+  ansible.builtin.copy:
+    content: >-
+      {{ control_secret_values[control_plan.secret_refs.postgres_owner_password_ref] }}
+    dest: "{{ control_plan.paths.secrets }}/postgres-owner-password"
+    owner: root
+    group: "{{ control_postgres_gid }}"
+    mode: "0440"
+  register: _control_postgres_owner_password
+  no_log: true
+  diff: false
+
+- name: Install protected backend secret files
+  ansible.builtin.copy:
+    content: "{{ control_secret_values[item.reference] }}"
+    dest: "{{ control_plan.paths.secrets }}/{{ item.destination }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - destination: server.crt
+      reference: "{{ control_plan.secret_refs.grpc_tls_certificate_ref }}"
+      owner: "{{ control_backend_uid }}"
+      group: "{{ control_backend_gid }}"
+      mode: "0400"
+    - destination: server.key
+      reference: "{{ control_plan.secret_refs.grpc_tls_private_key_ref }}"
+      owner: "{{ control_backend_uid }}"
+      group: "{{ control_backend_gid }}"
+      mode: "0400"
+    - destination: clients-ca.crt
+      reference: "{{ control_plan.secret_refs.grpc_tls_client_ca_ref }}"
+      owner: "{{ control_backend_uid }}"
+      group: "{{ control_backend_gid }}"
+      mode: "0400"
+    - destination: agent-client.crt
+      reference: "{{ control_plan.secret_refs.agent_tls_certificate_ref }}"
+      owner: "{{ control_backend_uid }}"
+      group: "{{ control_backend_gid }}"
+      mode: "0400"
+    - destination: agent-client.key
+      reference: "{{ control_plan.secret_refs.agent_tls_private_key_ref }}"
+      owner: "{{ control_backend_uid }}"
+      group: "{{ control_backend_gid }}"
+      mode: "0400"
+    - destination: agents-ca.crt
+      reference: "{{ control_plan.secret_refs.agent_tls_ca_ref }}"
+      owner: "{{ control_backend_uid }}"
+      group: "{{ control_backend_gid }}"
+      mode: "0400"
+    - destination: client_uuid.key
+      reference: "{{ control_plan.secret_refs.client_uuid_key_ref }}"
+      owner: "{{ control_backend_uid }}"
+      group: "{{ control_backend_gid }}"
+      mode: "0400"
+  register: _control_secret_files
+  no_log: true
+  diff: false
+
+- name: Validate control certificate lifetimes
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ control_plan.paths.secrets }}/{{ item }}"
+      - -noout
+      - -checkend
+      - "{{ control_tls_minimum_validity_seconds | string }}"
+  loop:
+    - server.crt
+    - clients-ca.crt
+    - agent-client.crt
+    - agents-ca.crt
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require the backend certificate to match its desired TLS server name
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ control_plan.paths.secrets }}/server.crt"
+      - -noout
+      - -checkhost
+      - "{{ control_plan.network.backend_tls_server_name }}"
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Read the backend-to-agent certificate identity
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ control_plan.paths.secrets }}/agent-client.crt"
+      - -noout
+      - -text
+  register: _control_agent_client_certificate
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require the environment-bound backend-to-agent identity
+  ansible.builtin.assert:
+    that:
+      - >-
+        ('URI:' ~ control_plan.backend.agent_client_identity)
+        in _control_agent_client_certificate.stdout
+  when: not ansible_check_mode
+
+- name: Read public keys from both control certificates
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ control_plan.paths.secrets }}/{{ item }}.crt"
+      - -pubkey
+      - -noout
+  loop: [server, agent-client]
+  register: _control_certificate_public_keys
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Derive public keys from both protected control private keys
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - pkey
+      - -in
+      - "{{ control_plan.paths.secrets }}/{{ item }}.key"
+      - -pubout
+  loop: [server, agent-client]
+  register: _control_private_key_public_keys
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Require each control certificate and private key to match
+  ansible.builtin.assert:
+    that:
+      - >-
+        (_control_certificate_public_keys.results[item].stdout | trim)
+        == (_control_private_key_public_keys.results[item].stdout | trim)
+  loop: [0, 1]
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Render protected backend environment
+  ansible.builtin.copy:
+    content: |
+      SPIRIT_DATABASE_URL={{ control_secret_values[control_plan.secret_refs.runtime_database_url_ref] }}
+      SPIRIT_DB_MAX_CONNS={{ control_plan.backend.database_max_connections }}
+      SPIRIT_LOG_LEVEL={{ control_plan.backend.log_level }}
+      SPIRIT_GRPC_LISTEN=:8443
+      SPIRIT_HTTP_LISTEN=:8080
+      SPIRIT_GRPC_TLS_CERT_FILE=/secrets/server.crt
+      SPIRIT_GRPC_TLS_KEY_FILE=/secrets/server.key
+      SPIRIT_GRPC_TLS_CLIENT_CA_FILE=/secrets/clients-ca.crt
+      SPIRIT_AGENT_TLS_CERT_FILE=/secrets/agent-client.crt
+      SPIRIT_AGENT_TLS_KEY_FILE=/secrets/agent-client.key
+      SPIRIT_AGENT_TLS_CA_FILE=/secrets/agents-ca.crt
+      SPIRIT_ROLE_CUSTOMER_ACCESS_WRITER={{ control_plan.backend.customer_access_writers | join(',') }}
+      SPIRIT_ROLE_CUSTOMER_ACCESS_READER={{ control_plan.backend.customer_access_readers | join(',') }}
+      SPIRIT_ROLE_MANIFEST_WRITER={{ control_plan.backend.manifest_writer_identity }}
+      SPIRIT_CLIENT_UUID_KEY_FILE=/secrets/client_uuid.key
+    dest: "{{ control_plan.paths.root }}/backend.env"
+    owner: root
+    group: root
+    mode: "0600"
+  register: _control_backend_environment
+  no_log: true
+  diff: false
+
+- name: Render protected migration environment
+  ansible.builtin.copy:
+    content: |
+      DATABASE_URL={{ control_secret_values[control_plan.secret_refs.migration_database_url_ref] }}
+    dest: "{{ control_plan.paths.root }}/migration.env"
+    owner: root
+    group: root
+    mode: "0600"
+  register: _control_migration_environment
+  no_log: true
+  diff: false
+
+- name: Render environment-isolated control compose definition
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ control_plan.paths.root }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0600"
+  register: _control_compose
+
+- name: Install the local PostgreSQL backup command
+  ansible.builtin.template:
+    src: backup-postgres.sh.j2
+    dest: "{{ control_plan.paths.root }}/backup-postgres"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Read the last successful control release marker
+  ansible.builtin.slurp:
+    src: "{{ control_plan.paths.root }}/release-id"
+  register: _control_release_marker
+  failed_when: false
+  changed_when: false
+
+- name: Calculate the exact control release identity
+  ansible.builtin.set_fact:
+    _control_release_id: >-
+      {{ control_plan.backend.source_git_sha ~ ' '
+         ~ control_plan.backend.image ~ ' '
+         ~ control_plan.backend.migration_image }}
+    _control_release_changed: >-
+      {{ _control_release_marker.content is not defined
+         or (_control_release_marker.content | b64decode | trim)
+            != (control_plan.backend.source_git_sha ~ ' '
+                ~ control_plan.backend.image ~ ' '
+                ~ control_plan.backend.migration_image) }}
+
+- name: Require an external prod backup adapter before a changed release
+  ansible.builtin.assert:
+    that:
+      - control_external_backup_command_argv | length > 0
+    fail_msg: >-
+      Prod migrations require a reviewed external backup command; a dump on the
+      shared management VPS is not an independent backup.
+  when:
+    - control_plan.environment == 'prod'
+    - control_plan.postgres.backup_required | bool
+    - _control_postgres_state.stat.exists
+    - _control_release_changed | bool
+
+- name: Ensure the pinned PostgreSQL service is running
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - up
+      - -d
+      - --wait
+      - --wait-timeout
+      - "120"
+      - --pull
+      - "{{ control_compose_pull_policy }}"
+      - postgres
+  register: _control_postgres_apply
+  changed_when: >-
+    'Created' in (_control_postgres_apply.stdout ~ _control_postgres_apply.stderr)
+    or 'Started' in (_control_postgres_apply.stdout ~ _control_postgres_apply.stderr)
+    or 'Recreated' in (_control_postgres_apply.stdout ~ _control_postgres_apply.stderr)
+    or 'Pulled' in (_control_postgres_apply.stdout ~ _control_postgres_apply.stderr)
+  when: not ansible_check_mode
+
+- name: Create a local pre-migration PostgreSQL dump
+  ansible.builtin.command:
+    argv: ["{{ control_plan.paths.root }}/backup-postgres"]
+  register: _control_local_backup
+  when:
+    - not ansible_check_mode
+    - _control_release_changed | bool
+    - _control_postgres_state.stat.exists
+    - control_plan.postgres.backup_required | bool
+  no_log: true
+
+- name: Reconcile a rotated PostgreSQL owner password before migrations
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - exec
+      - -T
+      - --user
+      - postgres
+      - postgres
+      - psql
+      - --set
+      - ON_ERROR_STOP=1
+      - --username
+      - "{{ control_plan.postgres.owner_user }}"
+      - --dbname
+      - "{{ control_plan.postgres.database }}"
+    stdin: >-
+      ALTER ROLE {{ control_plan.postgres.owner_user }} PASSWORD
+      '{{ control_secret_values[control_plan.secret_refs.postgres_owner_password_ref] | replace("'", "''") }}';
+  when:
+    - not ansible_check_mode
+    - _control_postgres_owner_password.changed
+  changed_when: true
+  no_log: true
+
+- name: Run the reviewed external backup adapter
+  ansible.builtin.command:
+    argv: "{{ control_external_backup_command_argv }}"
+  when:
+    - not ansible_check_mode
+    - _control_release_changed | bool
+    - _control_postgres_state.stat.exists
+    - control_plan.postgres.backup_required | bool
+    - control_external_backup_command_argv | length > 0
+  no_log: true
+
+- name: Apply migrations from the matching backend release
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - run
+      - --rm
+      - --no-deps
+      - migrate
+      - up
+  when:
+    - not ansible_check_mode
+    - _control_release_changed | bool
+  changed_when: true
+
+- name: Reconcile the restricted PostgreSQL runtime role after migrations
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - exec
+      - -T
+      - --user
+      - postgres
+      - postgres
+      - psql
+      - --set
+      - ON_ERROR_STOP=1
+      - --username
+      - "{{ control_plan.postgres.owner_user }}"
+      - --dbname
+      - "{{ control_plan.postgres.database }}"
+    stdin: |
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ control_plan.postgres.runtime_user }}') THEN
+          CREATE ROLE {{ control_plan.postgres.runtime_user }} LOGIN;
+        END IF;
+      END
+      $do$;
+      ALTER ROLE {{ control_plan.postgres.runtime_user }} PASSWORD '{{ control_secret_values[control_plan.secret_refs.postgres_runtime_password_ref] | replace("'", "''") }}';
+      GRANT CONNECT ON DATABASE {{ control_plan.postgres.database }} TO {{ control_plan.postgres.runtime_user }};
+      GRANT USAGE ON SCHEMA public TO {{ control_plan.postgres.runtime_user }};
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {{ control_plan.postgres.runtime_user }};
+      GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO {{ control_plan.postgres.runtime_user }};
+      ALTER DEFAULT PRIVILEGES FOR ROLE {{ control_plan.postgres.owner_user }} IN SCHEMA public
+        GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {{ control_plan.postgres.runtime_user }};
+      ALTER DEFAULT PRIVILEGES FOR ROLE {{ control_plan.postgres.owner_user }} IN SCHEMA public
+        GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO {{ control_plan.postgres.runtime_user }};
+  when:
+    - not ansible_check_mode
+    - _control_release_changed | bool or _control_secret_files.changed
+  changed_when: true
+  no_log: true
+
+- name: Reconcile only the backend service
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - up
+      - -d
+      - --no-deps
+      - --wait
+      - --wait-timeout
+      - "60"
+      - --pull
+      - "{{ control_compose_pull_policy }}"
+      - backend
+  register: _control_backend_apply
+  changed_when: >-
+    _control_compose.changed
+    or _control_backend_environment.changed
+    or _control_secret_files.changed
+    or 'Created' in (_control_backend_apply.stdout ~ _control_backend_apply.stderr)
+    or 'Started' in (_control_backend_apply.stdout ~ _control_backend_apply.stderr)
+    or 'Recreated' in (_control_backend_apply.stdout ~ _control_backend_apply.stderr)
+    or 'Pulled' in (_control_backend_apply.stdout ~ _control_backend_apply.stderr)
+  when: not ansible_check_mode
+
+- name: Require backend readiness inside its private container namespace
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - exec
+      - -T
+      - backend
+      - wget
+      - -qO-
+      - http://127.0.0.1:8080/health/ready
+  register: _control_backend_readiness
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: _control_backend_readiness.rc == 0
+  when: not ansible_check_mode
+
+- name: Persist the successful exact control release identity
+  ansible.builtin.copy:
+    content: "{{ _control_release_id }}\n"
+    dest: "{{ control_plan.paths.root }}/release-id"
+    owner: root
+    group: root
+    mode: "0600"
+  when: not ansible_check_mode

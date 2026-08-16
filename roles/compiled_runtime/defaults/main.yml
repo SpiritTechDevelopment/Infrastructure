@@ -2,3 +2,4 @@
 vpn_stack_dir: /opt/vpn
 compose_project: spiritvpn-node
 compiled_runtime_pull_policy: missing
+node_agent_runtime_inputs_changed: false

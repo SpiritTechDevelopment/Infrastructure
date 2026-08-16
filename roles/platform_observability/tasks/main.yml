@@ -1,0 +1,186 @@
+---
+- name: Validate the shared collector inputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        platform_prometheus_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - platform_observability_environments | length > 0
+      - platform_observability_jobs | length > 0
+      - platform_prometheus_retention_days | int > 0
+      - platform_prometheus_scrape_interval_seconds | int > 0
+      # A routable listener would publish fleet composition and traffic volumes
+      # from a host that already holds Vault. Scraping is outbound and needs no
+      # inbound listener at all.
+      - platform_prometheus_bind_address == '127.0.0.1'
+    fail_msg: >-
+      The shared observability inputs are incomplete, unpinned, or would expose
+      the collector beyond loopback.
+
+- name: Create the shared collector directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ platform_observability_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_observability_targets_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_observability_state_dir }}"
+      owner: "{{ platform_prometheus_uid }}"
+      group: "{{ platform_prometheus_gid }}"
+      mode: "0700"
+
+# Each environment owns exactly one directory. Creating them here rather than
+# in the control contour means Prometheus never references a path that does not
+# exist, which it would otherwise report as a permanent file_sd read error.
+- name: Create one target directory per environment
+  ansible.builtin.file:
+    path: "{{ platform_observability_targets_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ platform_observability_environments }}"
+
+# An absent fragment is a permanent read error in the Prometheus logs, so every
+# declared job starts as an explicit empty target list. `force: false` is what
+# stops a platform deployment from erasing targets a control deployment wrote.
+- name: Seed an empty fragment for every declared job
+  ansible.builtin.copy:
+    content: "[]\n"
+    dest: >-
+      {{ platform_observability_targets_dir }}/{{ item.0 }}/{{ item.1.name }}.json
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  loop: "{{ platform_observability_environments | product(platform_observability_jobs) | list }}"
+  loop_control:
+    label: "{{ item.0 }}/{{ item.1.name }}"
+
+- name: Render the shared collector skeleton
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ platform_observability_dir }}/prometheus.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _platform_prometheus_configuration
+
+# The control contour asserts its desired state against these values before it
+# writes any fragment, so desired state cannot quietly disagree with what the
+# shared collector actually does.
+- name: Publish the shared collector contract for the control contour
+  ansible.builtin.copy:
+    content: |
+      {
+        "_notice": "GENERATED — DO NOT EDIT",
+        "schema_version": 1,
+        "scrape_interval_seconds": {{ platform_prometheus_scrape_interval_seconds | int }},
+        "retention_days": {{ platform_prometheus_retention_days | int }},
+        "environments": {{ platform_observability_environments | to_json }},
+        "jobs": {{ platform_observability_jobs | map(attribute='name') | list | to_json }},
+        "targets_dir": "{{ platform_observability_targets_dir }}"
+      }
+    dest: "{{ platform_observability_dir }}/collector-contract.json"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Render the shared collector compose definition
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ platform_observability_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0600"
+  register: _platform_prometheus_compose
+
+- name: Validate the skeleton with the pinned promtool
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network
+      - none
+      - --user
+      - "{{ platform_prometheus_uid }}:{{ platform_prometheus_gid }}"
+      - -v
+      - "{{ platform_observability_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - -v
+      - "{{ platform_observability_targets_dir }}:{{ platform_prometheus_targets_container_dir }}:ro"
+      - --entrypoint
+      - promtool
+      - "{{ platform_prometheus_image }}"
+      - check
+      - config
+      - /etc/prometheus/prometheus.yml
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Reconcile the shared collector
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ platform_observability_dir }}/compose.yml"
+      - up
+      - -d
+      - --wait
+      - --wait-timeout
+      - "60"
+      - --pull
+      - missing
+      - prometheus
+  register: _platform_prometheus_apply
+  changed_when: >-
+    _platform_prometheus_compose.changed
+    or 'Created' in (_platform_prometheus_apply.stdout ~ _platform_prometheus_apply.stderr)
+    or 'Started' in (_platform_prometheus_apply.stdout ~ _platform_prometheus_apply.stderr)
+    or 'Recreated' in (_platform_prometheus_apply.stdout ~ _platform_prometheus_apply.stderr)
+    or 'Pulled' in (_platform_prometheus_apply.stdout ~ _platform_prometheus_apply.stderr)
+  when: not ansible_check_mode
+
+# Only the skeleton needs this. Fragment changes are picked up by file_sd on
+# their own, which is the whole reason the environments write files instead of
+# rewriting this configuration.
+- name: Restart the collector onto a changed skeleton
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ platform_observability_dir }}/compose.yml"
+      - restart
+      - prometheus
+  when:
+    - not ansible_check_mode
+    - _platform_prometheus_configuration.changed
+    - not _platform_prometheus_apply.changed
+  changed_when: true
+
+- name: Require collector readiness on loopback
+  ansible.builtin.uri:
+    url: >-
+      http://{{ platform_prometheus_bind_address }}:{{
+      platform_prometheus_port }}/-/ready
+    method: GET
+    status_code: 200
+    return_content: false
+    timeout: 5
+  register: _platform_prometheus_readiness
+  retries: 12
+  delay: 5
+  until: _platform_prometheus_readiness.status == 200
+  changed_when: false
+  when: not ansible_check_mode

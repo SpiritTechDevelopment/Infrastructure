@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -10,8 +11,11 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment
 
+from fleetctl.validation import validate_environment
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+VALID_DESIRED = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
 
 
 class PlatformFoundationTests(unittest.TestCase):
@@ -121,6 +125,7 @@ all:
         self.assertIn("original_command\" == platform-readiness", text)
         self.assertIn("fleet-deploy", text)
         self.assertIn("platform-deploy", text)
+        self.assertIn("control-deploy", text)
         self.assertIn("cross-environment deployment", text)
         self.assertIn("bound_environment", text)
         self.assertNotIn("eval", text)
@@ -310,6 +315,192 @@ all:
             self.assertIn(required, executor)
         self.assertNotIn("eval", executor)
 
+    def test_control_deploy_is_digest_pinned_local_and_environment_bound(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "control-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        executor = (
+            REPO_ROOT
+            / "roles"
+            / "platform_executor"
+            / "templates"
+            / "spiritvpn-control-deploy.j2"
+        ).read_text(encoding="utf-8")
+        compose = (
+            REPO_ROOT / "roles" / "control_runtime" / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        tasks = (REPO_ROOT / "roles" / "control_runtime" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "git merge-base --is-ancestor",
+            "refs/spiritvpn/control-source",
+            "platform-remote.sh",
+            "environment: ${{ inputs.environment }}",
+        ):
+            self.assertIn(required, workflow)
+        for forbidden in ("VAULT_TOKEN", "SOPS_AGE_KEY", "ssh-keyscan"):
+            self.assertNotIn(forbidden, workflow)
+        for required in (
+            'bundle verify "$bundle"',
+            "--scope control",
+            "control-plan.json",
+            "playbooks/control/deploy.yml",
+            "refs/control-deployments/$environment",
+        ):
+            self.assertIn(required, executor)
+        self.assertIn("control_plan.backend.image", compose)
+        self.assertIn("control_plan.backend.migration_image", compose)
+        self.assertIn("control_plan.postgres.image", compose)
+        self.assertIn("Refuse an implicit PostgreSQL major-version upgrade", tasks)
+        self.assertNotIn("--force-recreate", tasks)
+        self.assertNotIn("compose\n      - down", tasks)
+
+    def test_metrics_surfaces_never_leave_the_management_overlay(self) -> None:
+        control_compose = (
+            REPO_ROOT / "roles" / "control_runtime" / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        collector = REPO_ROOT / "roles" / "platform_observability"
+        collector_tasks = (collector / "tasks" / "main.yml").read_text(encoding="utf-8")
+        collector_compose = (
+            collector / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        node_plan = (
+            REPO_ROOT / "roles" / "compiled_node_plan" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+
+        # The backend service port carries /metrics without TLS or caller
+        # checks; publishing it on a wildcard would expose the whole fleet.
+        self.assertIn(
+            "{{ control_plan.network.management_address }}:"
+            "{{ control_plan.network.backend_metrics_port }}:"
+            "{{ control_plan.network.backend_metrics_port }}",
+            control_compose,
+        )
+        self.assertNotIn("0.0.0.0", control_compose)
+
+        # Scraping is outbound. The collector sits on a host that also holds
+        # Vault, so it gets no inbound listener beyond loopback at all.
+        self.assertIn(
+            "--web.listen-address={{ platform_prometheus_bind_address }}",
+            collector_compose,
+        )
+        self.assertIn("platform_prometheus_bind_address == '127.0.0.1'", collector_tasks)
+        self.assertNotIn("--web.enable-admin-api", collector_compose)
+        self.assertIn("--web.enable-lifecycle=false", collector_compose)
+        self.assertIn("promtool", collector_tasks)
+
+        # Node-side listeners bind the overlay and the firewall repeats it.
+        self.assertIn(
+            "node_exporter_bind_address: "
+            '"{{ spiritvpn_node_plan.instance.management_address }}"',
+            node_plan,
+        )
+        self.assertIn("observability.ports.agent_metrics", node_plan)
+
+    def test_one_collector_is_shared_but_each_environment_writes_only_its_own(self) -> None:
+        collector = REPO_ROOT / "roles" / "platform_observability"
+        skeleton = (collector / "templates" / "prometheus.yml.j2").read_text(encoding="utf-8")
+        collector_tasks = (collector / "tasks" / "main.yml").read_text(encoding="utf-8")
+        control_tasks = (
+            REPO_ROOT / "roles" / "control_observability" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        steady = (REPO_ROOT / "playbooks" / "platform" / "steady.yml").read_text(
+            encoding="utf-8"
+        )
+        executor = (
+            REPO_ROOT
+            / "roles"
+            / "platform_executor"
+            / "templates"
+            / "spiritvpn-control-deploy.j2"
+        ).read_text(encoding="utf-8")
+
+        # The shared skeleton belongs to the platform contour, beside Vault.
+        self.assertIn("role: platform_observability", steady)
+        self.assertIn("file_sd_configs", skeleton)
+        self.assertIn("platform_observability_environments", skeleton)
+
+        # The environment-bound deployment writes fragments and nothing else:
+        # no compose, no collector process, no shared configuration file.
+        self.assertNotIn("docker", control_tasks)
+        self.assertNotIn("compose", control_tasks)
+        self.assertIn("fragment.json.j2", control_tasks)
+        self.assertIn(
+            "{{ collector_contract.targets_dir }}/{{ control_plan.environment }}/",
+            control_tasks,
+        )
+        # Fragments written before the collector exists would be read by nobody.
+        self.assertIn("Refuse to write fragments no collector will read", control_tasks)
+        # A shared TSDB has one cadence; desired state must not claim another.
+        self.assertIn(
+            "collector_contract.scrape_interval_seconds | int",
+            control_tasks,
+        )
+        # Only management-collected metrics are scraped: node-local expvar is
+        # unreachable from here and external probes have no exporter yet.
+        self.assertIn("selectattr('collection', 'equalto', 'management')", control_tasks)
+        self.assertIn("monitoring_targets.environment == control_plan.environment", control_tasks)
+        self.assertIn("monitoring-targets.json", executor)
+
+        # A platform run must not erase what an environment wrote.
+        self.assertIn("force: false", collector_tasks)
+
+    def test_skeleton_reads_exactly_where_the_environments_write(self) -> None:
+        """The two roles meet only at a path, and nothing else checks it.
+
+        The skeleton names container paths, the fragments are written to host
+        paths, and a bind mount joins them. Any of the three can be edited on
+        its own, and the failure would be an empty graph rather than an error.
+        """
+        collector = REPO_ROOT / "roles" / "platform_observability"
+        defaults = yaml.safe_load(
+            (collector / "defaults" / "main.yml").read_text(encoding="utf-8")
+        )
+        jinja = Environment(  # noqa: S701 - rendering our own template for inspection
+            keep_trailing_newline=True, trim_blocks=True, lstrip_blocks=False
+        )
+        jinja.filters["comment"] = lambda value: str(value)
+        skeleton_source = (
+            collector / "templates" / "prometheus.yml.j2"
+        ).read_text(encoding="utf-8")
+        skeleton = yaml.safe_load(
+            jinja.from_string(skeleton_source).render(ansible_managed="", **defaults)
+        )
+
+        declared = {
+            path
+            for job in skeleton["scrape_configs"]
+            for config in job.get("file_sd_configs", [])
+            for path in config["files"]
+        }
+        host_directory = defaults["platform_observability_targets_dir"]
+        container_directory = defaults["platform_prometheus_targets_container_dir"]
+
+        # The compose definition is what makes the two path spaces the same
+        # directory; without this mount the skeleton would read an empty path.
+        compose = yaml.safe_load(
+            jinja.from_string(
+                (collector / "templates" / "compose.yml.j2").read_text(encoding="utf-8")
+            ).render(**defaults)
+        )
+        self.assertIn(
+            f"{host_directory}:{container_directory}:ro",
+            compose["services"]["prometheus"]["volumes"],
+        )
+
+        expected = {
+            f"{container_directory}/{environment}/{job['name']}.json"
+            for environment in defaults["platform_observability_environments"]
+            for job in defaults["platform_observability_jobs"]
+        }
+        self.assertEqual(declared, expected)
+        # Every environment in the schema gets jobs, or its metrics silently
+        # go nowhere.
+        self.assertEqual(
+            sorted(defaults["platform_observability_environments"]), ["develop", "prod"]
+        )
+
     def test_root_executor_is_fail_closed_and_does_not_move_deployment_ref(self) -> None:
         path = REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-fleet-deploy.j2"
         text = path.read_text(encoding="utf-8")
@@ -370,6 +561,34 @@ all:
             "secret://kv/develop/executor/ansible#private_key",
         )
 
+    def test_control_secret_scope_excludes_fleet_and_executor_credentials(self) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                str(REPO_ROOT / "scripts" / "vault-secret-resolver.py"),
+                "--root",
+                str(REPO_ROOT),
+                "--desired-root",
+                str(REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"),
+                "--environment",
+                "develop",
+                "--scope",
+                "control",
+                "--list-references",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        references = result.stdout.splitlines()
+        self.assertEqual(len(references), 11)
+        self.assertTrue(
+            all(reference.startswith("secret://kv/develop/control/") for reference in references)
+        )
+        self.assertFalse(any("executor/ansible" in reference for reference in references))
+
     def test_private_writer_refuses_symlink_and_sets_mode(self) -> None:
         script = REPO_ROOT / "scripts" / "vault-secret-resolver.py"
         with tempfile.TemporaryDirectory() as temporary:
@@ -402,6 +621,7 @@ all:
             REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-platform-readiness.j2",
             REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-fleet-deploy.j2",
             REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-platform-deploy.j2",
+            REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-control-deploy.j2",
             REPO_ROOT / "roles" / "platform_vault" / "templates" / "spiritvpn-vault-operator.j2",
             REPO_ROOT / "roles" / "platform_wireguard" / "templates" / "spiritvpn-wireguard-reconcile.j2",
             REPO_ROOT / "roles" / "platform_wireguard" / "templates" / "spiritvpn-wireguard-peer.j2",

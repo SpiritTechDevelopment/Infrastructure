@@ -7,6 +7,7 @@ import json
 from fleetctl.model import DesiredState
 
 from .bootstrap import compile_bootstrap_inventory
+from .control import compile_control_plan
 from .dns import compile_dns_plan
 from .inventory import compile_ansible_inventory
 from .monitoring import compile_monitoring_targets
@@ -20,6 +21,9 @@ def render_files(state: DesiredState) -> dict[str, bytes]:
         "dns-plan.json": _json_bytes(compile_dns_plan(state)),
         "monitoring-targets.json": _json_bytes(compile_monitoring_targets(state)),
     }
+    control_plan = compile_control_plan(state)
+    if control_plan is not None:
+        files["control-plan.json"] = _json_bytes(control_plan)
     for instance_id, plan in compile_node_plans(state).items():
         files[f"node-plans/{instance_id}.json"] = _json_bytes(plan)
     return dict(sorted(files.items()))

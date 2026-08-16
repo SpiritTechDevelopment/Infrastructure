@@ -192,6 +192,26 @@ class ImpactPlanningTests(unittest.TestCase):
         self.assertEqual(plan.changes, ())
         self.assertEqual(plan.source_digest, plan.baseline_digest)
 
+    def test_control_release_change_affects_only_local_control_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            baseline_root = copy_valid_desired(root, "baseline")
+            current_root = copy_valid_desired(root, "current")
+            environment_path = current_root / "environments" / "develop" / "environment.yml"
+            environment = load_yaml(environment_path)
+            environment["spec"]["control"]["backend_release"]["backend_image"]["digest"] = (
+                "sha256:" + "f" * 64
+            )
+            save_yaml(environment_path, environment)
+
+            baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
+            current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
+            plan = build_impact_plan(current, baseline)
+
+        self.assertEqual(plan.affected["control"], ("develop",))
+        self.assertEqual(plan.affected["configure"], ())
+        self.assertEqual(plan.affected["node_runtime"], ())
+
     def test_bridge_removal_is_destructive_and_affects_entry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
