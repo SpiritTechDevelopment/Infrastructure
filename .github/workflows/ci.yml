@@ -44,6 +44,43 @@ jobs:
             python -m json.tool "$FIRST_RENDER/$environment/impact-plan.json" >/dev/null
           done
 
+      # The repository environments carry no fleet, so the step above proves
+      # the frame and not the paths that handle real topology. The fixture is
+      # the only desired state with nodes, instances and a control plane in it,
+      # and `--root` is enough to compile it without a flag that could later be
+      # pointed at an unreviewed directory for real.
+      - name: Compile the populated fixture desired state
+        env:
+          FIXTURE_ROOT: ${{ runner.temp }}/fleetctl-fixture
+        run: |
+          set -euo pipefail
+          mkdir -p "$FIXTURE_ROOT"
+          cp -r tests/fixtures/valid/desired "$FIXTURE_ROOT/desired"
+          cp -r contracts "$FIXTURE_ROOT/contracts"
+          python -m fleetctl.cli --root "$FIXTURE_ROOT" validate --environment develop
+          python -m fleetctl.cli --root "$FIXTURE_ROOT" render \
+            --environment develop --output "$FIXTURE_ROOT/first"
+          python -m fleetctl.cli --root "$FIXTURE_ROOT" render \
+            --environment develop --output "$FIXTURE_ROOT/second"
+          diff -ru "$FIXTURE_ROOT/first" "$FIXTURE_ROOT/second"
+          ansible-inventory -i "$FIXTURE_ROOT/first/ansible-inventory.json" --list >/dev/null
+          test -s "$FIXTURE_ROOT/first/control-plan.json"
+          # An empty target list still renders and still parses. Monitoring
+          # that collects nothing must fail the build, not pass it quietly.
+          python - "$FIXTURE_ROOT/first/monitoring-targets.json" <<'PYTHON'
+          import json, sys
+
+          targets = json.load(open(sys.argv[1]))["targets"]
+          scraped = [
+              target
+              for target in targets
+              if target["kind"] == "metrics" and target["collection"] == "management"
+          ]
+          services = {target["service"] for target in scraped}
+          assert services == {"node-exporter", "agent-metrics", "backend-metrics"}, services
+          print(f"fixture: {len(targets)} targets, {len(scraped)} scraped")
+          PYTHON
+
   lint:
     runs-on: ubuntu-latest
     steps:

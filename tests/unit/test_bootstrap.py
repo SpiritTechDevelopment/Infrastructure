@@ -5,8 +5,93 @@ import subprocess
 import unittest
 from pathlib import Path
 
+import yaml
+from jinja2 import Environment
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def compiled_node_facts() -> dict[str, object]:
+    """The set_fact bodies of roles/compiled_node_plan, merged."""
+    tasks = yaml.safe_load(
+        (REPO_ROOT / "roles" / "compiled_node_plan" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    facts: dict[str, object] = {}
+    for task in tasks:
+        block = task.get("ansible.builtin.set_fact")
+        if isinstance(block, dict):
+            facts.update(block)
+    return facts
+
+
+class XrayAccessLogTests(unittest.TestCase):
+    """The access log holds client addresses, destinations and the user.
+
+    Desired state carries `xray.access_log.enabled`, and for a while nothing
+    read it: the log path was set unconditionally, so turning the flag off
+    changed nothing at all.
+    """
+
+    def render_access_log_path(self, *, enabled: bool) -> str:
+        expression = compiled_node_facts()["xray_access_log"]
+        environment = Environment()
+        # Ansible's `bool`, which stock Jinja does not provide.
+        environment.filters["bool"] = lambda value: (
+            value
+            if isinstance(value, bool)
+            else str(value).strip().lower() in ("true", "yes", "on", "1")
+        )
+        return environment.from_string(str(expression)).render(
+            spiritvpn_node_plan={
+                "infrastructure": {"xray": {"access_log": {"enabled": enabled}}}
+            }
+        )
+
+    def test_disabled_access_log_is_none_and_never_an_empty_string(self) -> None:
+        # An empty string does not disable the log in Xray, it redirects it to
+        # stdout — where the json-file driver keeps writing it to disk anyway.
+        self.assertEqual(self.render_access_log_path(enabled=False), "none")
+        self.assertEqual(
+            self.render_access_log_path(enabled=True), "/var/log/xray/access.log"
+        )
+
+    def test_role_default_does_not_fall_back_to_stdout(self) -> None:
+        defaults = yaml.safe_load(
+            (REPO_ROOT / "roles" / "xray" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(defaults["xray_access_log"], "none")
+
+    def test_repository_desired_state_keeps_the_access_log_off(self) -> None:
+        common = yaml.safe_load(
+            (REPO_ROOT / "desired" / "common" / "xray.yml").read_text(encoding="utf-8")
+        )
+        self.assertFalse(common["access_log"]["enabled"])
+        self.assertFalse(common["access_log"]["export_enabled"])
+
+    def test_export_stays_forbidden_while_enabling_became_a_choice(self) -> None:
+        """Only half of the old pair was removed, and deliberately so."""
+        semantic = (
+            REPO_ROOT / "fleetctl" / "validation" / "semantic.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("ACCESS_LOG_EXPORT", semantic)
+        self.assertNotIn("ACCESS_LOG_REQUIRED", semantic)
+
+    def test_enabling_the_access_log_still_validates(self) -> None:
+        """Turning it on for an investigation must remain possible."""
+        from fleetctl.validation import validate_environment
+
+        state = validate_environment(
+            REPO_ROOT,
+            "develop",
+            desired_root=REPO_ROOT / "tests" / "fixtures" / "valid" / "desired",
+        )
+        self.assertTrue(state.common.xray.access_log_enabled)
+        self.assertFalse(state.common.xray.access_log_export_enabled)
 
 
 class BootstrapContourTests(unittest.TestCase):

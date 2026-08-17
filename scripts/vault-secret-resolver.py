@@ -105,6 +105,30 @@ class VaultClient:
             raise ResolverError(f"Vault returned an invalid response for {path}")
         return value
 
+    def revoke_self(self) -> None:
+        """Give the AppRole token back as soon as the secrets are on disk.
+
+        Without this the token stays valid for its whole TTL after the process
+        exits, which is a usable Vault credential lying around on the executor
+        for no reason. Revocation returns 204 with an empty body, so this does
+        not go through `_request`, which expects JSON.
+        """
+        token = getattr(self, "token", None)
+        if token is None:
+            return
+        self.token = None
+        request = urllib.request.Request(
+            f"{self.address}/v1/auth/token/revoke-self",
+            data=b"",
+            headers={"X-Vault-Token": token},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, context=self.context, timeout=10):
+                pass
+        except (OSError, urllib.error.URLError) as exc:
+            raise ResolverError("Vault self-revocation failed") from exc
+
     def read(self, path: str, field: str) -> str:
         response = self._request("GET", f"/v1/kv/data/{path}")
         try:
@@ -177,22 +201,32 @@ def main() -> int:
         if not role_id or not secret_id:
             raise ResolverError("Vault AppRole credentials are empty")
         client = VaultClient(args.vault_address, args.vault_ca, role_id, secret_id)
-        resolved = {}
-        for reference in references:
-            path, field = parse_reference(reference, args.environment)
-            resolved[reference] = client.read(path, field)
-        payload = yaml.safe_dump(
-            {"spiritvpn_secret_values": resolved},
-            allow_unicode=True,
-            sort_keys=True,
-        )
-        write_private(args.compiled_secrets, payload)
-        if args.ssh_private_key is not None:
-            ssh_path, ssh_field = parse_reference(ssh_reference, args.environment)
-            ssh_private_key = client.read(ssh_path, ssh_field)
-            if "PRIVATE KEY" not in ssh_private_key:
-                raise ResolverError("executor Ansible private key has an invalid format")
-            write_private(args.ssh_private_key, ssh_private_key.rstrip("\n") + "\n")
+        try:
+            resolved = {}
+            for reference in references:
+                path, field = parse_reference(reference, args.environment)
+                resolved[reference] = client.read(path, field)
+            payload = yaml.safe_dump(
+                {"spiritvpn_secret_values": resolved},
+                allow_unicode=True,
+                sort_keys=True,
+            )
+            write_private(args.compiled_secrets, payload)
+            if args.ssh_private_key is not None:
+                ssh_path, ssh_field = parse_reference(ssh_reference, args.environment)
+                ssh_private_key = client.read(ssh_path, ssh_field)
+                if "PRIVATE KEY" not in ssh_private_key:
+                    raise ResolverError("executor Ansible private key has an invalid format")
+                write_private(args.ssh_private_key, ssh_private_key.rstrip("\n") + "\n")
+        finally:
+            # Revocation runs on the failure path too, where a leftover token
+            # matters most. It never changes the outcome: the secrets are
+            # already written, and failing the deployment over cleanup would
+            # leave the caller worse off than the warning does.
+            try:
+                client.revoke_self()
+            except ResolverError as exc:
+                print(f"warning: {exc}", file=sys.stderr)
     except (OSError, ResolverError, DesiredStateInvalid, ValueError) as exc:
         print(f"secret resolution failed: {exc}", file=sys.stderr)
         return 2

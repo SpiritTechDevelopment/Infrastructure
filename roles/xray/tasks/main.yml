@@ -1,4 +1,12 @@
 ---
+- name: Require a digest-pinned Xray image
+  ansible.builtin.assert:
+    that:
+      - xray_image is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      Xray must run a digest-pinned image from the compiled node plan.
+      A tag can be moved after review and is not a supply-chain pin.
+
 - name: Require the compiled logical-node REALITY identity
   ansible.builtin.assert:
     that:

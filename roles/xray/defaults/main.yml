@@ -2,13 +2,17 @@
 # Xray VLESS + REALITY runtime. Infrastructure owns the process, base config,
 # REALITY identity and entry/exit topology. The backend owns runtime customer users.
 vpn_stack_dir: /opt/vpn
-xray_image: ghcr.io/xtls/xray-core:26.3.27
+# Supplied by the compiled node plan as repository@digest. Empty here so a
+# role used without its plan fails instead of silently running a tag.
+xray_image: ""
 xray_config_dir: "{{ vpn_stack_dir }}/xray"
 
 public_port: 443
 xray_listen_port: "{{ public_port }}"
 xray_loglevel: info
-xray_access_log: ""
+# 'none' disables the log. An empty string would send it to stdout, so the
+# safe default for a record of client addresses and destinations is not "".
+xray_access_log: none
 xray_error_log: ""
 xray_mask_address: ""
 xray_stats_user_traffic: true

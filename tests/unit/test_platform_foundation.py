@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import yaml
@@ -16,6 +19,51 @@ from fleetctl.validation import validate_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VALID_DESIRED = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+
+
+class RecordingVault(BaseHTTPRequestHandler):
+    """A stand-in Vault that records the calls the resolver actually makes."""
+
+    calls: list[tuple[str, str, str | None]] = []
+    fail_reads = False
+
+    def log_message(self, *arguments: object) -> None:  # keep test output clean
+        return
+
+    def _respond(self, status: int, body: bytes = b"") -> None:
+        self.send_response(status)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        type(self).calls.append(("POST", self.path, self.headers.get("X-Vault-Token")))
+        if self.path == "/v1/auth/approle/login":
+            self._respond(200, json.dumps({"auth": {"client_token": "s.TEST"}}).encode())
+        elif self.path == "/v1/auth/token/revoke-self":
+            self._respond(204)  # Vault answers revocation with an empty body
+        else:
+            self._respond(404)
+
+    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        type(self).calls.append(("GET", self.path, self.headers.get("X-Vault-Token")))
+        if type(self).fail_reads:
+            self._respond(500, b'{"errors":["unavailable"]}')
+            return
+        self._respond(
+            200,
+            json.dumps(
+                {
+                    "data": {
+                        "data": {
+                            "service_uuid": "0f9d3a2e-1111-2222-3333-444455556666",
+                            "fullchain": "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----",
+                            "private_key": "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----",
+                        }
+                    }
+                }
+            ).encode(),
+        )
 
 
 class PlatformFoundationTests(unittest.TestCase):
@@ -514,6 +562,78 @@ all:
             self.assertIn(required, text)
         self.assertNotIn("update-deployment-ref", text)
         self.assertNotIn("eval", text)
+
+    def run_resolver_against_fake_vault(
+        self, workspace: Path, *, fail_reads: bool
+    ) -> subprocess.CompletedProcess[str]:
+        RecordingVault.calls = []
+        RecordingVault.fail_reads = fail_reads
+        server = HTTPServer(("127.0.0.1", 0), RecordingVault)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            # The address is plain HTTP so the test needs no TLS, but the
+            # resolver still builds an SSL context, so --vault-ca must parse.
+            authority = workspace / "ca.crt"
+            subprocess.run(
+                [
+                    "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                    "-keyout", str(workspace / "ca.key"), "-out", str(authority),
+                    "-days", "1", "-subj", "/CN=test",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            credentials = workspace / "approle"
+            credentials.mkdir()
+            (credentials / "role-id").write_text("role", encoding="utf-8")
+            (credentials / "secret-id").write_text("secret", encoding="utf-8")
+            return subprocess.run(
+                [
+                    "python3",
+                    str(REPO_ROOT / "scripts" / "vault-secret-resolver.py"),
+                    "--root", str(REPO_ROOT),
+                    "--desired-root", str(VALID_DESIRED),
+                    "--environment", "develop",
+                    "--scope", "fleet",
+                    "--credentials-dir", str(credentials),
+                    "--compiled-secrets", str(workspace / "compiled.yml"),
+                    "--vault-address", f"http://127.0.0.1:{server.server_address[1]}",
+                    "--vault-ca", str(authority),
+                ],
+                cwd=REPO_ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_vault_token_is_revoked_on_success_and_on_failure(self) -> None:
+        """A surviving AppRole token is a usable credential left on the executor.
+
+        It outlives the process for its whole TTL otherwise, and the failure
+        path is exactly where that matters most.
+        """
+        for fail_reads, expected_status in ((False, 0), (True, 2)):
+            with self.subTest(fail_reads=fail_reads):
+                with tempfile.TemporaryDirectory() as temporary:
+                    workspace = Path(temporary)
+                    result = self.run_resolver_against_fake_vault(
+                        workspace, fail_reads=fail_reads
+                    )
+                    self.assertEqual(result.returncode, expected_status, result.stderr)
+                    revocations = [
+                        call
+                        for call in RecordingVault.calls
+                        if call[1] == "/v1/auth/token/revoke-self"
+                    ]
+                    self.assertEqual(len(revocations), 1, RecordingVault.calls)
+                    self.assertEqual(revocations[0][2], "s.TEST")
+                    self.assertEqual(revocations[0][0], "POST")
+                    if not fail_reads:
+                        compiled = workspace / "compiled.yml"
+                        self.assertEqual(compiled.stat().st_mode & 0o777, 0o600)
 
     def test_vault_operator_is_manual_and_environment_scoped(self) -> None:
         operator = (

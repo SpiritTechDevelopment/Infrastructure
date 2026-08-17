@@ -30,8 +30,14 @@ if ! flock -n 9; then
   exit 75
 fi
 
-ulimit -f "{{ platform_executor_bundle_limit_kib }}"
-dd of="$bundle" bs=64K status=none
+# The ceiling bounds the incoming bundle and nothing else. RLIMIT_FSIZE is
+# inherited by every later process, so leaving it set would also cap the
+# pre-migration pg_dump and kill it with SIGXFSZ once the database outgrows
+# the limit — mid-deployment, right before migrations.
+(
+  ulimit -f "{{ platform_executor_bundle_limit_kib }}"
+  dd of="$bundle" bs=64K status=none
+)
 test -s "$bundle"
 
 if [[ ! -d "$repository" ]]; then

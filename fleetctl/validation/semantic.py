@@ -121,14 +121,16 @@ def _validate_common_policy(
                 "default outbound must be the fail-closed block outbound",
             )
         )
-    if not common.xray.access_log_enabled:
-        issues.append(
-            ValidationIssue.at(
-                common.xray.source,
-                "ACCESS_LOG_REQUIRED",
-                "Xray access log must be enabled for local accounting classification",
-            )
-        )
+    # There was a rule here requiring the access log to be enabled "for local
+    # accounting classification". Its consumer does not exist: NODE_AGENT_SPEC
+    # §14 puts the activity subsystem out of scope for v1 and states the agent
+    # does not read the Xray access log at all, while per-user volume comes
+    # from the stats API instead. The rule therefore mandated writing client
+    # addresses and destinations for a feature that was never built, so
+    # `enabled` is now a choice desired state records rather than a constant.
+    #
+    # The export prohibition below stays: it is the half that still means
+    # something, and it keeps the log from ever becoming a central archive.
     if common.xray.access_log_export_enabled:
         issues.append(
             ValidationIssue.at(

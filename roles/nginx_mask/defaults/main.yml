@@ -1,6 +1,8 @@
 ---
 vpn_stack_dir: /opt/vpn
-nginx_mask_image: nginx:1.29-alpine
+# Supplied by the compiled node plan as repository@digest. Empty here so a
+# role used without its plan fails instead of silently running a tag.
+nginx_mask_image: ""
 nginx_dir: "{{ vpn_stack_dir }}/nginx"
 mask_bind_address: 127.0.0.1
 mask_port: 8443

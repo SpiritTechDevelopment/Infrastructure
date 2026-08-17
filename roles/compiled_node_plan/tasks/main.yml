@@ -120,7 +120,13 @@
     xray_metrics_enabled: true
     xray_metrics_bind: 127.0.0.1
     xray_metrics_port: "{{ spiritvpn_node_plan.infrastructure.observability.ports.xray_metrics }}"
-    xray_access_log: /var/log/xray/access.log
+    # 'none' is the only value that disables the access log. An empty string
+    # sends it to stdout, which under the json-file driver means it keeps
+    # being written — just into the container log instead of the file.
+    xray_access_log: >-
+      {{ '/var/log/xray/access.log'
+         if spiritvpn_node_plan.infrastructure.xray.access_log.enabled | bool
+         else 'none' }}
     xray_error_log: /var/log/xray/error.log
     xray_manage_routing_via_agent: true
     reality_server_names: ["{{ spiritvpn_node_plan.logical_node.public.server_name }}"]
