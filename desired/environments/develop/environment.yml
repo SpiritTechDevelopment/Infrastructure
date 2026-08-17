@@ -9,6 +9,50 @@ spec:
   secret_store:
     kv: kv/develop
     pki: pki/develop
+  control:
+    # Первый control release проставлен руками: workflow release-bump гейтится
+    # на уже существующем релизе и первый записать отказывается. Значения взяты
+    # из dispatch'а run 32020264625, поэтому backend и migration заведомо
+    # собраны из одного source_git_sha. Дальше это поле правит автоматика.
+    backend_release:
+      source_git_sha: eb3e875d847f551ddecf86c0f5e3ba81a607e9a0
+      backend_image:
+        repository: ghcr.io/spirittechdevelopment/spiritvpn-spiritvpnd
+        digest: sha256:1d813797d575fed37c1ce025952bd0b5f5e65aa3d1913701c3d0416e3e3d99ff
+      migration_image:
+        repository: ghcr.io/spirittechdevelopment/spiritvpn-migrate
+        digest: sha256:0be3c4607d33e1dd99de3237776d2131d74a9b2e63f2bf98c30251c51182d9ab
+    postgres:
+      image:
+        repository: docker.io/library/postgres
+        digest: sha256:e38411452a464af89e5adadb8d223bf53b898d47d6ef918b2d58c08707350449
+      major_version: 17
+      database: spiritvpn
+      owner_user: spiritvpn_owner
+      runtime_user: spiritvpn_runtime
+      # develop переживает потерю базы; для prod обязано быть true.
+      backup_required: false
+    secrets:
+      postgres_owner_password_ref: secret://kv/develop/control/postgres#owner_password
+      postgres_runtime_password_ref: secret://kv/develop/control/postgres#runtime_password
+      # Разные роли, не дубликат: migration ходит owner'ом с правом DDL,
+      # runtime — ограниченной ролью без него.
+      migration_database_url_ref: secret://kv/develop/control/postgres#migration_database_url
+      runtime_database_url_ref: secret://kv/develop/control/postgres#runtime_database_url
+      client_uuid_key_ref: secret://kv/develop/control/backend#client_uuid_key
+      grpc_tls_certificate_ref: secret://kv/develop/control/backend-tls#server_certificate
+      grpc_tls_private_key_ref: secret://kv/develop/control/backend-tls#server_private_key
+      grpc_tls_client_ca_ref: secret://kv/develop/control/backend-tls#clients_ca
+      agent_tls_certificate_ref: secret://kv/develop/control/backend-tls#agent_client_certificate
+      agent_tls_private_key_ref: secret://kv/develop/control/backend-tls#agent_client_private_key
+      # При одном корне на среду держит те же байты, что и clients_ca.
+      agent_tls_ca_ref: secret://kv/develop/control/backend-tls#agents_ca
+    authorization:
+      # CustomerService ещё не реализован; идентичность закреплена заранее,
+      # чтобы сертификат и этот список не расходились. Reader отдаёт VLESS URI
+      # с client_uuid, то есть сами учётные данные.
+      customer_access_writers: [spiffe://spiritvpn/develop/service/customer-service]
+      customer_access_readers: [spiffe://spiritvpn/develop/service/customer-service]
   common_overrides:
     components:
       node_agent:

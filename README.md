@@ -676,8 +676,8 @@ spec:
       agent_tls_private_key_ref: secret://kv/develop/control/backend-tls#agent_client_private_key
       agent_tls_ca_ref: secret://kv/develop/control/backend-tls#agents_ca
     authorization:
-      customer_access_writers: [spiffe://spiritvpn/develop/service/product]
-      customer_access_readers: [spiffe://spiritvpn/develop/service/product]
+      customer_access_writers: [spiffe://spiritvpn/develop/service/customer-service]
+      customer_access_readers: [spiffe://spiritvpn/develop/service/customer-service]
 ```
 
 `backend_image` и `migration_image` обязаны быть собраны из одного
@@ -707,9 +707,25 @@ ssh -t deploy@10.80.0.1 \
 `postgres:5432`: migration DSN использует `owner_user`, runtime DSN —
 `runtime_user`. Для backend также нужны его UUID encryption key и две стороны
 mTLS: server identity для manifest clients и client identity для NodeAgent.
-CA/certificate issuance пока не автоматизированы этим инкрементом; готовые PEM
-значения должны быть выпущены доверенным environment-scoped CA и помещены в
-указанные поля Vault.
+
+Обе стороны mTLS выпускает `fleetctl`. Имена он берёт из desired state, а не
+из рук оператора: DNS-имя серверного сертификата — это host из
+`backend_endpoint`, а идентичность клиентского — та же строка, которую
+компилятор кладёт в `SPIRIT_GRPC_ALLOWED_CLIENT_IDENTITIES` на нодах.
+
+```bash
+make fleet-pki-issue ENVIRONMENT=develop PROFILE=backend-server CA_STATE=~/.config/spiritvpn/ca
+make fleet-pki-issue ENVIRONMENT=develop PROFILE=backend-client CA_STATE=~/.config/spiritvpn/ca
+```
+
+`CA_STATE` обязателен и умолчания не имеет: корневой ключ среды не должен
+попасть ни в репозиторий, ни в `generated/`. Команда печатает, какой файл в
+какое поле Vault кладётся, — при одном корне на среду один и тот же `ca.crt`
+идёт и в `clients_ca`, и в `agents_ca`.
+
+Сертификат ноды через эти команды не выпускается: его приватный ключ рождается
+на самой ноде (`roles/pki_agent`), наружу уходит только CSR, который
+подписывается `make fleet-pki-sign INSTANCE=... CSR=...`.
 
 Создайте каталоги объектов:
 

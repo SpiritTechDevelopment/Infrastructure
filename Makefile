@@ -11,6 +11,13 @@ PLATFORM_WIREGUARD_PRIVATE_KEY ?= $(HOME)/.config/spiritvpn/keys/operator-wg.key
 RESUME ?= 0
 REVISION ?=
 ALLOW_DESTRUCTIVE ?= 0
+PROFILE ?=
+INSTANCE ?=
+CSR ?=
+# No default: the environment root key must never land in the repository or in
+# generated artifacts, and a default path is how it would.
+CA_STATE ?=
+PKI_OUTPUT ?=
 
 help: ## Show targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n",$$1,$$2}'
@@ -51,6 +58,17 @@ fleet-configure: fleet-ansible-check ## Apply compiled configure; requires APPLY
 
 fleet-provisioning-check: ## Validate manual VPS declarations; never calls provider APIs
 	python3 -m fleetctl.cli provisioning-check --environment "$(or $(ENVIRONMENT),develop)"
+
+fleet-pki-issue: ## Issue a control-plane certificate; requires PROFILE and CA_STATE outside the repo
+	@test -n "$(PROFILE)" || (echo 'PROFILE is required: backend-server, backend-client, manifest-writer or customer-service' >&2; exit 2)
+	@test -n "$(CA_STATE)" || (echo 'CA_STATE is required and must live outside the repository' >&2; exit 2)
+	python3 -m fleetctl.cli pki-issue --environment "$(or $(ENVIRONMENT),develop)" --profile "$(PROFILE)" --ca-state "$(CA_STATE)" --output "$(or $(PKI_OUTPUT),$(HOME)/.config/spiritvpn/pki/$(or $(ENVIRONMENT),develop))"
+
+fleet-pki-sign: ## Sign a node CSR reported by roles/pki_agent; requires INSTANCE, CSR and CA_STATE
+	@test -n "$(INSTANCE)" || (echo 'INSTANCE is required' >&2; exit 2)
+	@test -n "$(CSR)" || (echo 'CSR is required' >&2; exit 2)
+	@test -n "$(CA_STATE)" || (echo 'CA_STATE is required and must live outside the repository' >&2; exit 2)
+	python3 -m fleetctl.cli pki-sign --environment "$(or $(ENVIRONMENT),develop)" --instance "$(INSTANCE)" --csr "$(CSR)" --ca-state "$(CA_STATE)" --output "$(or $(PKI_OUTPUT),$(HOME)/.config/spiritvpn/pki/$(or $(ENVIRONMENT),develop))"
 
 fleet-bootstrap-check: fleet-ansible-check ## CONNECT=1 checks bootstrap syntax and SSH connectivity
 	@if [ "$(CONNECT)" = 1 ]; then \

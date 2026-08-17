@@ -24,6 +24,8 @@ from fleetctl.compiler import (
 )
 from fleetctl.deployment import DeploymentCoordinator, DeploymentError, DeploymentOptions
 from fleetctl.model import DesiredState
+from fleetctl.pki import DEFAULT_VALIDITY_DAYS, PkiError
+from fleetctl.pki.issuance import CONTROL_PROFILES, issue_control_certificate, sign_agent_certificate
 from fleetctl.planning import ImpactPlan, PlanningError, build_impact_plan, build_initial_baseline
 from fleetctl.provisioning import ManualProvisioningAdapter
 from fleetctl.validation import DesiredStateInvalid, validate_environment
@@ -108,7 +110,35 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--bootstrap-vars", type=Path)
     deploy.add_argument("--compiled-secrets", type=Path)
     deploy.add_argument("--readiness-vars", type=Path)
+    pki_issue = commands.add_parser(
+        "pki-issue",
+        help="issue a control-plane certificate; names are taken from desired state",
+    )
+    pki_issue.add_argument("--environment", required=True, choices=("develop", "prod"))
+    pki_issue.add_argument("--profile", required=True, choices=CONTROL_PROFILES)
+    _add_ca_arguments(pki_issue)
+    pki_sign = commands.add_parser(
+        "pki-sign",
+        help="sign a node CSR for one declared instance; the node keeps its private key",
+    )
+    pki_sign.add_argument("--environment", required=True, choices=("develop", "prod"))
+    pki_sign.add_argument("--instance", required=True)
+    pki_sign.add_argument("--csr", required=True, type=Path, help="CSR reported by roles/pki_agent")
+    _add_ca_arguments(pki_sign)
     return parser
+
+
+def _add_ca_arguments(command: argparse.ArgumentParser) -> None:
+    # --ca-state has no default on purpose. The root key must not land in the
+    # repository or in generated artifacts, and a default is the way it would.
+    command.add_argument(
+        "--ca-state",
+        required=True,
+        type=Path,
+        help="environment-scoped CA state directory; must live outside the repository",
+    )
+    command.add_argument("--output", required=True, type=Path)
+    command.add_argument("--validity-days", type=int, default=DEFAULT_VALIDITY_DAYS)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -262,6 +292,37 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 2
         print(json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    if args.command in ("pki-issue", "pki-sign"):
+        try:
+            state = validate_environment(args.root, args.environment)
+        except DesiredStateInvalid as exc:
+            for issue in exc.issues:
+                print(issue.render(), file=sys.stderr)
+            print(f"{args.environment}: invalid ({len(exc.issues)} error(s))", file=sys.stderr)
+            return 1
+        try:
+            if args.command == "pki-issue":
+                summary = issue_control_certificate(
+                    state,
+                    args.profile,
+                    ca_state=args.ca_state,
+                    output=args.output,
+                    validity_days=args.validity_days,
+                )
+            else:
+                summary = sign_agent_certificate(
+                    state,
+                    args.instance,
+                    ca_state=args.ca_state,
+                    csr_pem=args.csr.read_bytes(),
+                    output=args.output,
+                    validity_days=args.validity_days,
+                )
+        except (PkiError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     raise AssertionError(f"unreachable command: {args.command}")
 

@@ -3,7 +3,12 @@
   ansible.builtin.assert:
     that:
       - pki_agent_identity == 'spiffe://spiritvpn/' ~ spiritvpn_node_plan.environment ~ '/instance/' ~ spiritvpn_node_plan.instance.id
-    fail_msg: "Machine certificate identity must be the compiled environment-scoped SPIFFE identity."
+      # The backend dials this node with ServerName set and full verification
+      # (SpiritVPN/internal/nodeagent/tls.go), so the certificate needs the host
+      # name as well as the identity. An identity-only certificate fails the
+      # handshake before either side looks at the SAN it does carry.
+      - pki_agent_server_name == spiritvpn_node_plan.instance.id ~ '.agent.' ~ spiritvpn_node_plan.environment ~ '.internal'
+    fail_msg: "Machine certificate must carry the compiled SPIFFE identity and the compiled TLS server name."
 
 - name: Create protected agent PKI directory
   ansible.builtin.file:
@@ -58,7 +63,7 @@
       - -subj
       - "/CN={{ spiritvpn_node_plan.instance.id }}"
       - -addext
-      - "subjectAltName=URI:{{ pki_agent_identity }}"
+      - "subjectAltName=DNS:{{ pki_agent_server_name }},URI:{{ pki_agent_identity }}"
   when: not _pki_agent_csr.stat.exists
   changed_when: true
   no_log: true
@@ -74,11 +79,15 @@
   register: _pki_agent_csr_text
   changed_when: false
 
-- name: Require expected environment-scoped identity in CSR
+- name: Require expected environment-scoped identity and server name in CSR
   ansible.builtin.assert:
     that:
       - "('URI:' ~ pki_agent_identity) in _pki_agent_csr_text.stdout"
-    fail_msg: "Existing CSR does not contain the compiled machine identity."
+      - "('DNS:' ~ pki_agent_server_name) in _pki_agent_csr_text.stdout"
+    fail_msg: >-
+      Existing CSR does not contain both compiled names. A CSR left over from
+      before the server name was added must be removed so it is regenerated
+      against the unchanged node-local private key.
 
 - name: Read public CSR for the CA adapter
   ansible.builtin.slurp:
@@ -91,6 +100,7 @@
       status: CSR_READY
       instance_id: "{{ spiritvpn_node_plan.instance.id }}"
       certificate_identity: "{{ pki_agent_identity }}"
+      tls_server_name: "{{ pki_agent_server_name }}"
       csr_pem: "{{ _pki_agent_csr_public.content | b64decode }}"
   when: pki_agent_certificate_chain | length == 0
 
@@ -131,6 +141,22 @@
     that:
       - "('URI:' ~ pki_agent_identity) in _pki_agent_certificate_text.stdout"
     fail_msg: "Installed machine certificate has the wrong identity."
+  when: _pki_agent_certificate.stat.exists
+
+# Exact check rather than a substring of -text, and the same one the backend's
+# TLS stack performs on connect. control_runtime asserts the backend's own
+# certificate this way for the same reason.
+- name: Require the installed certificate to match its compiled TLS server name
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ pki_agent_certificate_path }}"
+      - -noout
+      - -checkhost
+      - "{{ pki_agent_server_name }}"
+  changed_when: false
   when: _pki_agent_certificate.stat.exists
 
 - name: Require sufficient remaining certificate lifetime

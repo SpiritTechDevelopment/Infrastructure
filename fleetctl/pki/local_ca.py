@@ -1,31 +1,51 @@
-"""Offline OpenSSL CA for develop/tests; no node private key is accepted."""
+"""Offline OpenSSL CA for every environment identity; no private key is accepted."""
 
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import tempfile
 from pathlib import Path
 
-from .model import CertificateBundle, CertificateRequest, PkiError
-
-
-IDENTITY_PATTERN = re.compile(
-    r"^spiffe://spiritvpn/(?P<environment>develop|prod)/instance/[a-z0-9-]{1,63}$"
+from .model import (
+    ENVIRONMENTS,
+    HOST_NAME,
+    INSTANCE_IDENTITY,
+    KEY_USAGE,
+    SERVICE_IDENTITY,
+    CertificateBundle,
+    CertificateRequest,
+    PkiError,
+    agent_dns_name,
 )
 
 
+# Nothing renews these certificates. roles/pki_agent installs a daily timer, but
+# renew-agent-certificate.sh only writes a marker file that no collector reads,
+# so expiry surfaces as a refused handshake rather than as a signal. Until that
+# is closed, a short leaf lifetime buys no safety and costs a manual signing
+# ceremony per node per rotation.
+DEFAULT_VALIDITY_DAYS = 365
+CA_VALIDITY_DAYS = 3650
+
+_SAN_HEADER = "X509v3 Subject Alternative Name:"
+
+
 class LocalCertificateAuthorityAdapter:
-    def __init__(self, state_directory: Path):
+    def __init__(self, state_directory: Path, validity_days: int = DEFAULT_VALIDITY_DAYS):
         self.state_directory = state_directory.resolve()
+        self.validity_days = validity_days
 
     def sign(self, request: CertificateRequest) -> CertificateBundle:
-        match = IDENTITY_PATTERN.fullmatch(request.identity)
-        if match is None or match.group("environment") != request.environment:
-            raise PkiError("certificate identity does not belong to the requested environment")
-        if request.environment not in {"develop", "prod"}:
+        profile = request.resolved_profile()
+        if request.environment not in ENVIRONMENTS:
             raise PkiError(f"unsupported PKI environment: {request.environment!r}")
+
+        identity = self._resolve_identity(request)
+        dns_names = self._resolve_dns_names(request)
+        expected_sans = request.subject_alt_names()
+        if not expected_sans:
+            raise PkiError(f"profile {profile.name} would produce a certificate without any SAN")
 
         environment_directory = self.state_directory / request.environment
         environment_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -44,9 +64,9 @@ class LocalCertificateAuthorityAdapter:
                 "\n".join(
                     (
                         "basicConstraints=critical,CA:FALSE",
-                        "keyUsage=critical,digitalSignature,keyEncipherment",
-                        "extendedKeyUsage=serverAuth,clientAuth",
-                        f"subjectAltName=URI:{request.identity}",
+                        f"keyUsage=critical,{','.join(KEY_USAGE)}",
+                        f"extendedKeyUsage={','.join(profile.extended_key_usage)}",
+                        f"subjectAltName={','.join(expected_sans)}",
                         "",
                     )
                 ),
@@ -56,8 +76,7 @@ class LocalCertificateAuthorityAdapter:
             csr_text = self._run("req", "-in", str(csr_path), "-noout", "-text").stdout.decode(
                 "utf-8", errors="replace"
             )
-            if f"URI:{request.identity}" not in csr_text:
-                raise PkiError("CSR does not contain the requested machine identity")
+            self._require_declared_sans(csr_text, expected_sans)
             self._run(
                 "x509",
                 "-req",
@@ -69,26 +88,87 @@ class LocalCertificateAuthorityAdapter:
                 str(ca_key),
                 "-CAcreateserial",
                 "-days",
-                "30",
+                str(self.validity_days),
                 "-sha256",
                 "-extfile",
                 str(extensions_path),
                 "-out",
                 str(certificate_path),
             )
-            self._run(
-                "verify",
-                "-CAfile",
-                str(ca_certificate),
-                str(certificate_path),
-            )
+            self._run("verify", "-CAfile", str(ca_certificate), str(certificate_path))
             certificate = certificate_path.read_bytes()
             ca_pem = ca_certificate.read_bytes()
             return CertificateBundle(
                 environment=request.environment,
-                identity=request.identity,
+                profile=profile.name,
+                identity=identity,
+                dns_names=dns_names,
+                certificate_pem=certificate,
                 certificate_chain_pem=certificate + ca_pem,
                 ca_certificate_pem=ca_pem,
+            )
+
+    def _resolve_identity(self, request: CertificateRequest) -> str | None:
+        """Check the caller's identity against the one the profile permits."""
+        expected = request.expected_identity()
+        stated = (request.identity or "").strip()
+        if expected is None:
+            if stated:
+                raise PkiError(
+                    f"profile {request.profile} carries no identity, but {stated!r} was requested"
+                )
+            return None
+        if stated and stated != expected:
+            raise PkiError(f"identity {stated!r} does not belong to profile {request.profile}")
+
+        pattern = INSTANCE_IDENTITY if "/instance/" in expected else SERVICE_IDENTITY
+        match = pattern.fullmatch(expected)
+        if match is None:
+            raise PkiError(f"malformed certificate identity: {expected!r}")
+        # Belt and braces: the environment is built into the string above, but a
+        # develop certificate accepted in prod is the one failure this naming
+        # scheme exists to make impossible.
+        if match.group("environment") != request.environment:
+            raise PkiError("certificate identity does not belong to the requested environment")
+        return expected
+
+    def _resolve_dns_names(self, request: CertificateRequest) -> tuple[str, ...]:
+        profile = request.resolved_profile()
+        names = tuple(name.strip() for name in request.dns_names)
+        if not profile.requires_dns:
+            if names:
+                raise PkiError(f"profile {profile.name} does not carry DNS names")
+            return ()
+        if not names:
+            # Both server profiles are verified by host name on the other side —
+            # `openssl x509 -checkhost` for the backend, Go's ServerName check
+            # for the agent — so a certificate without a DNS SAN is refused at
+            # the first handshake rather than here.
+            raise PkiError(f"profile {profile.name} requires at least one DNS name")
+        for name in names:
+            if not HOST_NAME.fullmatch(name):
+                raise PkiError(f"malformed DNS name: {name!r}")
+        if profile.name == "agent-server":
+            expected = agent_dns_name(request.environment, request.subject or "")
+            if names != (expected,):
+                raise PkiError(
+                    f"agent-server certificate must carry exactly one DNS name {expected!r}"
+                )
+        return names
+
+    @staticmethod
+    def _require_declared_sans(csr_text: str, expected: tuple[str, ...]) -> None:
+        """The CSR must ask for exactly what it is about to be given.
+
+        Set equality, not a substring search: `URI:.../develop-entry-nl-01` is a
+        substring of `URI:.../develop-entry-nl-011`, so a prefix test would let
+        one node's request be signed under a neighbour's identity.
+        """
+        declared = _subject_alt_names(csr_text)
+        if declared != set(expected):
+            raise PkiError(
+                "CSR does not declare the certificate it is being issued: "
+                f"declared {sorted(declared)}, issuing {sorted(expected)}"
             )
 
     def _ensure_ca(self, environment: str, key: Path, certificate: Path) -> None:
@@ -117,7 +197,7 @@ class LocalCertificateAuthorityAdapter:
             str(key),
             "-sha256",
             "-days",
-            "3650",
+            str(CA_VALIDITY_DAYS),
             "-subj",
             f"/CN=SpiritVPN {environment} local CA",
             "-out",
@@ -140,3 +220,21 @@ class LocalCertificateAuthorityAdapter:
             operation = arguments[0] if arguments else "command"
             raise PkiError(f"openssl {operation} failed")
         return result
+
+
+def _subject_alt_names(text: str) -> set[str]:
+    """Extract the SAN entries from `openssl req -text` / `openssl x509 -text`."""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if _SAN_HEADER not in line:
+            continue
+        indent = len(line) - len(line.lstrip())
+        collected: list[str] = []
+        for candidate in lines[index + 1 :]:
+            if not candidate.strip():
+                break
+            if len(candidate) - len(candidate.lstrip()) <= indent:
+                break
+            collected.append(candidate.strip())
+        return {entry.strip() for entry in ", ".join(collected).split(",") if entry.strip()}
+    return set()

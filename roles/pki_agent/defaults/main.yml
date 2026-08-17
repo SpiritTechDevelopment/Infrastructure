@@ -4,6 +4,7 @@ pki_agent_private_key_path: "{{ pki_agent_directory }}/agent.key"
 pki_agent_csr_path: "{{ pki_agent_directory }}/agent.csr"
 pki_agent_certificate_path: "{{ pki_agent_directory }}/agent-chain.pem"
 pki_agent_identity: "{{ spiritvpn_node_plan.instance.agent.certificate_identity }}"
+pki_agent_server_name: "{{ spiritvpn_node_plan.instance.agent.tls_server_name }}"
 pki_agent_certificate_chain: ""
 pki_agent_require_certificate: true
 pki_agent_minimum_validity_seconds: 604800
