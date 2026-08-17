@@ -29,7 +29,11 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, linux, spiritvpn-deploy]
-    environment: ${{ inputs.environment }}
+    # `environment:` намеренно отсутствует — см. control-deploy.yml. На плане
+    # free с приватными репозиториями environments недоступны, и задача,
+    # объявившая среду, падает с нулём шагов, ничего не сообщая. Разделение
+    # сред держится на forced command в authorized_keys исполнителя
+    # (roles/platform_executor) и на проверке среды в самом скрипте.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -39,9 +43,11 @@ jobs:
       - name: Validate reviewed source
         shell: bash
         env:
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
           REQUESTED_SHA: ${{ inputs.source_git_sha }}
         run: |
           set -euo pipefail
+          [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'

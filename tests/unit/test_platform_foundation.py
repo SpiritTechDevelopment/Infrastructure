@@ -322,7 +322,11 @@ all:
             "git merge-base --is-ancestor",
             "git bundle create",
             "platform-remote.sh",
-            "environment: ${{ inputs.environment }}",
+            # See test_control_deploy_is_digest_pinned_local_and_environment_bound:
+            # the GitHub `environment:` key is unavailable on the free plan for
+            # private repositories, so the binding is asserted at run time here
+            # and by the forced command on the github-deploy key.
+            '[[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]',
             "secrets.PLATFORM_SSH_HOST",
             "secrets.PLATFORM_SSH_KNOWN_HOSTS",
             "runs-on: [self-hosted, linux, spiritvpn-deploy]",
@@ -348,7 +352,11 @@ all:
             "git merge-base --is-ancestor",
             "git bundle create",
             "platform-remote.sh",
-            "environment: ${{ inputs.environment }}",
+            # See test_control_deploy_is_digest_pinned_local_and_environment_bound:
+            # the GitHub `environment:` key is unavailable on the free plan for
+            # private repositories, so the binding is asserted at run time here
+            # and by the forced command on the github-deploy key.
+            '[[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]',
             "runs-on: [self-hosted, linux, spiritvpn-deploy]",
         ):
             self.assertIn(required, workflow)
