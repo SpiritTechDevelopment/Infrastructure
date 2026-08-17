@@ -1,0 +1,69 @@
+---
+- name: Verify bootstrap readiness without mutation
+  hosts: spiritvpn_bootstrap
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Load compiled node plan for readiness expectations
+      ansible.builtin.include_role:
+        name: compiled_node_plan
+      vars:
+        spiritvpn_deploy_mode: bootstrap
+        spiritvpn_manage_deploy_user: true
+        spiritvpn_require_runtime_secrets: false
+
+    - name: Read required systemd unit states
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ item }}"]
+      loop:
+        - docker.service
+        - "wg-quick@{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}.service"
+        - spiritvpn-egress-qdisc.service
+      changed_when: false
+
+    - name: Require deployment user account
+      ansible.builtin.command:
+        argv: [getent, passwd, "{{ spiritvpn_deployment_user }}"]
+      changed_when: false
+
+    - name: Inspect installed compiled node plan
+      ansible.builtin.stat:
+        path: /etc/spiritvpn/node-plan.json
+      register: _bootstrap_node_plan
+
+    - name: Require protected compiled node plan
+      ansible.builtin.assert:
+        that:
+          - _bootstrap_node_plan.stat.exists
+          - _bootstrap_node_plan.stat.pw_name == 'root'
+          - _bootstrap_node_plan.stat.mode == '0640'
+
+    - name: Require management interface and compiled address
+      ansible.builtin.command:
+        argv:
+          - ip
+          - -4
+          - address
+          - show
+          - dev
+          - "{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}"
+      register: _bootstrap_management_address
+      changed_when: false
+
+    - name: Validate compiled management address is active
+      ansible.builtin.assert:
+        that:
+          - spiritvpn_node_plan.instance.management_address in _bootstrap_management_address.stdout
+
+    - name: Require machine certificate lifetime
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - x509
+          - -in
+          - /var/lib/spiritvpn/pki/agent-chain.pem
+          - -noout
+          - -checkend
+          - "604800"
+      changed_when: false

@@ -1,4 +1,22 @@
 ---
+- name: Require a digest-pinned Xray image
+  ansible.builtin.assert:
+    that:
+      - xray_image is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      Xray must run a digest-pinned image from the compiled node plan.
+      A tag can be moved after review and is not a supply-chain pin.
+
+- name: Require the compiled logical-node REALITY identity
+  ansible.builtin.assert:
+    that:
+      - reality_private_key | trim | length == 43
+      - reality_private_key | trim is match('^[A-Za-z0-9_-]{43}$')
+    fail_msg: >-
+      Compiled deployments must resolve the logical-node REALITY private-key
+      reference before configuring Xray; generating an instance-local replacement is forbidden.
+  no_log: true
+
 - name: Ensure Xray config directory
   ansible.builtin.file:
     path: "{{ xray_config_dir }}"
@@ -25,65 +43,6 @@
     group: root
     mode: "0600"
   when: (reality_private_key | default('') | trim | length) > 0
-  no_log: true
-  diff: false
-
-- name: Inspect retained REALITY private key
-  ansible.builtin.stat:
-    path: /var/lib/xray/reality.key
-  register: _reality_key_file
-
-- name: Generate a REALITY key pair when no retained key exists
-  ansible.builtin.command:
-    argv:
-      - docker
-      - run
-      - --rm
-      - "{{ xray_image }}"
-      - x25519
-  register: _reality_key_generation
-  changed_when: true
-  when: not (_reality_key_file.stat.exists and (_reality_key_file.stat.size | int) > 0)
-  no_log: true
-
-- name: Extract the generated REALITY private key
-  ansible.builtin.set_fact:
-    _generated_reality_private_key: >-
-      {{ [
-           (
-             ((_reality_key_generation.stdout | default(''))
-               | regex_findall(xray_reality_private_key_output_regex)
-               | first)
-             | default('', true)
-           ),
-           (
-             ((_reality_key_generation.stderr | default(''))
-               | regex_findall(xray_reality_private_key_output_regex)
-               | first)
-             | default('', true)
-           )
-         ] | select | first | default('', true) }}
-  when: _reality_key_generation is not skipped
-  no_log: true
-
-- name: Validate generated REALITY private key before storing it
-  ansible.builtin.assert:
-    that:
-      - _generated_reality_private_key | length == 43
-      - _generated_reality_private_key is match('^[A-Za-z0-9_-]{43}$')
-    fail_msg: >-
-      Xray did not emit a parseable PrivateKey value. The key file was not changed.
-  when: _reality_key_generation is not skipped
-  no_log: true
-
-- name: Store generated REALITY private key
-  ansible.builtin.copy:
-    content: "{{ _generated_reality_private_key }}\n"
-    dest: /var/lib/xray/reality.key
-    owner: root
-    group: root
-    mode: "0600"
-  when: _reality_key_generation is not skipped
   no_log: true
   diff: false
 

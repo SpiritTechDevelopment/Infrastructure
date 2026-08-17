@@ -1,0 +1,121 @@
+syntax = "proto3";
+
+// Приём infrastructure manifest. Нормативный источник: BACKEND_DOMAIN_AGREEMENTS.md
+// §6 (Infrastructure manifest) и §13 (materialization). Этот proto — wire-проекция
+// логического YAML-снапшота, который рендерит infra CI/CD. Со-owned с infra CI/CD.
+//
+// Вызывающая сторона аутентифицируется по mTLS с ролью manifest-writer (§14). Весь
+// снапшот применяется атомарно или не применяется вовсе; массовая материализация
+// customer access идёт асинхронно durable-джобой после commit (§6/§13).
+//
+// Ограничения полей, которые protobuf выразить не может (schema_version == 1,
+// revision > 0, регэксп fingerprint, transport == "tcp", flow == "xtls-rprx-vision",
+// уникальность, ссылочная целостность, destructive-guard), валидирует backend до
+// проекции; см. §6.
+package spiritvpn.manifest.v1;
+
+// ManifestService принимает полные versioned-снапшоты топологии от инфраструктуры.
+service ManifestService {
+  // Валидирует и атомарно проецирует полный manifest-снапшот. Повтор revision с тем
+  // же каноническим digest идемпотентен; другой digest для той же revision либо
+  // более старая revision отклоняются.
+  rpc ApplyFleetManifest(ApplyFleetManifestRequest) returns (ApplyFleetManifestResponse);
+}
+
+message ApplyFleetManifestRequest {
+  // Зафиксировано в 1 для этой версии документа.
+  uint32 schema_version = 1;
+
+  // Глобальная, строго возрастающая (не обязательно последовательная) revision.
+  uint64 revision = 2;
+
+  // Разрешение на удаление ранее присутствовавших нод / membership / relations в
+  // рамках только этого запроса. Не сохраняется для следующих revisions. Никогда
+  // не разрешает удаление ранее принятого fleet.
+  bool allow_destructive = 3;
+
+  // Полный инвентарь нод снапшота. node_id уникален в снапшоте.
+  repeated ManifestNode nodes = 4;
+
+  // Полный инвентарь fleets снапшота. Все ранее принятые fleets обязаны
+  // присутствовать. vpn_fleet_id уникален в снапшоте.
+  repeated ManifestFleet fleets = 5;
+}
+
+// ManifestNode — одна логическая VPN-нода. node_id — стабильная идентичность;
+// endpoint, домен и публичные параметры изменяемы между revisions.
+message ManifestNode {
+  string node_id = 1;
+  NodeAgentConfig agent = 2;
+  NodePublicConfig public = 3;
+
+  // Человекочитаемое имя; используется как фрагмент VLESS URI для FREEDOM-ссылок.
+  string display_name = 4;
+}
+
+// NodeAgentConfig — как backend достаёт и аутентифицирует агента этой ноды (mTLS
+// поверх management WireGuard overlay). Клиенту не показывается.
+message NodeAgentConfig {
+  string endpoint = 1;              // host:port node-agent
+  string tls_server_name = 2;       // ожидаемый TLS SNI агента
+  string certificate_identity = 3;  // например spiffe://spiritvpn/node/NL-1
+}
+
+// NodePublicConfig — публичные REALITY/VLESS-параметры для клиента, проецируются в
+// URI GetCustomerAccessLinks (§8). security=reality и encryption=none фиксированы
+// протоколом v1 и намеренно отсутствуют здесь.
+message NodePublicConfig {
+  string address = 1;             // публичный host inbound
+  uint32 port = 2;                // публичный порт (1..65535)
+  string reality_public_key = 3;  // -> pbk
+  string server_name = 4;         // -> sni
+  string short_id = 5;            // -> sid
+  string fingerprint = 6;         // -> fp; ASCII 1..64 из [A-Za-z0-9._-]
+  string flow = 7;                // v1: "xtls-rprx-vision"
+  string transport = 8;           // v1: "tcp"
+}
+
+// ManifestFleet — один продаваемый fleet: набор нод-участников плюс направленные
+// BRIDGE-связи между ними. Принятый vpn_fleet_id не удаляется и не переиспользуется.
+message ManifestFleet {
+  int64 vpn_fleet_id = 1;
+
+  // node_id участников; каждый обязан существовать в nodes этого снапшота.
+  repeated string node_ids = 2;
+
+  // Направленные BRIDGE-связи. routing_key уникален в fleet; пара
+  // (entry_node_id, exit_node_id) уникальна в fleet.
+  repeated ManifestBridge bridges = 3;
+}
+
+// ManifestBridge — одна направленная связь entry->exit. routing_key — её стабильная
+// идентичность; пара (entry, exit) неизменяема для существующего routing_key.
+message ManifestBridge {
+  string routing_key = 1;
+  string entry_node_id = 2;  // куда устанавливается customer VLESS user
+  string exit_node_id = 3;   // egress-нода (отлична от entry, тот же fleet)
+
+  // Статический тег Xray outbound на входной ноде для этой relation. Обязателен и
+  // непуст. Хранится и передаётся агенту дословно как User.egress_key (§7/§9);
+  // неймингом владеет infra, backend его не деривит.
+  string egress_tag = 4;
+
+  // Человекочитаемое имя; используется как фрагмент VLESS URI для BRIDGE-ссылок.
+  string display_name = 5;
+}
+
+message ApplyFleetManifestResponse {
+  // Revision, ставшая текущей после этого вызова (на успехе эхо request.revision).
+  uint64 applied_revision = 1;
+  ManifestApplyResult result = 2;
+}
+
+enum ManifestApplyResult {
+  MANIFEST_APPLY_RESULT_UNSPECIFIED = 0;
+
+  // Новый снапшот провалидирован и спроецирован; поставлена materialization-джоба.
+  MANIFEST_APPLY_RESULT_APPLIED = 1;
+
+  // Та же revision и тот же канонический digest, что уже применены: no-op.
+  MANIFEST_APPLY_RESULT_IDEMPOTENT = 2;
+}

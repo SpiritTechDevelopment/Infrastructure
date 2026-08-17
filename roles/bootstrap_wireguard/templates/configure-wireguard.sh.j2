@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+umask 077
+
+private_key=$(tr -d '\r\n' < '{{ bootstrap_wireguard_private_key_path }}')
+temporary=$(mktemp '{{ bootstrap_wireguard_config_path }}.tmp.XXXXXX')
+trap 'rm -f "$temporary"' EXIT HUP INT TERM
+
+cat > "$temporary" <<EOF
+[Interface]
+PrivateKey = $private_key
+Address = {{ bootstrap_wireguard_address }}
+ListenPort = {{ bootstrap_wireguard_listen_port }}
+MTU = {{ bootstrap_wireguard_mtu }}
+
+[Peer]
+PublicKey = {{ bootstrap_wireguard_hub_public_key }}
+AllowedIPs = {{ bootstrap_wireguard_network }}
+Endpoint = {{ bootstrap_wireguard_hub_endpoint }}
+PersistentKeepalive = {{ bootstrap_wireguard_persistent_keepalive }}
+EOF
+
+chmod 0600 "$temporary"
+if [ -f '{{ bootstrap_wireguard_config_path }}' ] && cmp -s "$temporary" '{{ bootstrap_wireguard_config_path }}'; then
+  echo unchanged
+  exit 0
+fi
+install -o root -g root -m 0600 "$temporary" '{{ bootstrap_wireguard_config_path }}'
+echo changed

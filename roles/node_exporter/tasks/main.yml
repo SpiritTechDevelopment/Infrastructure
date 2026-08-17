@@ -1,4 +1,15 @@
 ---
+- name: Require a digest-pinned node exporter image
+  ansible.builtin.assert:
+    that:
+      - node_exporter_image is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      node exporter must run a digest-pinned image from the compiled node plan.
+      A tag can be moved after review and is not a supply-chain pin.
+
 - name: Note node_exporter deployment ownership
   ansible.builtin.debug:
-    msg: "node_exporter is defined in the vpn_stack Compose file and scraped locally by Alloy."
+    msg: >-
+      node_exporter is defined in the compiled_runtime Compose file. It binds
+      the management overlay and is scraped from the shared collector on the
+      management host, not by a node-local agent.

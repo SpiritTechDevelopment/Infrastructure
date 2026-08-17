@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/fleet-v1alpha1.json",
+  "title": "SpiritVPN Fleet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "spiritvpn.io/v1alpha1"},
+    "kind": {"const": "Fleet"},
+    "metadata": {"$ref": "#/$defs/metadata"},
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entries", "exits", "bridges"],
+      "properties": {
+        "entries": {"type": "array", "uniqueItems": true, "maxItems": 10, "items": {"$ref": "#/$defs/id"}},
+        "exits": {"type": "array", "uniqueItems": true, "maxItems": 10, "items": {"$ref": "#/$defs/id"}},
+        "bridges": {
+          "type": "array",
+          "maxItems": 90,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["routing_key", "entry", "exit", "display_name", "service_credential_ref"],
+            "properties": {
+              "routing_key": {"type": "string", "maxLength": 63, "pattern": "^[a-z0-9-]+\\.to-[a-z0-9-]+$"},
+              "entry": {"$ref": "#/$defs/id"},
+              "exit": {"$ref": "#/$defs/id"},
+              "display_name": {"type": "string", "minLength": 1, "maxLength": 128},
+              "service_credential_ref": {
+                "type": "string",
+                "pattern": "^secret://kv/(develop|prod)/bridges/[a-z0-9.-]+#service_uuid$"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9-]+$"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {"id": {"$ref": "#/$defs/id"}}
+    }
+  }
+}

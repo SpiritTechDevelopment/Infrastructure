@@ -1,0 +1,16 @@
+---
+# fleetctl enables the role and supplies the remaining values per Instance.
+# Enabled explicitly by the compiled node plan for every non-retired instance.
+node_limits_egress_enabled: false
+node_limits_egress_interface: ""
+node_limits_bandwidth_profile: ""
+node_limits_port_capacity_mbps: 0
+node_limits_egress_limit_mbps: 0
+node_limits_qdisc_kind: cake
+node_limits_diffserv: besteffort
+node_limits_flow_isolation: flows
+node_limits_nat: false
+node_limits_rtt: internet
+node_limits_packages: [iproute2, kmod]
+node_limits_script_path: /usr/local/sbin/spiritvpn-apply-egress-qdisc
+node_limits_systemd_unit: spiritvpn-egress-qdisc.service

@@ -1,16 +1,10 @@
-inventories/*/inventory.yml
-inventories/*/inventory.yml.bak*
-inventories/*/inventory.yml.tmp
-inventories/*/hosts.yml
-inventories/**/host_vars/*
-!inventories/**/host_vars/.gitkeep
-# Track non-secret per-host config (firewall profiles); keep everything else
-# under host_vars ignored by default (generated_exits.yml carries REALITY
-# passwords, etc.). Safe-by-default: re-include the dirs, re-ignore their files,
-# then allow ONLY firewall.yml back.
-!inventories/**/host_vars/*/
-inventories/**/host_vars/*/*
-!inventories/**/host_vars/*/firewall.yml
+# Only the reviewed management bootstrap inventory may be tracked. Ignore any
+# local inventory experiments so they cannot become a second source of truth.
+inventories/*/
+!inventories/bootstrap/
+inventories/bootstrap/*
+!inventories/bootstrap/.gitkeep
+!inventories/bootstrap/platform.sops.yml
 _render/
 *.decrypted
 *.plain.yml
@@ -29,6 +23,11 @@ client-*.json
 smoke-client.json
 s.sh
 generated/
+build/
+.fleetctl-state/
+# Local Python/Ansible environments are machine-specific build artifacts.
+ansible-env/
+.venv/
 deploy-e2e.log
 support-bundle/
 # editor / patch / backup cruft — never commit (may contain secrets)
@@ -36,8 +35,5 @@ support-bundle/
 *.rej
 *.bak
 *.bak.*
-# recovery bundles: commit ONLY the passphrase-encrypted .age blobs; never any
-# decrypted or extracted material.
+# Recovery material belongs in approved external storage, never this repository.
 recovery/*
-!recovery/*.age
-!recovery/.gitkeep

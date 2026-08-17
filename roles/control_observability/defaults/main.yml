@@ -1,0 +1,8 @@
+---
+# Both generated inputs are required; the role refuses to guess either.
+control_plan_file: ""
+monitoring_targets_file: ""
+# Written by roles/platform_observability. Its absence means the shared
+# collector has not been deployed, and fragments written now would be read by
+# nobody.
+control_collector_contract_file: /opt/spiritvpn/platform/observability/collector-contract.json

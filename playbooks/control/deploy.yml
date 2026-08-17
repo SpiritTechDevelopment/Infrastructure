@@ -1,0 +1,12 @@
+---
+- name: Reconcile one environment control stack on the management VPS
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  roles:
+    - role: control_runtime
+    # Metrics collection is deployed with the control plane, not beside it: a
+    # backend running without its collector is an unmonitored backend.
+    - role: control_observability

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+bound_environment="${1:-}"
+case "$bound_environment" in
+  develop|prod) ;;
+  *)
+    printf '%s\n' 'refusing invalid GitHub environment binding' >&2
+    exit 64
+    ;;
+esac
+
+original_command="${SSH_ORIGINAL_COMMAND:-}"
+if [[ "$original_command" == platform-readiness ]]; then
+    exec sudo -n /usr/local/sbin/spiritvpn-platform-readiness
+fi
+
+read -r operation requested_environment source_git_sha mode remaining <<< "$original_command"
+if [[ "$operation" == platform-deploy ]]; then
+  [[ -z "${remaining:-}" ]] || { printf '%s\n' 'refusing extra platform deployment arguments' >&2; exit 64; }
+  [[ "$requested_environment" == "$bound_environment" ]] || { printf '%s\n' 'refusing cross-environment deployment' >&2; exit 64; }
+  [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'refusing invalid source Git SHA' >&2; exit 64; }
+  [[ "$mode" =~ ^(check|apply)$ ]] || { printf '%s\n' 'refusing invalid platform deployment mode' >&2; exit 64; }
+  exec sudo -n /usr/local/sbin/spiritvpn-platform-deploy \
+    "$requested_environment" "$source_git_sha" "$mode"
+fi
+
+if [[ "$operation" == control-deploy ]]; then
+  [[ -z "${remaining:-}" ]] || { printf '%s\n' 'refusing extra control deployment arguments' >&2; exit 64; }
+  [[ "$requested_environment" == "$bound_environment" ]] || { printf '%s\n' 'refusing cross-environment deployment' >&2; exit 64; }
+  [[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'refusing invalid source Git SHA' >&2; exit 64; }
+  [[ "$mode" =~ ^(check|apply)$ ]] || { printf '%s\n' 'refusing invalid control deployment mode' >&2; exit 64; }
+  exec sudo -n /usr/local/sbin/spiritvpn-control-deploy \
+    "$requested_environment" "$source_git_sha" "$mode"
+fi
+
+read -r operation requested_environment source_git_sha mode initial resume allow_destructive extra <<< "$original_command"
+if [[ "$operation" != fleet-deploy || -n "${extra:-}" ]]; then
+  printf '%s\n' 'refusing unsupported GitHub command' >&2
+  exit 64
+fi
+[[ "$requested_environment" == "$bound_environment" ]] || { printf '%s\n' 'refusing cross-environment deployment' >&2; exit 64; }
+[[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || { printf '%s\n' 'refusing invalid source Git SHA' >&2; exit 64; }
+[[ "$mode" =~ ^(dry-run|apply)$ ]] || { printf '%s\n' 'refusing invalid deployment mode' >&2; exit 64; }
+[[ "$initial" =~ ^(true|false)$ ]] || { printf '%s\n' 'refusing invalid initial flag' >&2; exit 64; }
+[[ "$resume" =~ ^(true|false)$ ]] || { printf '%s\n' 'refusing invalid resume flag' >&2; exit 64; }
+[[ "$allow_destructive" =~ ^(true|false)$ ]] || { printf '%s\n' 'refusing invalid destructive flag' >&2; exit 64; }
+
+exec sudo -n /usr/local/sbin/spiritvpn-fleet-deploy \
+  "$requested_environment" "$source_git_sha" "$mode" \
+  "$initial" "$resume" "$allow_destructive"

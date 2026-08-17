@@ -1,11 +1,16 @@
 # Architecture
 
-How the system is designed.
+[`INFRA_TECHNICAL_SPEC.md`](INFRA_TECHNICAL_SPEC.md) is the only normative
+infrastructure architecture document.
 
-| Doc | What |
-|---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | The full guide: fleet inventory, diagrams, the 7 logical layers, the three planes, container networking, firewalls, overlay, and the operational runbook |
-| [TOPOLOGY.md](TOPOLOGY.md) | The config-driven model: how inventory **labels** drive routing / telemetry / quotas / backend roster / DNS, and exactly what a topology change touches |
+[`TRANSITIONAL_GITHUB_RUNNER.md`](TRANSITIONAL_GITHUB_RUNNER.md) records the
+temporary GitHub-hosted runner boundary without changing the protected-runner
+target in the normative specification.
 
-Read ARCHITECTURE for the "how it's built," TOPOLOGY for the "what happens when I
-change it."
+It defines the environment/fleet/logical-node/instance model, source-of-truth
+boundaries, compiler invariants, generated artifacts, PKI, rollout ordering,
+readiness gates, backend and agent boundaries, DNS, observability, failure
+behavior, and acceptance phases.
+
+Superseded architecture drafts remain available in Git history. This directory
+contains only the approved v1 model.

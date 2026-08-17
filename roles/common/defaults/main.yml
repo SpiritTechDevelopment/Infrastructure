@@ -12,11 +12,7 @@ deploy_mode: runtime
 # Hardening flags. In runtime mode these are tripwires (must be false); in
 # bootstrap/hardened mode they enable the corresponding hardening task.
 common_manage_deploy_user: false
-common_remove_legacy_sshd_dropin: false
 common_manage_sshd: false
-# Vault SSH CA public key. When set, hosts trust certs signed by it
-# (TrustedUserCAKeys). Public key — safe to commit. Set in group_vars.
-common_ssh_ca_public_key: ""
 common_manage_firewall: false
 common_enable_fail2ban: false
 common_manage_sysctl: false
@@ -27,23 +23,17 @@ common_enable_auditd: false
 # Safe defaults: empty lists render a minimal ruleset, and an empty
 # ssh_allowed_cidrs falls back to SSH-from-anywhere so enabling the firewall
 # without setting admin sources cannot lock you out. Set per host/group.
-common_firewall_engine: nftables          # nftables | ufw (exit-fr uses ufw)
 ssh_port: "{{ ansible_port | default(22) }}"
 ssh_allowed_cidrs: []                      # [] = allow SSH from anywhere (fallback)
 common_public_tcp_ports: []                # ports open to the internet (input chain)
 common_public_udp_ports: []
+# Fully trusted pre-existing tunnel interfaces. Platform bootstrap discovers
+# active WireGuard interfaces and uses this only to preserve operator access.
+common_trusted_interfaces: []
 # Source-scoped rules. `forward_ports` optionally describes the post-DNAT
 # container port when it differs from the host-facing `ports`.
 common_restricted_tcp_rules: []            # [{ports, forward_ports?, cidrs, interface}]
-common_restricted_tcp_ports: []            # legacy flat form (used if _rules empty)
-common_restricted_cidrs: []
 common_restricted_interface: ""
-common_management_forwarding_enabled: false  # hub-only: forward between overlay spokes
-common_management_interface: wg0
-common_management_cidr: 10.20.0.0/24
-# Docker bridge egress in the forward chain (the rule the orphaned template lacked).
-common_docker_bridge_forwarding: false
-common_docker_bridge_cidr: 172.16.0.0/12
 
 # --- fail2ban (rendered only when common_enable_fail2ban) ---
 # SSH brute-force protection via the systemd journal backend. `port` derives from
@@ -51,10 +41,8 @@ common_docker_bridge_cidr: 172.16.0.0/12
 common_fail2ban_maxretry: 5
 common_fail2ban_findtime: 600
 common_fail2ban_bantime: 3600
-# Never ban these sources — the operator/overlay must not get locked out (an SSH
-# client offering several agent keys logs multiple "Failed publickey" lines and
-# can trip fail2ban even on a legitimate login). Loopback + the overlay + admin.
-common_fail2ban_ignoreip: "127.0.0.1/8 ::1 10.20.0.0/24 206.84.238.130/32"
+# Environment playbooks extend this with reviewed management and operator CIDRs.
+common_fail2ban_ignoreip: "127.0.0.1/8 ::1"
 
 # --- unattended-upgrades (common_enable_unattended_upgrades) ---
 # Auto-apply security updates only; never auto-reboot (a reboot would drop the
@@ -65,8 +53,8 @@ common_unattended_auto_reboot: false
 # Named, auditable non-root account for steady-state deploys. docker group + sudo
 # make it root-equivalent on a Docker host — accepted deliberately; the win is a
 # named account with no root-password login, not a hard boundary. Its
-# authorized_keys is the operator roster (operators log in AS deploy). Root stays
-# as key-only break-glass. ansible_user is migrated to deploy separately, after
-# this is verified.
+# authorized_keys is the reviewed operator roster. Root stays as key-only
+# break-glass; migration of the coordinator to the deploy user is separate.
 common_deploy_user: deploy
 common_deploy_groups: [sudo, docker]
+common_authorized_keys: []

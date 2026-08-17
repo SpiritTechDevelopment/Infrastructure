@@ -1,0 +1,227 @@
+---
+- name: Require one reviewed and environment-bound GitHub key
+  ansible.builtin.assert:
+    that:
+      - item.environment in ['develop', 'prod']
+      - item.public_key is match('^(ssh-ed25519|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+(?: .*)?$')
+    fail_msg: "A reviewed GitHub Environment SSH public key is required."
+  loop: "{{ platform_github_ssh_keys }}"
+
+- name: Require at most one GitHub key per environment
+  ansible.builtin.assert:
+    that:
+      - >-
+        (platform_github_ssh_keys | map(attribute='environment') | unique | length)
+        == (platform_github_ssh_keys | length)
+    fail_msg: "GitHub SSH key environment bindings must be unique."
+
+- name: Create restricted GitHub command user
+  ansible.builtin.user:
+    name: "{{ platform_github_user }}"
+    shell: /bin/bash
+    create_home: true
+    password_lock: true
+
+- name: Install protected executor prerequisites
+  ansible.builtin.apt:
+    name: "{{ ['git', 'python3-pip', 'util-linux'] + platform_executor_python_apt_packages }}"
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+
+- name: Create protected executor directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ platform_executor_dir }}"
+    - "{{ platform_executor_dir }}/incoming"
+    - "{{ platform_executor_dir }}/build"
+    - "{{ platform_executor_state_dir }}"
+    - "{{ platform_executor_config_dir }}"
+    - "{{ platform_runtime_config_dir }}"
+    - "{{ platform_executor_config_dir }}/develop"
+    - "{{ platform_executor_config_dir }}/prod"
+
+- name: Remove the retired staging executor configuration
+  ansible.builtin.file:
+    path: "{{ platform_executor_config_dir }}/staging"
+    state: absent
+
+- name: Inspect the existing executor Python environment
+  ansible.builtin.stat:
+    path: "{{ platform_executor_dir }}/venv/bin/python"
+  register: _platform_executor_venv_python
+
+- name: Check whether the existing executor Python is compatible
+  ansible.builtin.command:
+    argv:
+      - "{{ platform_executor_dir }}/venv/bin/python"
+      - -c
+      - >-
+        import sys;
+        print(int(sys.version_info.major == 3 and
+        sys.version_info.minor >= {{ platform_executor_python_minimum_minor }}))
+  register: _platform_executor_venv_compatible
+  changed_when: false
+  failed_when: false
+  when: _platform_executor_venv_python.stat.exists
+
+- name: Remove an incompatible executor Python environment
+  ansible.builtin.file:
+    path: "{{ platform_executor_dir }}/venv"
+    state: absent
+  when:
+    - _platform_executor_venv_python.stat.exists
+    - >-
+      _platform_executor_venv_compatible.rc != 0 or
+      _platform_executor_venv_compatible.stdout | trim != '1'
+
+- name: Create the isolated deployment Python environment
+  ansible.builtin.command:
+    argv:
+      - "{{ platform_executor_python_executable }}"
+      - -m
+      - venv
+      - "{{ platform_executor_dir }}/venv"
+    creates: "{{ platform_executor_dir }}/venv/bin/python"
+
+- name: Install bounded deployment runtime dependencies
+  ansible.builtin.pip:
+    name: "{{ platform_executor_python_packages }}"
+    virtualenv: "{{ platform_executor_dir }}/venv"
+
+- name: Create restricted GitHub SSH directory
+  ansible.builtin.file:
+    path: "/home/{{ platform_github_user }}/.ssh"
+    state: directory
+    owner: "{{ platform_github_user }}"
+    group: "{{ platform_github_user }}"
+    mode: "0700"
+
+- name: Install the root-owned GitHub command gate
+  ansible.builtin.template:
+    src: spiritvpn-github-command.j2
+    dest: /usr/local/sbin/spiritvpn-github-command
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the root-owned platform readiness command
+  ansible.builtin.template:
+    src: spiritvpn-platform-readiness.j2
+    dest: /usr/local/sbin/spiritvpn-platform-readiness
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the root-owned fleet deployment executor
+  ansible.builtin.template:
+    src: spiritvpn-fleet-deploy.j2
+    dest: /usr/local/sbin/spiritvpn-fleet-deploy
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the root-owned control deployment executor
+  ansible.builtin.template:
+    src: spiritvpn-control-deploy.j2
+    dest: /usr/local/sbin/spiritvpn-control-deploy
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Persist the bounded management runtime configuration
+  ansible.builtin.copy:
+    content: |
+      {{ {
+        'platform_operator_ssh_public_keys': platform_operator_ssh_public_keys,
+        'platform_github_ssh_keys': platform_github_ssh_keys,
+        'platform_ssh_allowed_cidrs': platform_ssh_allowed_cidrs,
+        'platform_wireguard_interface': platform_wireguard_interface,
+        'platform_wireguard_hub_addresses': platform_wireguard_hub_addresses,
+        'platform_wireguard_environment_networks': platform_wireguard_environment_networks,
+        'platform_wireguard_listen_port': platform_wireguard_listen_port,
+        'platform_wireguard_mtu': platform_wireguard_mtu,
+        'platform_wireguard_operator_peers': platform_wireguard_operator_peers,
+        'platform_wireguard_public_endpoint': platform_wireguard_public_endpoint,
+        'platform_fail2ban_ignore_cidrs': platform_fail2ban_ignore_cidrs | default([]),
+        'platform_vault_node_id': platform_vault_node_id,
+        'platform_vault_tls_server_name': platform_vault_tls_server_name
+      } | to_nice_yaml(indent=2, sort_keys=true) }}
+    dest: "{{ platform_runtime_vars_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Read the public management WireGuard key for fleet bootstrap
+  ansible.builtin.slurp:
+    src: "{{ platform_wireguard_public_key_path }}"
+  register: _platform_executor_wireguard_public_key
+
+- name: Create initial environment fleet bootstrap inputs
+  ansible.builtin.copy:
+    content: |
+      {{ {
+        'spiritvpn_operator_ssh_public_keys': platform_operator_ssh_public_keys,
+        'bootstrap_wireguard_hub_endpoint': platform_wireguard_public_endpoint,
+        'bootstrap_wireguard_hub_public_key': _platform_executor_wireguard_public_key.content | b64decode | trim,
+        'bootstrap_wireguard_hub_management_address': item.value | regex_replace('/16$', ''),
+        'spiritvpn_agent_certificate_chains': {}
+      } | to_nice_yaml(indent=2, sort_keys=true) }}
+    dest: "{{ platform_executor_config_dir }}/{{ item.key }}/bootstrap.yml"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+  loop: "{{ platform_wireguard_hub_addresses | dict2items }}"
+  no_log: true
+  diff: false
+  when: deploy_mode == 'bootstrap'
+
+- name: Preserve environment-local control deployment settings
+  ansible.builtin.copy:
+    content: |
+      {{ {
+        'control_external_backup_command_argv': []
+      } | to_nice_yaml(indent=2, sort_keys=true) }}
+    dest: "{{ platform_executor_config_dir }}/{{ item.key }}/control.yml"
+    owner: root
+    group: root
+    mode: "0600"
+    force: false
+  loop: "{{ platform_wireguard_hub_addresses | dict2items }}"
+
+- name: Install the root-owned platform deployment executor
+  ansible.builtin.template:
+    src: spiritvpn-platform-deploy.j2
+    dest: /usr/local/sbin/spiritvpn-platform-deploy
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Restrict the GitHub keys to the command gate
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "/home/{{ platform_github_user }}/.ssh/authorized_keys"
+    owner: "{{ platform_github_user }}"
+    group: "{{ platform_github_user }}"
+    mode: "0600"
+
+- name: Permit only the fixed root-owned executor commands through sudo
+  ansible.builtin.copy:
+    content: |
+      {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-platform-readiness
+      {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-platform-deploy *
+      {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-control-deploy *
+      {{ platform_github_user }} ALL=(root) NOPASSWD: /usr/local/sbin/spiritvpn-fleet-deploy
+    dest: "/etc/sudoers.d/91-{{ platform_github_user }}-readiness"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"

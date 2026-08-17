@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 6 ]]; then
+  printf '%s\n' 'invalid fleet deployment invocation' >&2
+  exit 64
+fi
+environment="$1"
+source_git_sha="$2"
+mode="$3"
+initial="$4"
+resume="$5"
+allow_destructive="$6"
+
+[[ "$environment" =~ ^(develop|prod)$ ]] || exit 64
+[[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || exit 64
+[[ "$mode" =~ ^(dry-run|apply)$ ]] || exit 64
+[[ "$initial" =~ ^(true|false)$ ]] || exit 64
+[[ "$resume" =~ ^(true|false)$ ]] || exit 64
+[[ "$allow_destructive" =~ ^(true|false)$ ]] || exit 64
+
+umask 077
+executor_dir="{{ platform_executor_dir }}"
+state_dir="{{ platform_executor_state_dir }}"
+config_dir="{{ platform_executor_config_dir }}/$environment"
+repository="$executor_dir/repository.git"
+bundle="$(mktemp "$executor_dir/incoming/$environment.XXXXXXXX.bundle")"
+worktree="$(mktemp -d "$executor_dir/incoming/$environment.XXXXXXXX.worktree")"
+secrets_file="$(mktemp "$executor_dir/incoming/$environment.XXXXXXXX.secrets.yml")"
+ssh_key_file="$(mktemp "$executor_dir/incoming/$environment.XXXXXXXX.ssh-key")"
+cleanup() {
+  rm -f -- "$bundle" "$secrets_file" "$ssh_key_file"
+  rm -rf -- "$worktree"
+}
+trap cleanup EXIT
+
+exec 9>"$executor_dir/$environment.lock"
+if ! flock -n 9; then
+  printf '%s\n' "deployment already active for $environment" >&2
+  exit 75
+fi
+
+# The ceiling bounds the incoming bundle and nothing else. RLIMIT_FSIZE is
+# inherited by every later process, so leaving it set would also cap the
+# pre-migration pg_dump and kill it with SIGXFSZ once the database outgrows
+# the limit — mid-deployment, right before migrations.
+(
+  ulimit -f "{{ platform_executor_bundle_limit_kib }}"
+  dd of="$bundle" bs=64K status=none
+)
+test -s "$bundle"
+
+if [[ ! -d "$repository" ]]; then
+  git init --bare "$repository" >/dev/null
+fi
+git --git-dir="$repository" bundle verify "$bundle" >/dev/null
+
+source_ref=refs/spiritvpn/source
+deployment_ref="refs/deployments/$environment"
+mapfile -t bundle_heads < <(git bundle list-heads "$bundle")
+source_head_seen=false
+deployment_head_seen=false
+for head in "${bundle_heads[@]}"; do
+  read -r head_sha head_ref extra <<< "$head"
+  test -z "${extra:-}" || { printf '%s\n' 'invalid Git bundle head' >&2; exit 65; }
+  case "$head_ref" in
+    "$source_ref")
+      test "$head_sha" = "$source_git_sha" || { printf '%s\n' 'bundle source SHA mismatch' >&2; exit 65; }
+      source_head_seen=true
+      ;;
+    "$deployment_ref") deployment_head_seen=true ;;
+    *) printf '%s\n' "unexpected Git bundle ref: $head_ref" >&2; exit 65 ;;
+  esac
+done
+test "$source_head_seen" = true
+
+if test "$initial" = true; then
+  test "$deployment_head_seen" = false || { printf '%s\n' 'initial bundle unexpectedly contains a deployment baseline' >&2; exit 65; }
+else
+  test "$deployment_head_seen" = true || { printf '%s\n' 'non-initial bundle is missing its deployment baseline' >&2; exit 65; }
+fi
+
+git --git-dir="$repository" fetch --no-tags "$bundle" \
+  "+$source_ref:$source_ref" >/dev/null
+if test "$deployment_head_seen" = true; then
+  git --git-dir="$repository" fetch --no-tags "$bundle" \
+    "+$deployment_ref:$deployment_ref" >/dev/null
+elif git --git-dir="$repository" show-ref --verify --quiet "$deployment_ref"; then
+  printf '%s\n' 'initial deployment refused because the executor already has a baseline' >&2
+  exit 65
+fi
+test "$(git --git-dir="$repository" rev-parse "$source_ref^{commit}")" = "$source_git_sha"
+
+git clone --no-checkout --shared "$repository" "$worktree" >/dev/null
+git -C "$worktree" checkout --detach "$source_git_sha" >/dev/null
+if test "$deployment_head_seen" = true; then
+  git -C "$worktree" fetch --no-tags "$repository" \
+    "+$deployment_ref:$deployment_ref" >/dev/null
+fi
+test -z "$(git -C "$worktree" status --short)"
+
+python="{{ platform_executor_dir }}/venv/bin/python"
+export PATH="{{ platform_executor_dir }}/venv/bin:$PATH"
+arguments=(
+  -m fleetctl.cli --root "$worktree" deploy
+  --environment "$environment"
+  --source "$source_git_sha"
+  --state-dir "$state_dir"
+  --build-dir "{{ platform_executor_dir }}/build/$environment"
+)
+test "$initial" = true && arguments+=(--initial)
+test "$resume" = true && arguments+=(--resume)
+test "$allow_destructive" = true && arguments+=(--allow-destructive)
+
+if test "$mode" = apply; then
+  for required in bootstrap.yml readiness.yml known_hosts; do
+    test -s "$config_dir/$required" || { printf '%s\n' "missing protected executor input: $config_dir/$required" >&2; exit 66; }
+  done
+  "$python" "$worktree/scripts/vault-secret-resolver.py" \
+    --root "$worktree" \
+    --environment "$environment" \
+    --scope fleet \
+    --credentials-dir "$config_dir/vault-approle" \
+    --compiled-secrets "$secrets_file" \
+    --ssh-private-key "$ssh_key_file" \
+    --vault-address "https://127.0.0.1:{{ platform_vault_api_port }}" \
+    --vault-ca "{{ platform_vault_dir }}/tls/vault-ca.crt"
+  chmod 0600 "$secrets_file" "$ssh_key_file"
+  export ANSIBLE_HOST_KEY_CHECKING=True
+  export ANSIBLE_PRIVATE_KEY_FILE="$ssh_key_file"
+  export ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$config_dir/known_hosts -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
+  arguments+=(
+    --apply
+    --bootstrap-vars "$config_dir/bootstrap.yml"
+    --compiled-secrets "$secrets_file"
+    --readiness-vars "$config_dir/readiness.yml"
+  )
+fi
+
+cd "$worktree"
+PYTHONPATH="$worktree" "$python" "${arguments[@]}"

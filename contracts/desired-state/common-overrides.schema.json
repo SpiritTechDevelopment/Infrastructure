@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/common-overrides.schema.json",
+  "title": "Partial common configuration overrides",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "components": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repository": {"type": "string", "minLength": 1},
+          "tag": {"type": "string", "minLength": 1},
+          "digest": {
+            "oneOf": [
+              {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              {"type": "null"}
+            ]
+          }
+        }
+      }
+    },
+    "networking": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "management": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interface": {"type": "string", "pattern": "^[a-zA-Z0-9_.-]{1,15}$"},
+            "listen_port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "mtu": {"type": "integer", "minimum": 1280, "maximum": 9000},
+            "persistent_keepalive_seconds": {"type": "integer", "minimum": 0, "maximum": 65535}
+          }
+        },
+        "agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"port": {"type": "integer", "minimum": 1, "maximum": 65535}}
+        },
+        "dns": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ttl_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+            "proxied": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "operations_days": {"type": "integer", "minimum": 1},
+            "activity_days": {"type": "integer", "minimum": 1}
+          }
+        },
+        "ports": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "node_exporter": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "xray_metrics": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "agent_metrics": {"type": "integer", "minimum": 1, "maximum": 65535}
+          }
+        },
+        "scrape_interval_seconds": {"type": "integer", "minimum": 1},
+        "probe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interval_seconds": {"type": "integer", "minimum": 1},
+            "timeout_seconds": {"type": "integer", "minimum": 1}
+          }
+        }
+      }
+    },
+    "rollout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_parallel_logical_nodes_per_fleet": {"type": "integer", "minimum": 1},
+        "convergence_timeout_seconds": {"type": "integer", "minimum": 1},
+        "drain_timeout_seconds": {
+          "oneOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+        }
+      }
+    },
+    "xray": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tags": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "inbound": {"type": "string", "minLength": 1},
+            "direct_outbound": {"type": "string", "minLength": 1},
+            "block_outbound": {"type": "string", "minLength": 1},
+            "exit_outbound_prefix": {"type": "string", "minLength": 1},
+            "probe_outbound_prefix": {"type": "string", "minLength": 1}
+          }
+        },
+        "default_outbound_tag": {"type": "string", "minLength": 1},
+        "access_log": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "export_enabled": {"type": "boolean"}
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bandwidth_profiles": {
+          "type": "object",
+          "propertyNames": {"pattern": "^[a-z0-9-]+$"},
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "port_capacity_mbps": {"type": "integer", "minimum": 1},
+              "egress_utilization_percent": {"type": "integer", "minimum": 85, "maximum": 90},
+              "qdisc": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {"const": "cake"},
+                  "diffserv": {"const": "besteffort"},
+                  "entry_flow_isolation": {"const": "dual-dsthost"},
+                  "exit_flow_isolation": {"const": "flows"},
+                  "nat": {"const": false},
+                  "rtt": {"const": "internet"}
+                }
+              }
+            }
+          }
+        },
+        "degradation_threshold_percent": {
+          "oneOf": [{"type": "integer", "minimum": 1, "maximum": 100}, {"type": "null"}]
+        }
+      }
+    }
+  }
+}

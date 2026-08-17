@@ -1,0 +1,13 @@
+---
+# Secret values are supplied by the protected deployment adapter and keyed by
+# the secret:// references in the compiled node plan. They are never rendered
+# into generated artifacts.
+spiritvpn_secret_values: {}
+spiritvpn_require_runtime_secrets: true
+spiritvpn_deployment_user: deploy
+spiritvpn_deploy_mode: hardened
+spiritvpn_manage_deploy_user: false
+spiritvpn_operator_ssh_public_keys: []
+# Public certificate chains returned by the operator/CA ceremony, keyed by
+# instance ID. Private machine keys remain node-local.
+spiritvpn_agent_certificate_chains: {}

@@ -1,0 +1,12 @@
+---
+# Copy outside the repository and replace every placeholder before APPLY=1.
+platform_vault_image: docker.io/hashicorp/vault@sha256:REPLACE_WITH_64_HEX_DIGEST
+platform_vault_node_id: management-1
+platform_vault_tls_server_name: vault.management.internal
+platform_operator_ssh_public_keys:
+  - ssh-ed25519 REPLACE_WITH_REVIEWED_OPERATOR_PUBLIC_KEY
+platform_github_ssh_keys:
+  - environment: develop
+    public_key: ssh-ed25519 REPLACE_WITH_DEVELOP_GITHUB_ENVIRONMENT_PUBLIC_KEY
+platform_ssh_allowed_cidrs:
+  - REPLACE_WITH_OPERATOR_OR_GITHUB_SOURCE_CIDR

@@ -1,0 +1,45 @@
+---
+platform_observability_dir: /opt/spiritvpn/platform/observability
+platform_observability_state_dir: /var/lib/spiritvpn/observability
+# Where roles/control_observability writes file_sd fragments on the host, and
+# where that directory appears inside the container. The skeleton config must
+# reference the container path; the fragments are written to the host path.
+platform_observability_targets_dir: /opt/spiritvpn/platform/observability/targets
+platform_prometheus_targets_container_dir: /etc/prometheus/targets
+# Public, reviewed supply-chain pin, updated through the normal pull-request
+# flow exactly like platform_vault_image. Not a secret.
+platform_prometheus_image: "docker.io/prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996"
+# Upstream prom/prometheus runs as uid 65534 (nobody) and creates lock and
+# chunk files in the TSDB directory at startup.
+platform_prometheus_uid: "65534"
+platform_prometheus_gid: "65534"
+# Loopback only. Scraping is outbound, so a routable listener buys nothing and
+# would expose fleet composition and traffic volumes; operators reach the UI
+# through an SSH tunnel to the management host. This also sidesteps the fact
+# that the hub holds one overlay address per environment while Prometheus can
+# bind exactly one.
+platform_prometheus_bind_address: 127.0.0.1
+platform_prometheus_port: 9090
+platform_prometheus_scrape_timeout_seconds: 10
+
+# One shared instance serves both environments, the way one Vault does.
+# Isolation is by write surface: each environment's control deployment writes
+# only its own file_sd fragments under targets/<environment>/.
+platform_observability_environments: [develop, prod]
+
+# Retention and the scrape interval are shared because the TSDB is shared:
+# Prometheus has no per-job retention. Both are asserted against each
+# environment's desired state by roles/control_observability, so a divergence
+# fails the deployment instead of silently ignoring desired state.
+platform_prometheus_retention_days: 30
+platform_prometheus_scrape_interval_seconds: 15
+
+# Adding a scraped service is a skeleton change, and therefore a deliberate,
+# reviewed platform deployment rather than a side effect of a fleet change.
+platform_observability_jobs:
+  - name: node-exporter
+    path: /metrics
+  - name: agent-metrics
+    path: /metrics
+  - name: backend-metrics
+    path: /metrics

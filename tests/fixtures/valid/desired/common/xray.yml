@@ -1,0 +1,11 @@
+schema_version: 1
+tags:
+  inbound: xi-vless
+  direct_outbound: direct
+  block_outbound: block
+  exit_outbound_prefix: xo-
+  probe_outbound_prefix: xp-
+default_outbound_tag: block
+access_log:
+  enabled: true
+  export_enabled: false

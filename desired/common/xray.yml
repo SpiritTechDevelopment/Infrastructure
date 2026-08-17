@@ -1,0 +1,17 @@
+schema_version: 1
+tags:
+  inbound: xi-vless
+  direct_outbound: direct
+  block_outbound: block
+  exit_outbound_prefix: xo-
+  probe_outbound_prefix: xp-
+default_outbound_tag: block
+access_log:
+  # The access log records the client address, the destination and the user
+  # that opened the connection. Data that is never written cannot leak, be
+  # shipped by a later configuration change, or be compelled out of us.
+  # Per-user volume accounting does not depend on it: the agent reads that
+  # from Xray's stats API. Turn this on through a reviewed override when a
+  # specific investigation needs it, so that the decision stays in history.
+  enabled: false
+  export_enabled: false

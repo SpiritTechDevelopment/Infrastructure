@@ -1,0 +1,113 @@
+---
+- name: Validate compiled WireGuard spoke inputs
+  ansible.builtin.assert:
+    that:
+      - bootstrap_wireguard_interface is match('^[a-zA-Z0-9_.-]{1,15}$')
+      - bootstrap_wireguard_address is match('^[0-9.]+/32$')
+      - bootstrap_wireguard_network is match('^[0-9.]+/16$')
+      - bootstrap_wireguard_hub_endpoint | length > 0
+      - "':' in bootstrap_wireguard_hub_endpoint"
+      - bootstrap_wireguard_hub_public_key is match('^[A-Za-z0-9+/]{43}=$')
+      - bootstrap_wireguard_hub_management_address is match('^[0-9.]+$')
+    fail_msg: >-
+      Bootstrap requires the management hub's public endpoint and public WireGuard key.
+      No private key may be supplied from the controller.
+
+- name: Install WireGuard tooling
+  ansible.builtin.apt:
+    name: [wireguard, wireguard-tools]
+    state: present
+    update_cache: true
+
+- name: Create protected WireGuard directory
+  ansible.builtin.file:
+    path: /etc/wireguard
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Inspect node-local WireGuard private key
+  ansible.builtin.stat:
+    path: "{{ bootstrap_wireguard_private_key_path }}"
+  register: _bootstrap_wireguard_private_key
+
+- name: Generate WireGuard keypair entirely on the node
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    wg genkey > {{ bootstrap_wireguard_private_key_path | quote }}
+    wg pubkey < {{ bootstrap_wireguard_private_key_path | quote }} > {{ bootstrap_wireguard_public_key_path | quote }}
+    chmod 0600 {{ bootstrap_wireguard_private_key_path | quote }}
+    chmod 0644 {{ bootstrap_wireguard_public_key_path | quote }}
+  args:
+    executable: /bin/bash
+  when: not _bootstrap_wireguard_private_key.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Reconcile public key from the node-local private key
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    wg pubkey < {{ bootstrap_wireguard_private_key_path | quote }} > {{ bootstrap_wireguard_public_key_path | quote }}
+    chmod 0644 {{ bootstrap_wireguard_public_key_path | quote }}
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: true
+
+- name: Read only the public WireGuard key
+  ansible.builtin.slurp:
+    src: "{{ bootstrap_wireguard_public_key_path }}"
+  register: _bootstrap_wireguard_public_key
+
+- name: Report public key for management-hub peer registration
+  ansible.builtin.debug:
+    msg:
+      status: PUBLIC_KEY_READY
+      instance_id: "{{ spiritvpn_node_plan.instance.id }}"
+      management_address: "{{ spiritvpn_node_plan.instance.management_address }}"
+      public_key: "{{ _bootstrap_wireguard_public_key.content | b64decode | trim }}"
+
+- name: Reconcile this node as a management-hub peer
+  ansible.builtin.command:
+    argv:
+      - "{{ bootstrap_wireguard_hub_peer_command }}"
+      - reconcile
+      - "{{ spiritvpn_node_plan.environment }}"
+      - "{{ spiritvpn_node_plan.instance.id }}"
+      - "{{ bootstrap_wireguard_address }}"
+      - "{{ _bootstrap_wireguard_public_key.content | b64decode | trim }}"
+  delegate_to: localhost
+  become: true
+  register: _bootstrap_wireguard_hub_peer
+  changed_when: "'changed' in _bootstrap_wireguard_hub_peer.stdout_lines"
+  no_log: true
+
+- name: Install node-local WireGuard config reconciler
+  ansible.builtin.template:
+    src: configure-wireguard.sh.j2
+    dest: "{{ bootstrap_wireguard_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Render WireGuard config without exporting its private key
+  ansible.builtin.command:
+    argv: ["{{ bootstrap_wireguard_script_path }}"]
+  register: _bootstrap_wireguard_configure
+  changed_when: "'changed' in _bootstrap_wireguard_configure.stdout_lines"
+  no_log: true
+
+- name: Enable and start management WireGuard
+  ansible.builtin.systemd_service:
+    name: "wg-quick@{{ bootstrap_wireguard_interface }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Require management hub reachability after peer registration
+  ansible.builtin.command:
+    argv: [ping, -c, "1", -W, "5", "{{ bootstrap_wireguard_hub_management_address }}"]
+  changed_when: false

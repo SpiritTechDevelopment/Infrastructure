@@ -1,0 +1,196 @@
+---
+- name: Validate the single compiled node-plan locator
+  ansible.builtin.assert:
+    that:
+      - spiritvpn_node_plan_file is defined
+      - spiritvpn_node_plan_file is match('^node-plans/[a-z0-9-]+[.]json$')
+      - inventory_dir is defined
+    fail_msg: "A generated inventory must provide one safe spiritvpn_node_plan_file per host."
+
+- name: Load the generated node plan on the controller
+  ansible.builtin.include_vars:
+    file: "{{ inventory_dir }}/{{ spiritvpn_node_plan_file }}"
+    name: spiritvpn_node_plan
+
+- name: Validate node-plan schema, version and inventory binding
+  ansible.builtin.assert:
+    that:
+      - spiritvpn_node_plan._notice == 'GENERATED — DO NOT EDIT'
+      - spiritvpn_node_plan.schema_version | int == 1
+      - spiritvpn_node_plan.environment in ['develop', 'prod']
+      - spiritvpn_node_plan.instance.id == inventory_hostname
+      - >-
+        ansible_host == (
+          spiritvpn_node_plan.instance.public_address
+          if (spiritvpn_connection_phase | default('configure')) == 'bootstrap'
+          else spiritvpn_node_plan.instance.management_address
+        )
+      - spiritvpn_node_plan.logical_node.role in ['entry', 'exit']
+      - spiritvpn_node_plan.instance.target_state in ['provisioning', 'candidate', 'serving', 'draining', 'retired']
+      - spiritvpn_node_plan.infrastructure.components.xray.digest is match('^sha256:[0-9a-f]{64}$')
+      - spiritvpn_node_plan.infrastructure.components.nginx_mask.digest is match('^sha256:[0-9a-f]{64}$')
+      - spiritvpn_node_plan.infrastructure.components.node_agent.digest is match('^sha256:[0-9a-f]{64}$')
+      - spiritvpn_node_plan.infrastructure.components.node_exporter.digest is match('^sha256:[0-9a-f]{64}$')
+      - spiritvpn_node_plan.logical_node.reality.private_key_ref is match('^secret://')
+      - spiritvpn_node_plan.logical_node.mask.certificate_ref is match('^secret://')
+      - spiritvpn_node_plan.logical_node.mask.private_key_ref is match('^secret://')
+    fail_msg: "Node plan is incomplete, unsupported, or does not belong to this inventory host."
+
+- name: Collect secret references required by this node
+  ansible.builtin.set_fact:
+    _spiritvpn_required_secret_refs: >-
+      {{ [
+           spiritvpn_node_plan.logical_node.reality.private_key_ref,
+           spiritvpn_node_plan.logical_node.mask.certificate_ref,
+           spiritvpn_node_plan.logical_node.mask.private_key_ref
+         ]
+         + (spiritvpn_node_plan.routing.bridges_as_entry
+            | map(attribute='service_credential_ref') | list)
+         + (spiritvpn_node_plan.routing.bridges_as_exit
+            | map(attribute='service_credential_ref') | list) }}
+
+- name: Require protected secret resolution before runtime mutation
+  ansible.builtin.assert:
+    that:
+      - item in spiritvpn_secret_values
+      - spiritvpn_secret_values[item] | string | length > 0
+    fail_msg: "Required secret reference was not resolved by the deployment adapter: {{ item }}"
+  loop: "{{ _spiritvpn_required_secret_refs | unique }}"
+  when: spiritvpn_require_runtime_secrets | bool
+  no_log: true
+
+- name: Map compiled non-secret values into component role inputs
+  ansible.builtin.set_fact:
+    node_role: "{{ spiritvpn_node_plan.logical_node.role }}"
+    deploy_mode: "{{ spiritvpn_deploy_mode }}"
+    common_manage_deploy_user: "{{ spiritvpn_manage_deploy_user }}"
+    common_authorized_keys: "{{ spiritvpn_operator_ssh_public_keys }}"
+    common_manage_sshd: true
+    common_manage_firewall: true
+    common_enable_fail2ban: true
+    common_manage_sysctl: true
+    common_enable_unattended_upgrades: true
+    common_enable_auditd: true
+    common_public_tcp_ports: ["{{ spiritvpn_node_plan.logical_node.public.port }}"]
+    common_public_udp_ports: ["{{ spiritvpn_node_plan.infrastructure.networking.management.listen_port }}"]
+    pki_agent_certificate_chain: >-
+      {{ spiritvpn_agent_certificate_chains.get(spiritvpn_node_plan.instance.id, '') }}
+    common_restricted_tcp_rules:
+      - ports: ["{{ spiritvpn_node_plan.infrastructure.networking.agent.port }}"]
+        cidrs: ["{{ spiritvpn_node_plan.instance.management_network }}"]
+        interface: "{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}"
+      # Prometheus scrapes from the management host over the same overlay. The
+      # listeners already bind only the overlay address; this rule keeps the
+      # firewall from being the single thing standing between /metrics and the
+      # internet if a bind address is ever loosened.
+      - ports:
+          - "{{ spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}"
+          - "{{ spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}"
+        cidrs: ["{{ spiritvpn_node_plan.instance.management_network }}"]
+        interface: "{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}"
+    common_fail2ban_ignoreip: >-
+      127.0.0.1/8 ::1 {{ spiritvpn_node_plan.instance.management_network }}
+    xray_image: >-
+      {{ spiritvpn_node_plan.infrastructure.components.xray.repository
+         ~ '@' ~ spiritvpn_node_plan.infrastructure.components.xray.digest }}
+    nginx_mask_image: >-
+      {{ spiritvpn_node_plan.infrastructure.components.nginx_mask.repository
+         ~ '@' ~ spiritvpn_node_plan.infrastructure.components.nginx_mask.digest }}
+    node_exporter_image: >-
+      {{ spiritvpn_node_plan.infrastructure.components.node_exporter.repository
+         ~ '@' ~ spiritvpn_node_plan.infrastructure.components.node_exporter.digest }}
+    node_agent_image: >-
+      {{ spiritvpn_node_plan.infrastructure.components.node_agent.repository
+         ~ '@' ~ spiritvpn_node_plan.infrastructure.components.node_agent.digest }}
+    node_agent_grpc_listen: "{{ spiritvpn_node_plan.instance.agent.endpoint }}"
+    node_agent_allowed_client_identities:
+      - >-
+        spiffe://spiritvpn/{{ spiritvpn_node_plan.environment }}/service/backend
+    node_agent_xray_api_address: 127.0.0.1:10085
+    node_agent_xray_inbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.inbound }}"
+    node_agent_local_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.direct_outbound }}"
+    node_agent_fallback_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.block_outbound }}"
+    public_port: "{{ spiritvpn_node_plan.logical_node.public.port }}"
+    xray_listen_port: "{{ spiritvpn_node_plan.logical_node.public.port }}"
+    xray_inbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.inbound }}"
+    xray_direct_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.direct_outbound }}"
+    xray_block_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.block_outbound }}"
+    xray_enable_api: true
+    xray_api_bind: 127.0.0.1
+    xray_metrics_enabled: true
+    xray_metrics_bind: 127.0.0.1
+    xray_metrics_port: "{{ spiritvpn_node_plan.infrastructure.observability.ports.xray_metrics }}"
+    # 'none' is the only value that disables the access log. An empty string
+    # sends it to stdout, which under the json-file driver means it keeps
+    # being written — just into the container log instead of the file.
+    xray_access_log: >-
+      {{ '/var/log/xray/access.log'
+         if spiritvpn_node_plan.infrastructure.xray.access_log.enabled | bool
+         else 'none' }}
+    xray_error_log: /var/log/xray/error.log
+    xray_manage_routing_via_agent: true
+    reality_server_names: ["{{ spiritvpn_node_plan.logical_node.public.server_name }}"]
+    reality_short_ids: ["{{ spiritvpn_node_plan.logical_node.reality.short_id }}"]
+    reality_private_key: >-
+      {{ spiritvpn_secret_values.get(
+           spiritvpn_node_plan.logical_node.reality.private_key_ref, '') }}
+    mask_server_names: ["{{ spiritvpn_node_plan.logical_node.public.server_name }}"]
+    mask_tls_certificate: >-
+      {{ spiritvpn_secret_values.get(
+           spiritvpn_node_plan.logical_node.mask.certificate_ref, '') }}
+    mask_tls_private_key: >-
+      {{ spiritvpn_secret_values.get(
+           spiritvpn_node_plan.logical_node.mask.private_key_ref, '') }}
+    # Metrics bind the management overlay, never loopback and never a wildcard:
+    # Prometheus runs on the management host, and node-exporter plus the agent
+    # expose fleet composition and traffic volumes that must not reach the
+    # public interface even if a firewall rule is later wrong.
+    node_exporter_bind_address: "{{ spiritvpn_node_plan.instance.management_address }}"
+    node_exporter_port: "{{ spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}"
+    node_agent_http_listen: >-
+      {{ spiritvpn_node_plan.instance.management_address
+         ~ ':' ~ spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}
+    node_limits_egress_enabled: "{{ spiritvpn_node_plan.instance.target_state != 'retired' }}"
+    node_limits_bandwidth_profile: "{{ spiritvpn_node_plan.instance.bandwidth.profile }}"
+    node_limits_port_capacity_mbps: "{{ spiritvpn_node_plan.instance.bandwidth.port_capacity_mbps }}"
+    node_limits_egress_limit_mbps: "{{ spiritvpn_node_plan.instance.bandwidth.egress_limit_mbps }}"
+    node_limits_qdisc_kind: "{{ spiritvpn_node_plan.instance.bandwidth.qdisc.kind }}"
+    node_limits_diffserv: "{{ spiritvpn_node_plan.instance.bandwidth.qdisc.diffserv }}"
+    node_limits_flow_isolation: "{{ spiritvpn_node_plan.instance.bandwidth.qdisc.flow_isolation }}"
+    node_limits_nat: "{{ spiritvpn_node_plan.instance.bandwidth.qdisc.nat }}"
+    node_limits_rtt: "{{ spiritvpn_node_plan.instance.bandwidth.qdisc.rtt }}"
+  no_log: true
+
+- name: Initialize compiled Xray infrastructure identities
+  ansible.builtin.set_fact:
+    entry_exits: []
+    xray_static_clients: []
+  no_log: true
+
+- name: Compile entry-to-exit Xray outbounds from the node plan
+  ansible.builtin.set_fact:
+    entry_exits: >-
+      {{ entry_exits + [{
+           'tag': item.egress_tag,
+           'address': item.target.address,
+           'port': item.target.port,
+           'uuid': spiritvpn_secret_values.get(item.service_credential_ref, ''),
+           'reality_sni': item.target.server_name,
+           'reality_password': item.target.reality_public_key,
+           'reality_short_id': item.target.short_id,
+           'fingerprint': item.target.fingerprint,
+           'flow': item.target.flow
+         }] }}
+  loop: "{{ spiritvpn_node_plan.routing.bridges_as_entry }}"
+  no_log: true
+
+- name: Compile bridge service clients for exit inbounds
+  ansible.builtin.set_fact:
+    xray_static_clients: >-
+      {{ xray_static_clients + [{
+           'id': spiritvpn_secret_values.get(item.service_credential_ref, ''),
+           'email': 'bridge-' ~ item.routing_key,
+           'flow': spiritvpn_node_plan.logical_node.public.flow
+         }] }}
+  loop: "{{ spiritvpn_node_plan.routing.bridges_as_exit }}"
+  no_log: true

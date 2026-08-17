@@ -1,0 +1,30 @@
+{{ ansible_managed | comment }}
+# Shared collector skeleton for every environment, deployed by the platform
+# contour beside Vault. It declares jobs and where their targets come from; it
+# never contains a target itself.
+#
+# Each environment's control deployment writes only
+# targets/<environment>/<job>.json. A malformed fragment leaves that one file's
+# previous targets in place and does not affect the other environment.
+global:
+  scrape_interval: {{ platform_prometheus_scrape_interval_seconds }}s
+  scrape_timeout: {{ platform_prometheus_scrape_timeout_seconds }}s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["{{ platform_prometheus_bind_address }}:{{ platform_prometheus_port }}"]
+        labels:
+          environment: management
+          node_role: control
+{% for environment in platform_observability_environments %}
+{% for job in platform_observability_jobs %}
+
+  - job_name: {{ environment }}/{{ job.name }}
+    metrics_path: {{ job.path }}
+    file_sd_configs:
+      # Container path: the host directory is bind-mounted read-only here.
+      - files:
+          - {{ platform_prometheus_targets_container_dir }}/{{ environment }}/{{ job.name }}.json
+{% endfor %}
+{% endfor %}

@@ -1,0 +1,174 @@
+---
+- name: Validate compiled machine identity
+  ansible.builtin.assert:
+    that:
+      - pki_agent_identity == 'spiffe://spiritvpn/' ~ spiritvpn_node_plan.environment ~ '/instance/' ~ spiritvpn_node_plan.instance.id
+    fail_msg: "Machine certificate identity must be the compiled environment-scoped SPIFFE identity."
+
+- name: Create protected agent PKI directory
+  ansible.builtin.file:
+    path: "{{ pki_agent_directory }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Inspect node-local agent private key
+  ansible.builtin.stat:
+    path: "{{ pki_agent_private_key_path }}"
+  register: _pki_agent_private_key
+
+- name: Generate agent private key entirely on the node
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - genpkey
+      - -algorithm
+      - EC
+      - -pkeyopt
+      - ec_paramgen_curve:P-256
+      - -out
+      - "{{ pki_agent_private_key_path }}"
+  when: not _pki_agent_private_key.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Protect node-local agent private key
+  ansible.builtin.file:
+    path: "{{ pki_agent_private_key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Inspect agent CSR
+  ansible.builtin.stat:
+    path: "{{ pki_agent_csr_path }}"
+  register: _pki_agent_csr
+
+- name: Generate CSR locally from the non-exported private key
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -new
+      - -key
+      - "{{ pki_agent_private_key_path }}"
+      - -out
+      - "{{ pki_agent_csr_path }}"
+      - -subj
+      - "/CN={{ spiritvpn_node_plan.instance.id }}"
+      - -addext
+      - "subjectAltName=URI:{{ pki_agent_identity }}"
+  when: not _pki_agent_csr.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Verify CSR signature
+  ansible.builtin.command:
+    argv: [openssl, req, -in, "{{ pki_agent_csr_path }}", -verify, -noout]
+  changed_when: false
+
+- name: Inspect CSR identity
+  ansible.builtin.command:
+    argv: [openssl, req, -in, "{{ pki_agent_csr_path }}", -noout, -text]
+  register: _pki_agent_csr_text
+  changed_when: false
+
+- name: Require expected environment-scoped identity in CSR
+  ansible.builtin.assert:
+    that:
+      - "('URI:' ~ pki_agent_identity) in _pki_agent_csr_text.stdout"
+    fail_msg: "Existing CSR does not contain the compiled machine identity."
+
+- name: Read public CSR for the CA adapter
+  ansible.builtin.slurp:
+    src: "{{ pki_agent_csr_path }}"
+  register: _pki_agent_csr_public
+
+- name: Report CSR readiness without exposing the private key
+  ansible.builtin.debug:
+    msg:
+      status: CSR_READY
+      instance_id: "{{ spiritvpn_node_plan.instance.id }}"
+      certificate_identity: "{{ pki_agent_identity }}"
+      csr_pem: "{{ _pki_agent_csr_public.content | b64decode }}"
+  when: pki_agent_certificate_chain | length == 0
+
+- name: Install returned certificate chain
+  ansible.builtin.copy:
+    content: "{{ pki_agent_certificate_chain }}"
+    dest: "{{ pki_agent_certificate_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: pki_agent_certificate_chain | length > 0
+  no_log: true
+  diff: false
+
+- name: Inspect installed certificate chain
+  ansible.builtin.stat:
+    path: "{{ pki_agent_certificate_path }}"
+  register: _pki_agent_certificate
+
+- name: Require a returned certificate chain when requested
+  ansible.builtin.assert:
+    that:
+      - _pki_agent_certificate.stat.exists
+    fail_msg: >-
+      CSR is ready, but no certificate chain has been returned by the CA adapter.
+      Resume bootstrap with pki_agent_certificate_chain after signing the reported CSR.
+  when: pki_agent_require_certificate | bool
+
+- name: Read installed certificate identity and validity
+  ansible.builtin.command:
+    argv: [openssl, x509, -in, "{{ pki_agent_certificate_path }}", -noout, -text]
+  register: _pki_agent_certificate_text
+  changed_when: false
+  when: _pki_agent_certificate.stat.exists
+
+- name: Require correct identity in installed certificate
+  ansible.builtin.assert:
+    that:
+      - "('URI:' ~ pki_agent_identity) in _pki_agent_certificate_text.stdout"
+    fail_msg: "Installed machine certificate has the wrong identity."
+  when: _pki_agent_certificate.stat.exists
+
+- name: Require sufficient remaining certificate lifetime
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ pki_agent_certificate_path }}"
+      - -noout
+      - -checkend
+      - "{{ pki_agent_minimum_validity_seconds | string }}"
+  changed_when: false
+  when: _pki_agent_certificate.stat.exists
+
+- name: Install certificate renewal hook
+  ansible.builtin.template:
+    src: renew-agent-certificate.sh.j2
+    dest: "{{ pki_agent_renewal_script_path }}"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install certificate renewal systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - "{{ pki_agent_renewal_service }}"
+    - "{{ pki_agent_renewal_timer }}"
+  register: _pki_agent_renewal_units
+
+- name: Enable local certificate renewal timer
+  ansible.builtin.systemd_service:
+    name: "{{ pki_agent_renewal_timer }}"
+    enabled: true
+    state: started
+    daemon_reload: "{{ _pki_agent_renewal_units.changed }}"

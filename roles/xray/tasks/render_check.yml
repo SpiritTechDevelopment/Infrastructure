@@ -1,8 +1,0 @@
----
-- name: Render Xray configuration for offline validation
-  ansible.builtin.template:
-    src: config.json.j2
-    dest: "{{ playbook_dir }}/../_render/{{ inventory_hostname }}.json"
-    mode: "0600"
-  no_log: true
-  diff: false

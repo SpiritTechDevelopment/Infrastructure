@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/observability.schema.json",
+  "title": "Common observability settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "retention", "ports", "scrape_interval_seconds", "probe"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operations_days", "activity_days"],
+      "properties": {
+        "operations_days": {"type": "integer", "minimum": 1},
+        "activity_days": {"type": "integer", "minimum": 1}
+      }
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_exporter", "xray_metrics", "agent_metrics"],
+      "properties": {
+        "node_exporter": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "xray_metrics": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "agent_metrics": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    },
+    "scrape_interval_seconds": {"type": "integer", "minimum": 1},
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interval_seconds", "timeout_seconds"],
+      "properties": {
+        "interval_seconds": {"type": "integer", "minimum": 1},
+        "timeout_seconds": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

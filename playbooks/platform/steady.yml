@@ -1,0 +1,49 @@
+---
+- name: Reconcile the management foundation from a reviewed Git commit
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  vars:
+    deploy_mode: hardened
+    common_manage_deploy_user: true
+    common_authorized_keys: "{{ platform_operator_ssh_public_keys }}"
+    common_manage_sshd: true
+    common_manage_firewall: true
+    common_enable_fail2ban: true
+    common_manage_sysctl: true
+    common_enable_unattended_upgrades: true
+    common_enable_auditd: true
+    common_public_tcp_ports: []
+    common_public_udp_ports: ["{{ platform_wireguard_listen_port }}"]
+    common_trusted_interfaces: ["{{ platform_wireguard_interface }}"]
+    ssh_allowed_cidrs: "{{ platform_ssh_allowed_cidrs }}"
+    common_fail2ban_ignoreip: >-
+      127.0.0.1/8 ::1 {{ platform_fail2ban_ignore_cidrs | default([]) | join(' ') }}
+  pre_tasks:
+    - name: Require the persisted bootstrap contract
+      ansible.builtin.assert:
+        that:
+          - platform_operator_ssh_public_keys | default([]) | length > 0
+          - platform_github_ssh_keys | default([]) | length > 0
+          - platform_ssh_allowed_cidrs | default([]) | length > 0
+          - platform_wireguard_operator_peers | default([]) | length > 0
+          - platform_wireguard_hub_addresses | default({}) | length > 0
+          - platform_wireguard_public_endpoint is match('^[A-Za-z0-9.:[\]-]+:[0-9]{1,5}$')
+        fail_msg: "The protected management runtime configuration is incomplete."
+  roles:
+    - role: platform_wireguard
+    - role: docker
+    - role: common
+    - role: platform_vault
+    - role: platform_executor
+    # One shared collector for every environment, like one shared Vault.
+    # Isolation is by write surface: each environment's control deployment
+    # writes only its own file_sd fragments.
+    - role: platform_observability
+
+- name: Verify Vault after management reconciliation
+  ansible.builtin.import_playbook: readiness.yml
+  vars:
+    platform_readiness_hosts: localhost

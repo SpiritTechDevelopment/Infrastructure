@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 3 ]]; then
+  printf '%s\n' 'invalid control deployment invocation' >&2
+  exit 64
+fi
+environment="$1"
+source_git_sha="$2"
+mode="$3"
+
+[[ "$environment" =~ ^(develop|prod)$ ]] || exit 64
+[[ "$source_git_sha" =~ ^[0-9a-f]{40}$ ]] || exit 64
+[[ "$mode" =~ ^(check|apply)$ ]] || exit 64
+
+umask 077
+executor_dir="{{ platform_executor_dir }}"
+config_dir="{{ platform_executor_config_dir }}/$environment"
+repository="$executor_dir/control-repository.git"
+bundle="$(mktemp "$executor_dir/incoming/control-$environment.XXXXXXXX.bundle")"
+worktree="$(mktemp -d "$executor_dir/incoming/control-$environment.XXXXXXXX.worktree")"
+build_root="$(mktemp -d "$executor_dir/incoming/control-$environment.XXXXXXXX.build")"
+build_dir="$build_root/rendered"
+secrets_file="$(mktemp "$executor_dir/incoming/control-$environment.XXXXXXXX.secrets.yml")"
+cleanup() {
+  rm -f -- "$bundle" "$secrets_file"
+  rm -rf -- "$worktree" "$build_root"
+}
+trap cleanup EXIT
+
+exec 9>"$executor_dir/$environment.lock"
+if ! flock -n 9; then
+  printf '%s\n' "another deployment is already active for $environment" >&2
+  exit 75
+fi
+
+# The ceiling bounds the incoming bundle and nothing else. RLIMIT_FSIZE is
+# inherited by every later process, so leaving it set would also cap the
+# pre-migration pg_dump and kill it with SIGXFSZ once the database outgrows
+# the limit — mid-deployment, right before migrations.
+(
+  ulimit -f "{{ platform_executor_bundle_limit_kib }}"
+  dd of="$bundle" bs=64K status=none
+)
+test -s "$bundle"
+
+if [[ ! -d "$repository" ]]; then
+  git init --bare "$repository" >/dev/null
+fi
+git --git-dir="$repository" bundle verify "$bundle" >/dev/null
+
+source_ref=refs/spiritvpn/control-source
+bundle_head="$(git bundle list-heads "$bundle")"
+if test -z "$bundle_head" || test "$(printf '%s\n' "$bundle_head" | wc -l)" -ne 1; then
+  printf '%s\n' 'control bundle must contain exactly one ref' >&2
+  exit 65
+fi
+read -r head_sha head_ref extra <<< "$bundle_head"
+test -z "${extra:-}" || { printf '%s\n' 'invalid control Git bundle head' >&2; exit 65; }
+test "$head_ref" = "$source_ref" || { printf '%s\n' 'unexpected control Git bundle ref' >&2; exit 65; }
+test "$head_sha" = "$source_git_sha" || { printf '%s\n' 'control bundle SHA mismatch' >&2; exit 65; }
+
+git --git-dir="$repository" fetch --no-tags "$bundle" "+$source_ref:$source_ref" >/dev/null
+test "$(git --git-dir="$repository" rev-parse "$source_ref^{commit}")" = "$source_git_sha"
+git clone --no-checkout --shared "$repository" "$worktree" >/dev/null
+git -C "$worktree" checkout --detach "$source_git_sha" >/dev/null
+test -z "$(git -C "$worktree" status --short)"
+
+for required in control.yml vault-approle/role-id vault-approle/secret-id; do
+  test -s "$config_dir/$required" || {
+    printf '%s\n' "missing protected control executor input: $config_dir/$required" >&2
+    exit 66
+  }
+done
+
+python="{{ platform_executor_dir }}/venv/bin/python"
+export PATH="{{ platform_executor_dir }}/venv/bin:$PATH"
+cd "$worktree"
+PYTHONPATH="$worktree" "$python" -m fleetctl.cli \
+  --root "$worktree" render \
+  --environment "$environment" \
+  --output "$build_dir"
+test -s "$build_dir/control-plan.json" || {
+  printf '%s\n' "$environment has no control desired state" >&2
+  exit 66
+}
+test -s "$build_dir/monitoring-targets.json" || {
+  printf '%s\n' "$environment rendered no monitoring targets" >&2
+  exit 66
+}
+
+"$python" "$worktree/scripts/vault-secret-resolver.py" \
+  --root "$worktree" \
+  --environment "$environment" \
+  --scope control \
+  --credentials-dir "$config_dir/vault-approle" \
+  --compiled-secrets "$secrets_file" \
+  --vault-address "https://127.0.0.1:{{ platform_vault_api_port }}" \
+  --vault-ca "{{ platform_vault_dir }}/tls/vault-ca.crt"
+chmod 0600 "$secrets_file"
+
+arguments=(
+  -i localhost,
+  --connection local
+  "$worktree/playbooks/control/deploy.yml"
+  --extra-vars "control_plan_file=$build_dir/control-plan.json"
+  --extra-vars "monitoring_targets_file=$build_dir/monitoring-targets.json"
+  --extra-vars "@$secrets_file"
+  --extra-vars "@$config_dir/control.yml"
+)
+if test "$mode" = check; then
+  arguments+=(--check --diff)
+fi
+
+PYTHONPATH="$worktree" "{{ platform_executor_dir }}/venv/bin/ansible-playbook" "${arguments[@]}"
+
+if test "$mode" = apply; then
+  git --git-dir="$repository" update-ref \
+    "refs/control-deployments/$environment" "$source_git_sha"
+fi

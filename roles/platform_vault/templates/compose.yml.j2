@@ -1,0 +1,20 @@
+name: spiritvpn-platform-vault
+services:
+  vault:
+    image: "{{ platform_vault_image }}"
+    user: "100:1000"
+    restart: unless-stopped
+    command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+    environment:
+      SKIP_SETCAP: "true"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:{{ platform_vault_api_port }}:{{ platform_vault_api_port }}"
+      - "127.0.0.1:{{ platform_vault_cluster_port }}:{{ platform_vault_cluster_port }}"
+    volumes:
+      - ./config:/vault/config:ro
+      - ./tls:/vault/tls:ro
+      - ./data:/vault/data
+      - ./audit:/vault/audit
+      - ./snapshots:/vault/snapshots

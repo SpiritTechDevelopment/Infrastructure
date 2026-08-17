@@ -1,0 +1,12 @@
+[Interface]
+Address = {{ platform_wireguard_addresses | join(', ') }}
+ListenPort = {{ platform_wireguard_listen_port }}
+MTU = {{ platform_wireguard_mtu }}
+
+{% for peer in platform_wireguard_operator_peers %}
+[Peer]
+# operator:{{ peer.id }}
+PublicKey = {{ peer.public_key }}
+AllowedIPs = {{ peer.allowed_ips | join(', ') }}
+
+{% endfor %}

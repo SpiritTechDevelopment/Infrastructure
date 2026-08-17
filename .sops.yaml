@@ -1,17 +1,7 @@
-# SOPS config. Files matching path_regex are encrypted at rest; only the fields
-# whose KEY matches encrypted_regex are turned to ciphertext (structure stays
-# readable/diffable). Decryptable only by a listed `age` recipient — add each
-# operator's + the deploy machine's age PUBLIC key here, then `sops updatekeys`.
-#
-# NOTE: encrypted_regex is a single-line regex on purpose — a folded (>-) scalar
-# would fold newlines into spaces and silently break the alternation.
+# Infrastructure v1 keeps the one-host platform bootstrap inputs in Git only as
+# ciphertext. The age recipient is public; matching private identities belong
+# to reviewed operators and recovery storage, never to this repository.
 creation_rules:
-  # Inventory: WHOLE-FILE (binary) encryption. The host IPs appear in values AND in
-  # comments, so field-level encryption would leak them — encrypt the entire file.
-  # Preserves comments on decrypt. Materialized to inventory.yml by `make decrypt`.
-  # (This rule must precede the generic one; first match wins.)
-  - path_regex: inventories/.*/inventory\.sops\.ya?ml$
-    age: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax
-  - path_regex: inventories/.*\.sops\.ya?ml$
-    encrypted_regex: '^(ansible_host|address|.*uuid|id|reality_private_key|reality_public_key|reality_password|reality_short_ids|.*_secret|.*_token|.*_password|.*_private_key|xray_static_clients|entry_exits)$'
+  - path_regex: ^inventories/bootstrap/platform\.sops\.ya?ml$
+    encrypted_regex: '^(inventory|known_hosts|vars)$'
     age: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax

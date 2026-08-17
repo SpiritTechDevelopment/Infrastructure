@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/limits.schema.json",
+  "title": "Common node limits",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bandwidth_profiles", "degradation_threshold_percent"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "bandwidth_profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z0-9-]+$"},
+      "additionalProperties": {"$ref": "#/$defs/bandwidth_profile"}
+    },
+    "degradation_threshold_percent": {
+      "oneOf": [
+        {"type": "integer", "minimum": 1, "maximum": 100},
+        {"type": "null"}
+      ]
+    }
+  },
+  "$defs": {
+    "bandwidth_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port_capacity_mbps", "egress_utilization_percent", "qdisc"],
+      "properties": {
+        "port_capacity_mbps": {"type": "integer", "minimum": 1},
+        "egress_utilization_percent": {"type": "integer", "minimum": 85, "maximum": 90},
+        "qdisc": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "diffserv", "entry_flow_isolation", "exit_flow_isolation", "nat", "rtt"],
+          "properties": {
+            "kind": {"const": "cake"},
+            "diffserv": {"const": "besteffort"},
+            "entry_flow_isolation": {"const": "dual-dsthost"},
+            "exit_flow_isolation": {"const": "flows"},
+            "nat": {"const": false},
+            "rtt": {"const": "internet"}
+          }
+        }
+      }
+    }
+  }
+}

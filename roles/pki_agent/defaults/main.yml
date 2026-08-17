@@ -1,0 +1,12 @@
+---
+pki_agent_directory: /var/lib/spiritvpn/pki
+pki_agent_private_key_path: "{{ pki_agent_directory }}/agent.key"
+pki_agent_csr_path: "{{ pki_agent_directory }}/agent.csr"
+pki_agent_certificate_path: "{{ pki_agent_directory }}/agent-chain.pem"
+pki_agent_identity: "{{ spiritvpn_node_plan.instance.agent.certificate_identity }}"
+pki_agent_certificate_chain: ""
+pki_agent_require_certificate: true
+pki_agent_minimum_validity_seconds: 604800
+pki_agent_renewal_script_path: /usr/local/sbin/spiritvpn-renew-agent-certificate
+pki_agent_renewal_service: spiritvpn-agent-certificate-renewal.service
+pki_agent_renewal_timer: spiritvpn-agent-certificate-renewal.timer

@@ -1,0 +1,256 @@
+---
+- name: Run fail-closed read-only runtime readiness checks
+  hosts: spiritvpn_fleet
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars:
+    spiritvpn_require_runtime_secrets: false
+    spiritvpn_direct_smoke_argv: []
+    spiritvpn_entry_exit_smoke_argv: []
+    spiritvpn_smoke_timeout_seconds: 30
+  pre_tasks:
+    - name: Load compiled readiness expectations
+      ansible.builtin.include_role:
+        name: compiled_node_plan
+  tasks:
+    - name: Require management address on the expected interface
+      ansible.builtin.command:
+        argv:
+          - ip
+          - -4
+          - address
+          - show
+          - dev
+          - "{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}"
+      register: _readiness_management_address
+      changed_when: false
+
+    - name: Validate management address reachability precondition
+      ansible.builtin.assert:
+        that:
+          - spiritvpn_node_plan.instance.management_address in _readiness_management_address.stdout
+
+    - name: Require expected systemd units to be active
+      ansible.builtin.command:
+        argv: [systemctl, is-active, "{{ item }}"]
+      loop:
+        - docker.service
+        - "wg-quick@{{ spiritvpn_node_plan.infrastructure.networking.management.interface }}.service"
+        - spiritvpn-egress-qdisc.service
+        - spiritvpn-agent-certificate-renewal.timer
+      changed_when: false
+
+    - name: Validate Xray config syntax in the pinned runtime image
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --user
+          - "0:0"
+          - -v
+          - /opt/vpn/xray/config.json:/config.json:ro
+          - "{{ xray_image }}"
+          - run
+          - -test
+          - -config
+          - /config.json
+      changed_when: false
+
+    - name: Require Xray container to be running
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/vpn/compose.yml, ps, --status, running, --services, xray]
+      register: _readiness_xray_service
+      changed_when: false
+
+    - name: Validate Xray running result
+      ansible.builtin.assert:
+        that:
+          - "'xray' in _readiness_xray_service.stdout_lines"
+
+    - name: Require NodeAgent container to be running
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/vpn/compose.yml, ps, --status, running, --services, node-agent]
+      register: _readiness_node_agent_service
+      changed_when: false
+
+    - name: Validate NodeAgent running result
+      ansible.builtin.assert:
+        that:
+          - "'node-agent' in _readiness_node_agent_service.stdout_lines"
+
+    - name: Require local NodeAgent readiness
+      ansible.builtin.uri:
+        url: >-
+          http://{{ spiritvpn_node_plan.instance.management_address }}:{{
+          spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}/health/ready
+        method: GET
+        status_code: 200
+        return_content: false
+        timeout: "{{ spiritvpn_node_plan.infrastructure.observability.probe.timeout_seconds }}"
+      changed_when: false
+
+    - name: Read listening TCP sockets
+      ansible.builtin.command:
+        argv: [ss, -H, -lnt]
+      register: _readiness_listeners
+      changed_when: false
+
+    - name: Require public data port listener
+      ansible.builtin.assert:
+        that:
+          - "(':' ~ (spiritvpn_node_plan.logical_node.public.port | string)) in _readiness_listeners.stdout"
+          - "(':' ~ (spiritvpn_node_plan.infrastructure.networking.agent.port | string)) in _readiness_listeners.stdout"
+
+    # A wildcard bind would serve node-exporter and the agent's /metrics on the
+    # public interface. Both disclose fleet composition and traffic volumes, so
+    # readiness treats a wildcard as a failure rather than a warning.
+    - name: Require metrics listeners bound to the management overlay only
+      ansible.builtin.assert:
+        that:
+          - >-
+            (spiritvpn_node_plan.instance.management_address ~ ':' ~ (item | string))
+            in _readiness_listeners.stdout
+          - "('0.0.0.0:' ~ (item | string)) not in _readiness_listeners.stdout"
+          - "('*:' ~ (item | string)) not in _readiness_listeners.stdout"
+        fail_msg: >-
+          Metrics port {{ item }} is missing or bound outside the management
+          overlay.
+      loop:
+        - "{{ spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}"
+        - "{{ spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}"
+
+    - name: Read active CAKE qdisc
+      ansible.builtin.command:
+        argv: [tc, -s, qdisc, show, dev, "{{ ansible_default_ipv4.interface }}", root]
+      register: _readiness_cake
+      changed_when: false
+
+    - name: Require compiled CAKE policy
+      ansible.builtin.assert:
+        that:
+          - "'qdisc cake ' in _readiness_cake.stdout"
+          - "('bandwidth ' ~ (spiritvpn_node_plan.instance.bandwidth.egress_limit_mbps | string) ~ 'Mbit') in _readiness_cake.stdout"
+          - spiritvpn_node_plan.instance.bandwidth.qdisc.flow_isolation in _readiness_cake.stdout
+
+    - name: Read current conntrack occupancy
+      ansible.builtin.command:
+        argv: [cat, /proc/sys/net/netfilter/nf_conntrack_count]
+      register: _readiness_conntrack_count
+      changed_when: false
+      failed_when: false
+
+    - name: Read current conntrack capacity
+      ansible.builtin.command:
+        argv: [cat, /proc/sys/net/netfilter/nf_conntrack_max]
+      register: _readiness_conntrack_max
+      changed_when: false
+      failed_when: false
+
+    - name: Resolve the running Xray container
+      ansible.builtin.command:
+        argv: [docker, compose, -f, /opt/vpn/compose.yml, ps, -q, xray]
+      register: _readiness_xray_container
+      changed_when: false
+
+    - name: Resolve the host PID of Xray
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{{ '{{' }}.State.Pid{{ '}}' }}"
+          - "{{ _readiness_xray_container.stdout }}"
+      register: _readiness_xray_pid_result
+      changed_when: false
+
+    - name: Record the host PID of Xray
+      ansible.builtin.set_fact:
+        _readiness_xray_pid: "{{ _readiness_xray_pid_result.stdout | int }}"
+
+    - name: Count open Xray file descriptors
+      ansible.builtin.command:
+        argv: [ls, -1, "/proc/{{ _readiness_xray_pid }}/fd"]
+      register: _readiness_xray_fds
+      changed_when: false
+
+    - name: Read Xray process limits
+      ansible.builtin.command:
+        argv: [cat, "/proc/{{ _readiness_xray_pid }}/limits"]
+      register: _readiness_xray_limits
+      changed_when: false
+
+    - name: Read Xray CPU, memory, and thread snapshot
+      ansible.builtin.command:
+        argv: [ps, -p, "{{ _readiness_xray_pid }}", -o, "%cpu=", -o, "%mem=", -o, "nlwp="]
+      register: _readiness_xray_process
+      changed_when: false
+
+    - name: Report read-only node capacity diagnostics
+      ansible.builtin.debug:
+        msg:
+          - "CAKE: {{ _readiness_cake.stdout }}"
+          - >-
+            conntrack: {{ _readiness_conntrack_count.stdout | default('unavailable', true) }} /
+            {{ _readiness_conntrack_max.stdout | default('unavailable', true) }}
+          - "Xray open file descriptors: {{ _readiness_xray_fds.stdout_lines | length }}"
+          - >-
+            Xray {{ _readiness_xray_limits.stdout_lines
+              | select('match', '^Max open files') | first
+              | default('Max open files unavailable') }}
+          - "Xray process snapshot (%CPU %MEM threads): {{ _readiness_xray_process.stdout | trim }}"
+
+    - name: Require node exporter metrics response
+      ansible.builtin.uri:
+        url: >-
+          http://{{ spiritvpn_node_plan.instance.management_address }}:{{
+          spiritvpn_node_plan.infrastructure.observability.ports.node_exporter }}/metrics
+        method: GET
+        status_code: 200
+        return_content: false
+        timeout: "{{ spiritvpn_node_plan.infrastructure.observability.probe.timeout_seconds }}"
+      changed_when: false
+
+    - name: Require valid machine certificate lifetime
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, /var/lib/spiritvpn/pki/agent-chain.pem, -noout, -checkend, "604800"]
+      changed_when: false
+
+    - name: Read machine certificate identity
+      ansible.builtin.command:
+        argv: [openssl, x509, -in, /var/lib/spiritvpn/pki/agent-chain.pem, -noout, -text]
+      register: _readiness_certificate
+      changed_when: false
+
+    - name: Require compiled machine identity
+      ansible.builtin.assert:
+        that:
+          - "('URI:' ~ spiritvpn_node_plan.instance.agent.certificate_identity) in _readiness_certificate.stdout"
+
+    - name: Require direct exit smoke adapter
+      ansible.builtin.assert:
+        that:
+          - spiritvpn_direct_smoke_argv | length > 0
+        fail_msg: "A read-only direct exit smoke argv adapter is required; absence or timeout is failure."
+      when: spiritvpn_node_plan.logical_node.role == 'exit'
+
+    - name: Run direct exit smoke
+      ansible.builtin.command:
+        argv: "{{ ['timeout', spiritvpn_smoke_timeout_seconds | string] + spiritvpn_direct_smoke_argv }}"
+      changed_when: false
+      when: spiritvpn_node_plan.logical_node.role == 'exit'
+
+    - name: Require entry-to-exit smoke adapter
+      ansible.builtin.assert:
+        that:
+          - spiritvpn_entry_exit_smoke_argv | length > 0
+        fail_msg: "An entry-to-exit smoke argv adapter is required when compiled bridges exist."
+      when: spiritvpn_node_plan.routing.bridges_as_entry | length > 0
+
+    - name: Run entry-to-exit smoke interface
+      ansible.builtin.command:
+        argv: "{{ ['timeout', spiritvpn_smoke_timeout_seconds | string] + spiritvpn_entry_exit_smoke_argv }}"
+      changed_when: false
+      when: spiritvpn_node_plan.routing.bridges_as_entry | length > 0

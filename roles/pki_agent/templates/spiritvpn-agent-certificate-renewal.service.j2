@@ -1,0 +1,6 @@
+[Unit]
+Description=Check SpiritVPN agent certificate renewal requirement
+
+[Service]
+Type=oneshot
+ExecStart={{ pki_agent_renewal_script_path }}

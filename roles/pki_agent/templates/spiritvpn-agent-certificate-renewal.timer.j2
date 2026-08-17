@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily SpiritVPN agent certificate renewal check
+
+[Timer]
+OnBootSec=15m
+OnUnitActiveSec=24h
+Persistent=true
+RandomizedDelaySec=30m
+
+[Install]
+WantedBy=timers.target

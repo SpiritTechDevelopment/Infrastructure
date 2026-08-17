@@ -1,0 +1,20 @@
+---
+- name: Configure SpiritVPN nodes only from compiled artifacts
+  hosts: spiritvpn_fleet
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Load and validate the compiled node plan before mutation
+      ansible.builtin.include_role:
+        name: compiled_node_plan
+  roles:
+    - role: common
+    - role: docker
+    - role: node_limits
+    - role: xray
+    - role: nginx_mask
+    - role: node_exporter
+    - role: node_agent
+    - role: compiled_runtime

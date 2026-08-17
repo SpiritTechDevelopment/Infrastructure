@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spiritvpn-fleetctl"
+version = "0.1.0"
+description = "Offline desired-state compiler and validator for SpiritVPN infrastructure"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6,<7",
+  "jsonschema>=4.18,<5",
+]
+
+[project.scripts]
+fleetctl = "fleetctl.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["fleetctl*"]

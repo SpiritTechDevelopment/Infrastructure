@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+interface='{{ node_limits_resolved_egress_interface }}'
+bandwidth='{{ node_limits_egress_limit_mbps }}Mbit'
+diffserv='{{ node_limits_diffserv }}'
+isolation='{{ node_limits_flow_isolation }}'
+nat_mode='{{ "nat" if (node_limits_nat | bool) else "nonat" }}'
+rtt='{{ node_limits_rtt }}'
+
+modprobe sch_cake
+current="$(tc qdisc show dev "$interface" root)"
+if printf '%s\n' "$current" | grep -Fq 'qdisc cake ' \
+  && printf '%s\n' "$current" | grep -Fq "bandwidth $bandwidth" \
+  && printf '%s\n' "$current" | grep -Fq "$diffserv" \
+  && printf '%s\n' "$current" | grep -Fq "$isolation" \
+  && printf '%s\n' "$current" | grep -Fq "$nat_mode" \
+  && printf '%s\n' "$current" | grep -Fq 'rtt 100.0ms'; then
+  echo unchanged
+  exit 0
+fi
+
+tc qdisc replace dev "$interface" root cake \
+  bandwidth "$bandwidth" \
+  "$diffserv" \
+  "$isolation" \
+  "$nat_mode" \
+  "$rtt"
+echo changed

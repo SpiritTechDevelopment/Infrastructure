@@ -1,0 +1,45 @@
+---
+- name: Ensure compiled runtime and local log directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ vpn_stack_dir }}", mode: "0755"}
+    - {path: /var/log/xray, mode: "0750"}
+
+- name: Render compiled node runtime definition
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ vpn_stack_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  register: _compiled_runtime_definition
+
+- name: Apply compiled node runtime
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ vpn_stack_dir }}/compose.yml"
+      - up
+      - -d
+      - --remove-orphans
+      - --wait
+      - --wait-timeout
+      - "120"
+      - --pull
+      - "{{ compiled_runtime_pull_policy }}"
+  register: _compiled_runtime_apply
+  changed_when: >-
+    _compiled_runtime_definition.changed
+    or node_agent_runtime_inputs_changed | bool
+    or 'Created' in _compiled_runtime_apply.stderr
+    or 'Started' in _compiled_runtime_apply.stderr
+    or 'Recreated' in _compiled_runtime_apply.stderr
+    or 'Pulled' in _compiled_runtime_apply.stderr
+  when: not ansible_check_mode

@@ -1,0 +1,11 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: Environment
+metadata:
+  id: prod
+spec:
+  dns_zone: prod.example.invalid
+  management_network: 10.82.0.0/16
+  backend_endpoint: backend.prod.internal:9443
+  secret_store:
+    kv: kv/prod
+    pki: pki/prod

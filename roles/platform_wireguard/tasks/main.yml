@@ -1,0 +1,139 @@
+---
+- name: Validate management WireGuard inputs
+  ansible.builtin.assert:
+    that:
+      - platform_wireguard_interface is match('^[A-Za-z0-9_.-]{1,15}$')
+      - platform_wireguard_addresses | length > 0
+      - platform_wireguard_addresses | select('match', '^[0-9.]+/[0-9]{1,2}$') | list | length == platform_wireguard_addresses | length
+      - platform_wireguard_environment_networks.keys() | sort == ['develop', 'prod']
+      - platform_wireguard_environment_networks.values() | select('match', '^[0-9.]+/16$') | list | length == 2
+      - platform_wireguard_listen_port | int >= 1
+      - platform_wireguard_listen_port | int <= 65535
+      - platform_wireguard_mtu | int >= 1280
+      - platform_wireguard_mtu | int <= 9000
+      - platform_wireguard_operator_peers | length > 0
+    fail_msg: >-
+      Clean-host bootstrap requires explicit management addresses and at least
+      one reviewed operator WireGuard public peer.
+
+- name: Validate management WireGuard operator peers
+  ansible.builtin.assert:
+    that:
+      - item.id is match('^[a-z0-9][a-z0-9-]{0,62}$')
+      - item.public_key is match('^[A-Za-z0-9+/]{43}=$')
+      - item.allowed_ips | length > 0
+      - item.allowed_ips | select('match', '^[0-9.]+/32$') | list | length == item.allowed_ips | length
+    fail_msg: "Each operator peer requires a stable ID, public key and /32 addresses."
+  loop: "{{ platform_wireguard_operator_peers }}"
+  loop_control:
+    label: "{{ item.id | default('invalid-peer') }}"
+
+- name: Install WireGuard tooling on the management host
+  ansible.builtin.apt:
+    name: [wireguard, wireguard-tools]
+    state: present
+    update_cache: true
+
+- name: Create protected management WireGuard directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - /etc/wireguard
+    - "{{ platform_wireguard_state_dir }}"
+    - "{{ platform_wireguard_peer_dir }}"
+    - "{{ platform_wireguard_peer_dir }}/develop"
+    - "{{ platform_wireguard_peer_dir }}/prod"
+
+- name: Remove the retired staging WireGuard peer state
+  ansible.builtin.file:
+    path: "{{ platform_wireguard_peer_dir }}/staging"
+    state: absent
+
+- name: Generate the management WireGuard private key locally once
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    temporary="$(mktemp '{{ platform_wireguard_private_key_path }}.tmp.XXXXXX')"
+    trap 'rm -f "$temporary"' EXIT
+    wg genkey > "$temporary"
+    install -o root -g root -m 0600 "$temporary" '{{ platform_wireguard_private_key_path }}'
+  args:
+    executable: /bin/bash
+    creates: "{{ platform_wireguard_private_key_path }}"
+  no_log: true
+
+- name: Reconcile the public key from the host-local private key
+  ansible.builtin.shell: |
+    set -euo pipefail
+    temporary="$(mktemp '{{ platform_wireguard_public_key_path }}.tmp.XXXXXX')"
+    trap 'rm -f "$temporary"' EXIT
+    wg pubkey < '{{ platform_wireguard_private_key_path }}' > "$temporary"
+    if test -f '{{ platform_wireguard_public_key_path }}' && cmp -s "$temporary" '{{ platform_wireguard_public_key_path }}'; then
+      echo unchanged
+      exit 0
+    fi
+    install -o root -g root -m 0644 "$temporary" '{{ platform_wireguard_public_key_path }}'
+    echo changed
+  args:
+    executable: /bin/bash
+  register: _platform_wireguard_public_key
+  changed_when: "'changed' in _platform_wireguard_public_key.stdout_lines"
+  no_log: true
+
+- name: Render the public management WireGuard base configuration
+  ansible.builtin.template:
+    src: base.conf.j2
+    dest: "{{ platform_wireguard_base_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart management WireGuard
+
+- name: Install the management WireGuard config reconciler
+  ansible.builtin.template:
+    src: spiritvpn-wireguard-reconcile.j2
+    dest: "{{ platform_wireguard_reconcile_command }}"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the bounded dynamic peer command
+  ansible.builtin.template:
+    src: spiritvpn-wireguard-peer.j2
+    dest: "{{ platform_wireguard_peer_command }}"
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Reconcile the complete management WireGuard configuration
+  ansible.builtin.command:
+    argv: ["{{ platform_wireguard_reconcile_command }}"]
+  register: _platform_wireguard_config
+  changed_when: "'changed' in _platform_wireguard_config.stdout_lines"
+  notify: Restart management WireGuard
+  no_log: true
+
+- name: Enable and start management WireGuard
+  ansible.builtin.systemd_service:
+    name: "wg-quick@{{ platform_wireguard_interface }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Read the management WireGuard public key
+  ansible.builtin.slurp:
+    src: "{{ platform_wireguard_public_key_path }}"
+  register: _platform_wireguard_public_key_readback
+
+- name: Report only the public hub enrollment values
+  ansible.builtin.debug:
+    msg:
+      status: MANAGEMENT_WIREGUARD_READY
+      interface: "{{ platform_wireguard_interface }}"
+      listen_port: "{{ platform_wireguard_listen_port }}"
+      addresses: "{{ platform_wireguard_addresses }}"
+      public_key: "{{ _platform_wireguard_public_key_readback.content | b64decode | trim }}"

@@ -1,4 +1,12 @@
 ---
+- name: Require a digest-pinned nginx mask image
+  ansible.builtin.assert:
+    that:
+      - nginx_mask_image is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      nginx mask must run a digest-pinned image from the compiled node plan.
+      A tag can be moved after review and is not a supply-chain pin.
+
 - name: Create nginx mask directories
   ansible.builtin.file:
     path: "{{ item }}"

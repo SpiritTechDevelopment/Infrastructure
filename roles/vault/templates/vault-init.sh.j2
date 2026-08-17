@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-export VAULT_ADDR="{{ vault_api_addr }}"
-exec docker compose -f {{ vault_dir }}/compose.yml exec -T \
-  -e VAULT_ADDR="$VAULT_ADDR"{% if vault_tls_enabled | bool %} -e VAULT_CACERT=/vault/tls/vault.crt{% endif %} vault \
-  vault operator init -key-shares=5 -key-threshold=3 -format=json

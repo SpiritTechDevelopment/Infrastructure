@@ -1,17 +1,23 @@
-# Role map
+# Ansible role map
 
-| Role | Current responsibility |
+| Role | Responsibility |
 |---|---|
-| `common` | base runtime packages, chrony and timezone only; no users/access/hardening |
-| `docker` | install/start Docker and confirm Compose v2; no daemon configuration |
-| `xray` | VLESS/REALITY config, public API, stats, logs and retained REALITY key |
-| `nginx_mask` | local TLS mask destination for REALITY |
-| `node_exporter` | documents node-exporter ownership in the VPN Compose stack |
-| `alloy` | VPN Docker logs to Loki and node metrics to Prometheus remote-write |
-| `vpn_stack` | applies the complete VPN Compose stack after all configs exist |
-| `vault` | localhost-bound Vault process; initialization remains manual |
-| `observability` | Loki, Prometheus, Alertmanager, Grafana, blackbox probes and telemetry |
+| `compiled_node_plan` | Validate and expose one generated node plan |
+| `compiled_runtime` | Translate compiled runtime input for component roles |
+| `bootstrap_wireguard` | Generate machine-local WireGuard identity and configure management networking |
+| `node_layout` | Create protected node directories |
+| `pki_agent` | Generate machine-local agent key/CSR and install certificate renewal units |
+| `common` | Host baseline and deploy-user/hardening controls |
+| `docker` | Docker prerequisites |
+| `node_limits` | Persistent CAKE egress ceiling and role-aware fairness |
+| `xray` | Compiled Xray runtime configuration |
+| `nginx_mask` | REALITY mask service |
+| `node_exporter` | Node metrics component |
+| `node_agent` | Environment-bound backend agent with persistent SQLite and node-local mTLS |
+| `control_runtime` | Environment-isolated PostgreSQL, migrations, backend and readiness on management |
+| `platform_wireguard` | Create the management WireGuard hub and reconcile operator/node public peers without exporting private keys |
+| `platform_vault` | Install loopback-only TLS Vault and manual ceremony/policy tooling without automatic init or unseal |
+| `platform_executor` | Install the restricted GitHub SSH command gate and local deployment executor |
 
-There is no active WireGuard role. `playbooks/management-network.yml` is a deliberate
-failure stub. Backend customer operations use Xray HandlerService and StatsService
-directly; no custom node agent is installed.
+Role inputs used by v1 come from generated node plans. Component roles must not
+read `desired/`, infer topology, or use a hand-maintained fleet inventory.

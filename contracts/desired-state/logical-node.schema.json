@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spiritvpn.io/schemas/desired-state/logical-node-v1alpha1.json",
+  "title": "SpiritVPN LogicalNode",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {"const": "spiritvpn.io/v1alpha1"},
+    "kind": {"const": "LogicalNode"},
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9-]+$"}}
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "region", "public", "reality", "mask", "display_name"],
+      "properties": {
+        "role": {"enum": ["entry", "exit"]},
+        "region": {"type": "string", "minLength": 2, "maxLength": 16, "pattern": "^[a-z0-9-]+$"},
+        "public": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hostname", "port", "transport", "flow", "fingerprint", "server_name"],
+          "properties": {
+            "hostname": {"type": "string", "format": "hostname", "maxLength": 253},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "transport": {"const": "tcp"},
+            "flow": {"const": "xtls-rprx-vision"},
+            "fingerprint": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$"},
+            "server_name": {"type": "string", "format": "hostname", "maxLength": 253}
+          }
+        },
+        "reality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["public_key", "short_id", "private_key_ref"],
+          "properties": {
+            "public_key": {"type": "string", "minLength": 16, "maxLength": 128, "pattern": "^[A-Za-z0-9_-]+$"},
+            "short_id": {"type": "string", "minLength": 2, "maxLength": 16, "pattern": "^[0-9a-f]+$"},
+            "private_key_ref": {"type": "string", "pattern": "^secret://kv/(develop|prod)/nodes/[a-z0-9-]+/reality#private_key$"}
+          }
+        },
+        "mask": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["certificate_ref", "private_key_ref"],
+          "properties": {
+            "certificate_ref": {
+              "type": "string",
+              "pattern": "^secret://kv/(develop|prod)/nodes/[a-z0-9-]+/mask#fullchain$"
+            },
+            "private_key_ref": {
+              "type": "string",
+              "pattern": "^secret://kv/(develop|prod)/nodes/[a-z0-9-]+/mask#private_key$"
+            }
+          }
+        },
+        "display_name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "common_overrides": {"type": "object"}
+      }
+    }
+  }
+}

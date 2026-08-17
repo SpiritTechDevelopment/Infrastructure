@@ -1,0 +1,7 @@
+---
+spiritvpn_config_dir: /etc/spiritvpn
+spiritvpn_state_dir: /var/lib/spiritvpn
+spiritvpn_log_dir: /var/log/spiritvpn
+spiritvpn_component_dirs:
+  - /opt/vpn
+  - /opt/spiritvpn

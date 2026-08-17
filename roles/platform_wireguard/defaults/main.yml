@@ -1,0 +1,19 @@
+---
+platform_wireguard_interface: wg0
+platform_wireguard_hub_addresses: {}
+platform_wireguard_addresses: "{{ platform_wireguard_hub_addresses.values() | list }}"
+platform_wireguard_environment_networks:
+  develop: 10.80.0.0/16
+  prod: 10.82.0.0/16
+platform_wireguard_listen_port: 51820
+platform_wireguard_mtu: 1420
+platform_wireguard_operator_peers: []
+platform_wireguard_public_endpoint: ""
+platform_wireguard_state_dir: /etc/spiritvpn/platform/wireguard
+platform_wireguard_peer_dir: /etc/spiritvpn/platform/wireguard/peers
+platform_wireguard_private_key_path: "/etc/wireguard/{{ platform_wireguard_interface }}.key"
+platform_wireguard_public_key_path: "/etc/wireguard/{{ platform_wireguard_interface }}.pub"
+platform_wireguard_config_path: "/etc/wireguard/{{ platform_wireguard_interface }}.conf"
+platform_wireguard_base_path: /etc/spiritvpn/platform/wireguard/base.conf
+platform_wireguard_reconcile_command: /usr/local/sbin/spiritvpn-wireguard-reconcile
+platform_wireguard_peer_command: /usr/local/sbin/spiritvpn-wireguard-peer

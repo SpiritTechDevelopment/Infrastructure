@@ -1,0 +1,13 @@
+schema_version: 1
+bandwidth_profiles:
+  vps-1g:
+    port_capacity_mbps: 1000
+    egress_utilization_percent: 90
+    qdisc:
+      kind: cake
+      diffserv: besteffort
+      entry_flow_isolation: dual-dsthost
+      exit_flow_isolation: flows
+      nat: false
+      rtt: internet
+degradation_threshold_percent: null

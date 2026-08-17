@@ -1,0 +1,100 @@
+---
+- name: Require both generated observability inputs
+  ansible.builtin.assert:
+    that:
+      - control_plan_file | length > 0
+      - control_plan_file is file
+      - monitoring_targets_file | length > 0
+      - monitoring_targets_file is file
+    fail_msg: >-
+      A generated control-plan.json and monitoring-targets.json are both
+      required.
+
+- name: Load the generated control plan
+  ansible.builtin.include_vars:
+    file: "{{ control_plan_file }}"
+    name: control_plan
+
+- name: Load the generated monitoring targets
+  ansible.builtin.include_vars:
+    file: "{{ monitoring_targets_file }}"
+    name: monitoring_targets
+
+- name: Require the shared collector to be deployed first
+  ansible.builtin.stat:
+    path: "{{ control_collector_contract_file }}"
+  register: _control_collector_contract_state
+
+- name: Refuse to write fragments no collector will read
+  ansible.builtin.assert:
+    that:
+      - _control_collector_contract_state.stat.exists
+    fail_msg: >-
+      {{ control_collector_contract_file }} is missing. Deploy the shared
+      collector with the platform contour before deploying an environment's
+      monitoring.
+
+- name: Load the shared collector contract
+  ansible.builtin.include_vars:
+    file: "{{ control_collector_contract_file }}"
+    name: collector_contract
+
+- name: Validate the generated observability boundary
+  ansible.builtin.assert:
+    that:
+      - control_plan._notice == 'GENERATED — DO NOT EDIT'
+      - monitoring_targets._notice == 'GENERATED — DO NOT EDIT'
+      - control_plan.schema_version | int == 1
+      - monitoring_targets.schema_version | int == 1
+      # Two projections of one desired state must never be mixed across
+      # environments: that would publish prod targets under develop.
+      - monitoring_targets.environment == control_plan.environment
+      - control_plan.environment in ['develop', 'prod']
+      - control_plan.environment in collector_contract.environments
+      # The TSDB is shared and Prometheus has no per-job retention, so the
+      # scrape interval is a platform value. Asserting it here is what stops
+      # desired state from describing a cadence nothing applies.
+      - >-
+        collector_contract.scrape_interval_seconds | int
+        == control_plan.observability.scrape_interval_seconds | int
+    fail_msg: >-
+      The observability inputs disagree with the deployed shared collector.
+
+- name: Select the scrapeable subset of the compiled targets
+  ansible.builtin.set_fact:
+    _control_observability_scraped: >-
+      {{ monitoring_targets.targets
+         | selectattr('kind', 'equalto', 'metrics')
+         | selectattr('collection', 'equalto', 'management')
+         | list }}
+
+- name: Refuse scrape targets that are not concrete overlay addresses
+  ansible.builtin.assert:
+    that:
+      - item.endpoint.address is match('^[0-9]{1,3}(\.[0-9]{1,3}){3}$')
+      - not item.endpoint.address.startswith('127.')
+      - item.endpoint.address != '0.0.0.0'
+      - item.endpoint.port | int > 0
+      # A service with no declared job would be written to a file the skeleton
+      # does not reference, and would be collected by nobody.
+      - item.service in collector_contract.jobs
+    fail_msg: >-
+      Scrape target {{ item.id }} is unreachable, exposed, or has no job in the
+      shared collector skeleton.
+  loop: "{{ _control_observability_scraped }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+# Every declared job gets a file, including the ones with no targets: an empty
+# list is a fact ("this environment currently has no exit nodes"), while a
+# missing file is a permanent read error in the collector's logs.
+- name: Write one file_sd fragment per declared job
+  ansible.builtin.template:
+    src: fragment.json.j2
+    dest: >-
+      {{ collector_contract.targets_dir }}/{{ control_plan.environment }}/{{ item }}.json
+    owner: root
+    group: root
+    mode: "0644"
+    validate: python3 -c "import json,sys; json.load(open(sys.argv[1]))" %s
+  loop: "{{ collector_contract.jobs }}"

@@ -1,0 +1,19 @@
+---
+vpn_stack_dir: /opt/vpn
+node_agent_image: ""
+node_agent_state_dir: /var/lib/spirit-agent
+node_agent_tls_dir: "{{ vpn_stack_dir }}/node-agent/tls"
+node_agent_uid: "65532"
+node_agent_gid: "65532"
+node_agent_grpc_listen: ""
+node_agent_http_listen: ""
+node_agent_certificate_source: /var/lib/spiritvpn/pki/agent-chain.pem
+node_agent_private_key_source: /var/lib/spiritvpn/pki/agent.key
+node_agent_allowed_client_identities: []
+node_agent_xray_api_address: 127.0.0.1:10085
+node_agent_xray_inbound_tag: vless-in
+node_agent_local_outbound_tag: direct
+node_agent_fallback_outbound_tag: block
+node_agent_max_inventory_users: 2000
+node_agent_shutdown_timeout: 10s
+node_agent_log_level: info
