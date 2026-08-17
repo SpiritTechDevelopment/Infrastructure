@@ -13,6 +13,10 @@ REVISION ?=
 ALLOW_DESTRUCTIVE ?= 0
 PROFILE ?=
 INSTANCE ?=
+# Operator workstations keep ansible in a virtualenv that is not on PATH. Point
+# this at that virtualenv so `check` can run the syntax pass; CI installs
+# requirements-ansible.txt globally and needs nothing here.
+ANSIBLE_VENV ?=
 CSR ?=
 # No default: the environment root key must never land in the repository or in
 # generated artifacts, and a default path is how it would.
@@ -122,7 +126,18 @@ lint: ## Run YAML and Ansible lint on the active v1 contour
 check: fleet-validate fleet-test ## Run local v1 static checks
 	@for script in scripts/*.sh; do bash -n "$$script" || exit $$?; done
 	@python3 -m py_compile scripts/*.py
-	@if command -v ansible-playbook >/dev/null; then $(MAKE) syntax; else echo 'ansible-playbook unavailable; syntax check skipped' >&2; fi
+	@# A skipped syntax pass used to be a one-line note on stderr, which scrolled
+	@# past under the test output and let `check` report success while a third of
+	@# it never ran. Missing ansible is now a failure: silence here is how an
+	@# unparseable playbook reaches the deployment path.
+	@if command -v ansible-playbook >/dev/null; then $(MAKE) syntax; \
+	elif test -x "$(ANSIBLE_VENV)/bin/ansible-playbook"; then \
+	  PATH="$(ANSIBLE_VENV)/bin:$$PATH" $(MAKE) syntax; \
+	else \
+	  echo 'ansible-playbook not found: syntax check cannot run, so `check` is incomplete.' >&2; \
+	  echo 'Put ansible on PATH, or set ANSIBLE_VENV to the virtualenv holding it.' >&2; \
+	  exit 1; \
+	fi
 
 .PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-manifest \
 	fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check \
