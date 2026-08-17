@@ -9,3 +9,8 @@ spec:
   secret_store:
     kv: kv/develop
     pki: pki/develop
+  common_overrides:
+    components:
+      node_agent:
+        repository: ghcr.io/spirittechdevelopment/node-agent
+        digest: sha256:5e2b89734b02964669b79ce76014dada92ba58e89856fdc03b64aaebae8c8967
