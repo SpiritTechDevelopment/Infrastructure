@@ -1,0 +1,22 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: LogicalNode
+metadata:
+  id: develop-entry-ru
+spec:
+  role: entry
+  region: ru
+  public:
+    hostname: vmshare.ru
+    port: 443
+    transport: tcp
+    flow: xtls-rprx-vision
+    fingerprint: chrome
+    server_name: vmshare.ru
+  reality:
+    public_key: 5At0R1RdID_YVZ2px-KpErGO3gUz1OUcdaQp-rosCDQ
+    short_id: "8456802426f0b3c1"
+    private_key_ref: secret://kv/develop/nodes/develop-entry-ru/reality#private_key
+  mask:
+    certificate_ref: secret://kv/develop/nodes/develop-entry-ru/mask#fullchain
+    private_key_ref: secret://kv/develop/nodes/develop-entry-ru/mask#private_key
+  display_name: Russia

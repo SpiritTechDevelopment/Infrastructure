@@ -3,7 +3,7 @@ kind: Environment
 metadata:
   id: develop
 spec:
-  dns_zone: develop.example.invalid
+  dns_zone: vmshare.ru
   management_network: 10.80.0.0/16
   backend_endpoint: backend.develop.internal:9443
   secret_store:

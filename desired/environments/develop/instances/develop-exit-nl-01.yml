@@ -1,0 +1,12 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: Instance
+metadata:
+  id: develop-exit-nl-01
+spec:
+  logical_node: develop-exit-nl
+  target_state: serving
+  public_address: 82.24.174.244
+  bandwidth_profile: vps-1g
+  provider:
+    name: manual
+    resource_id: exit-nl

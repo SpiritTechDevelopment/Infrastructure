@@ -31,6 +31,12 @@ Compare it with an explicit previously deployed desired-state directory:
 make fleet-plan ENVIRONMENT=develop BASELINE=path/to/desired
 ```
 
-The checked-in environment objects are intentionally empty placeholders: they
-contain neither a real fleet nor a control release. A complete synthetic fleet
-and control stack live under `tests/fixtures/valid/`.
+`develop` declares the live fleet: one entry in Russia and the two exits it
+bridges to. `prod` is still an intentionally empty placeholder, containing
+neither a fleet nor a control release. A complete synthetic fleet and control
+stack live under `tests/fixtures/valid/`.
+
+Three components are declared through `mirror.gcr.io` rather than their
+canonical registries. Docker Hub and quay.io are unreachable from the network
+`entry-1` sits in, so a canonical declaration would leave the entry unable to
+pull three of its four components. See the comment in `common/components.yml`.

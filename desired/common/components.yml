@@ -3,19 +3,28 @@ components:
   xray:
     repository: ghcr.io/xtls/xray-core
     tag: 26.3.27
-    digest: null
+    digest: sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7
+  # Docker Hub и quay.io недоступны из сети, где стоит entry-1: соединение не
+  # отвергается, а виснет до таймаута. Три образа ниже объявлены через
+  # pull-through зеркало Google, иначе вход не вытянет три компонента из
+  # четырёх. Адресация по содержимому, поэтому digest'ы для nginx и alloy те же
+  # самые, что на Docker Hub, и подмены слоёв зеркало допустить не может.
+  #
+  # node_exporter — единственный, кто сменил источник: он был объявлен на quay,
+  # а зеркало отдаёт копию из Docker Hub (prom/node-exporter). Это отдельный
+  # пуш того же релиза, поэтому и digest здесь другой, не quay'ный.
   nginx_mask:
-    repository: docker.io/library/nginx
+    repository: mirror.gcr.io/library/nginx
     tag: 1.29-alpine
-    digest: null
+    digest: sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
   alloy:
-    repository: docker.io/grafana/alloy
+    repository: mirror.gcr.io/grafana/alloy
     tag: v1.17.1
-    digest: null
+    digest: sha256:4f6ddc56ffdcf8a6316748fc5162972e20cb301523cac1bb4a31957df733ae9b
   node_exporter:
-    repository: quay.io/prometheus/node-exporter
+    repository: mirror.gcr.io/prom/node-exporter
     tag: v1.9.1
-    digest: null
+    digest: sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
   node_agent:
     repository: ghcr.io/spirittechdevelopment/node-agent
     tag: unpinned

@@ -30,12 +30,32 @@ class DesiredStateValidationTests(unittest.TestCase):
                 validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             return {issue.code for issue in raised.exception.issues}
 
-    def test_repository_placeholder_environments_are_valid(self) -> None:
-        for environment in ("develop", "prod"):
+    def test_repository_environments_are_valid(self) -> None:
+        # develop declares the live fleet: one entry in Russia and two exits it
+        # bridges to. prod is still an empty placeholder, so the assertion that
+        # both environments validate has to carry two different shapes.
+        for environment, fleets in (("develop", 1), ("prod", 0)):
             with self.subTest(environment=environment):
                 state = validate_environment(REPO_ROOT, environment)
                 self.assertEqual(state.environment.object_id, environment)
-                self.assertEqual(state.fleets, ())
+                self.assertEqual(len(state.fleets), fleets)
+
+    def test_develop_declares_the_live_fleet(self) -> None:
+        state = validate_environment(REPO_ROOT, "develop")
+        self.assertEqual(
+            [node.object_id for node in state.nodes],
+            ["develop-entry-ru", "develop-exit-nl", "develop-exit-ro"],
+        )
+        # Slots are unique per role, so the second exit is 02 rather than 01.
+        self.assertEqual(
+            [instance.object_id for instance in state.instances],
+            ["develop-entry-ru-01", "develop-exit-nl-01", "develop-exit-ro-02"],
+        )
+        # The entry is what clients dial, so its public name has to be the one
+        # that actually resolves; the exits are reached by address and carry
+        # their names only as REALITY server names.
+        entry = next(node for node in state.nodes if node.role == "entry")
+        self.assertEqual(entry.hostname, state.environment.dns_zone)
 
     def test_staging_environment_is_not_supported(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

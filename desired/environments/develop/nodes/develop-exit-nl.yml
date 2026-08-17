@@ -1,0 +1,22 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: LogicalNode
+metadata:
+  id: develop-exit-nl
+spec:
+  role: exit
+  region: nl
+  public:
+    hostname: nl.vmshare.ru
+    port: 443
+    transport: tcp
+    flow: xtls-rprx-vision
+    fingerprint: chrome
+    server_name: nl.vmshare.ru
+  reality:
+    public_key: fjP10h6ypQWmW9EoQwvaLOWkndO5gqzeieXmABsWKDI
+    short_id: "7ca57bde2fb340c2"
+    private_key_ref: secret://kv/develop/nodes/develop-exit-nl/reality#private_key
+  mask:
+    certificate_ref: secret://kv/develop/nodes/develop-exit-nl/mask#fullchain
+    private_key_ref: secret://kv/develop/nodes/develop-exit-nl/mask#private_key
+  display_name: Netherlands
