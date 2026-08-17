@@ -34,6 +34,30 @@ on:
         default: false
         type: boolean
 
+  # Вызов из release-bump после того, как коммит с новым digest лёг в main.
+  # `type: choice` в workflow_call не существует, поэтому допустимые значения
+  # проверяет сам job — иначе вызывающая сторона могла бы передать что угодно.
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      source_git_sha:
+        required: true
+        type: string
+      mode:
+        required: true
+        type: string
+      initial:
+        required: true
+        type: boolean
+      resume:
+        required: true
+        type: boolean
+      allow_destructive:
+        required: true
+        type: boolean
+
 permissions:
   contents: read
 
@@ -57,9 +81,12 @@ jobs:
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
           REQUESTED_SHA: ${{ inputs.source_git_sha }}
+          REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_INITIAL: ${{ inputs.initial }}
         run: |
           set -euo pipefail
+          [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(dry-run|apply)$ ]]
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           actual_sha="$(git rev-parse HEAD)"
           test "$actual_sha" = "$REQUESTED_SHA"
