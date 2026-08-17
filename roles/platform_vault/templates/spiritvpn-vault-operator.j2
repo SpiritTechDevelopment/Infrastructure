@@ -84,14 +84,33 @@ case "$command" in
     fi
     unset secrets_json auth_json audit_json
 
+    # Vault runs on a bridge network, so a login from the host arrives through
+    # the published port with its source rewritten to the network's gateway.
+    # Binding to 127.0.0.1/32 alone therefore rejects the one caller the role
+    # exists for: the local executor's secret resolver, which reached
+    # 'unauthorized by CIDR restrictions' on its first real run. Only the host
+    # holds the gateway address — every container on the network gets a .0.x
+    # address instead — so adding it keeps the restriction meaningfully local.
+    #
+    # The address is read rather than pinned because Docker assigns the subnet.
+    # Pinning it in compose.yml would be sturdier, but that recreates the
+    # container, and recreating it seals Vault.
+    gateway="$(docker network inspect spiritvpn-platform-vault_default \
+      --format '{% raw %}{{ (index .IPAM.Config 0).Gateway }}{% endraw %}' 2>/dev/null || true)"
+    if [[ ! "$gateway" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+      printf '%s\n' 'cannot determine the Vault bridge gateway address' >&2
+      exit 69
+    fi
+    local_cidrs="127.0.0.1/32,$gateway/32"
+
     policy="fleet-deployer-$environment"
     vault_as_root policy write "$policy" "/vault/config/policies/$policy.hcl"
     vault_as_root write "auth/approle/role/$policy" \
       token_policies="$policy" \
       token_no_default_policy=true \
       token_ttl=10m token_max_ttl=15m \
-      token_bound_cidrs=127.0.0.1/32 \
-      secret_id_bound_cidrs=127.0.0.1/32 \
+      token_bound_cidrs="$local_cidrs" \
+      secret_id_bound_cidrs="$local_cidrs" \
       secret_id_ttl=0 secret_id_num_uses=0
 
     credential_dir="$credentials_root/$environment/vault-approle"
