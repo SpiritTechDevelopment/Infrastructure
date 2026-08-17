@@ -384,7 +384,12 @@ all:
             "git merge-base --is-ancestor",
             "refs/spiritvpn/control-source",
             "platform-remote.sh",
-            "environment: ${{ inputs.environment }}",
+            # The environment binding is asserted at run time, not by a GitHub
+            # `environment:` key. That key is unavailable on the free plan for
+            # private repositories and made the job fail before its first step,
+            # so it was removed; the binding it was standing in for lives here
+            # and in the forced command attached to the github-deploy key.
+            '[[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]',
         ):
             self.assertIn(required, workflow)
         for forbidden in ("VAULT_TOKEN", "SOPS_AGE_KEY", "ssh-keyscan"):

@@ -58,6 +58,10 @@ class RepositorySurfaceTests(unittest.TestCase):
                 "platform-sops.py",
                 "platform-remote.sh",
                 "bootstrap-self-hosted-runner.sh",
+                # Joins that runner to the management overlay; the hub is only
+                # reachable there, so registering the runner is part of the
+                # same bootstrap as installing it.
+                "enroll-runner-overlay.sh",
                 "vault-secret-resolver.py",
                 "vendor-backend-contract.sh",
             },

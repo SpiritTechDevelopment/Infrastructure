@@ -9,8 +9,17 @@ fi
 host="$1"
 operation="$2"
 shift 2
-if [[ ! "$host" =~ ^[A-Za-z0-9.:[\]-]+$ ]]; then
-  printf '%s\n' 'invalid management host' >&2
+# Host names, IPv4, and IPv6 with or without brackets; nothing that could carry
+# a shell metacharacter or a line break into the ssh invocation below.
+#
+# The bracket expression is ordered, not escaped, and that is deliberate. Inside
+# an ERE bracket expression a backslash is an ordinary character, so the earlier
+# `[A-Za-z0-9.:[\]-]` terminated at its first `]` and left `-]` outside as
+# literals. The result rejected every possible host, including plain `10.80.0.1`,
+# and every deployment through this script failed with 'invalid management host'.
+# Portable ERE has no escape here: `]` must come first and `-` must come last.
+if [[ ! "$host" =~ ^[]A-Za-z0-9.:[-]+$ ]]; then
+  printf '%s\n' "invalid management host: ${host}" >&2
   exit 64
 fi
 case "$operation" in
