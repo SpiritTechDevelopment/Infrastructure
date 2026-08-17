@@ -27,6 +27,14 @@ class TemporaryFleetRepository:
         self.git("init", "-q")
         self.git("config", "user.name", "fleetctl test")
         self.git("config", "user.email", "fleetctl@example.invalid")
+        # Auto-maintenance forks a process that keeps writing into .git/objects
+        # after the committing command has returned. A test that finishes soon
+        # after its last commit then races that process while removing its
+        # temporary directory, and rmtree fails with ENOTEMPTY. The fixture is
+        # short-lived and never needs packing, so the cheapest fix is to leave
+        # no background writer behind at all.
+        self.git("config", "gc.auto", "0")
+        self.git("config", "maintenance.auto", "false")
         self.git("add", ".")
         self.git("commit", "-qm", "baseline")
 

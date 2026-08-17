@@ -44,7 +44,17 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, linux, spiritvpn-deploy]
-    environment: ${{ inputs.environment }}
+    # `environment:` намеренно отсутствует. Организация на плане free с
+    # приватными репозиториями: environments там недоступны, поэтому задача,
+    # объявившая среду, не начинает выполняться вовсе — падает с нулём шагов,
+    # ничего не сообщая. Ни защиты, ни отдельного хранилища секретов эта
+    # строка здесь не давала: required reviewers на free тоже нет, а секреты
+    # приходится держать на уровне репозитория.
+    #
+    # Разделение сред держится на другом и остаётся в силе: ключ
+    # github-deploy привязан к среде форсированной командой в authorized_keys
+    # исполнителя (roles/platform_executor), а сам скрипт отвергает всё, кроме
+    # develop и prod. Вернуть строку, когда план позволит environments.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
