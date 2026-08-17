@@ -16,8 +16,16 @@ services:
       - --web.listen-address={{ platform_prometheus_bind_address }}:{{ platform_prometheus_port }}
       # The admin API can delete series and the lifecycle API can reload or
       # shut down the process over plain HTTP. Target changes arrive through
-      # file_sd, which needs neither.
-      - --web.enable-lifecycle=false
+      # file_sd, which needs neither. Both are off by default; saying so
+      # explicitly keeps the decision in the file rather than only in this
+      # comment.
+      #
+      # The negated form is the only one that works: these are kingpin boolean
+      # flags, declared as --[no-]web.enable-lifecycle, and they take no value.
+      # Written as `=false` the flag parsed as a bare `false` positional and
+      # Prometheus refused to start with "unexpected false", restarting in a
+      # loop until the readiness gate failed the deployment.
+      - --no-web.enable-lifecycle
     volumes:
       - {{ platform_observability_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - {{ platform_observability_targets_dir }}:{{ platform_prometheus_targets_container_dir }}:ro

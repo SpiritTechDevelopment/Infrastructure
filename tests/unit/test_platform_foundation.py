@@ -448,7 +448,11 @@ all:
         )
         self.assertIn("platform_prometheus_bind_address == '127.0.0.1'", collector_tasks)
         self.assertNotIn("--web.enable-admin-api", collector_compose)
-        self.assertIn("--web.enable-lifecycle=false", collector_compose)
+        # The negated form, not `=false`: these are kingpin boolean flags that
+        # take no value, so `=false` left a bare `false` positional behind and
+        # Prometheus refused to start.
+        self.assertIn("--no-web.enable-lifecycle", collector_compose)
+        self.assertNotIn("--web.enable-lifecycle=", collector_compose)
         self.assertIn("promtool", collector_tasks)
 
         # Node-side listeners bind the overlay and the firewall repeats it.
@@ -657,7 +661,16 @@ all:
         ).read_text(encoding="utf-8")
         self.assertIn("operator init", operator)
         self.assertIn("operator unseal", operator)
-        self.assertIn("secret_id_bound_cidrs=127.0.0.1/32", operator)
+        # The AppRole stays bound to callers on the management host itself, but
+        # the bound set can no longer be the loopback literal alone: Vault runs
+        # on a bridge network, so a login from the host arrives with its source
+        # rewritten to the network gateway and was rejected outright. Both
+        # bindings now come from the same computed pair, and the script refuses
+        # to write the role at all if it cannot read the gateway.
+        self.assertIn('local_cidrs="127.0.0.1/32,$gateway/32"', operator)
+        self.assertIn('token_bound_cidrs="$local_cidrs"', operator)
+        self.assertIn('secret_id_bound_cidrs="$local_cidrs"', operator)
+        self.assertIn("cannot determine the Vault bridge gateway address", operator)
         self.assertIn("token_no_default_policy=true", operator)
         self.assertNotIn('-e "VAULT_TOKEN=$root_token"', operator)
         self.assertNotIn("| grep -q", operator)
