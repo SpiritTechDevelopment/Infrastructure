@@ -3,3 +3,11 @@ vpn_stack_dir: /opt/vpn
 compose_project: spiritvpn-node
 compiled_runtime_pull_policy: missing
 node_agent_runtime_inputs_changed: false
+
+# Ноды, собранные вручную до перехода на скомпилированный контур, держат свои
+# контейнеры в отдельном compose-проекте. Он занимает те же порты, и
+# --remove-orphans его не видит: чужой проект для compose не сирота. Уступает
+# место здесь, а не раньше, чтобы простой длился с подъёма стека, а не со
+# старта плейбука.
+compiled_runtime_superseded_projects:
+  - vpn
