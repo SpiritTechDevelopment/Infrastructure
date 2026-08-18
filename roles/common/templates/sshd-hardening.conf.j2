@@ -1,4 +1,10 @@
 # Spirit convergence hardening. Key-only root, no password auth.
+{% if common_ssh_port | string | length > 0 %}
+# Port is additive in sshd_config: naming one here replaces the implicit 22 only
+# because no other Port directive is in effect. An uncommented Port elsewhere
+# would keep that port listening too.
+Port {{ common_ssh_port }}
+{% endif %}
 PasswordAuthentication no
 PermitRootLogin prohibit-password
 KbdInteractiveAuthentication no

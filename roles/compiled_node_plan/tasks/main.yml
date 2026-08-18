@@ -25,6 +25,12 @@
           if (spiritvpn_connection_phase | default('configure')) == 'bootstrap'
           else spiritvpn_node_plan.instance.management_address
         )
+      # Bootstrap reaches a clean VPS on the default port; only once the role has
+      # moved sshd does the declared port become the way in.
+      - >-
+        (spiritvpn_connection_phase | default('configure')) == 'bootstrap'
+        or (ansible_port | default(22)) | int
+           == spiritvpn_node_plan.infrastructure.networking.ssh.port | int
       - spiritvpn_node_plan.logical_node.role in ['entry', 'exit']
       - spiritvpn_node_plan.instance.target_state in ['provisioning', 'candidate', 'serving', 'draining', 'retired']
       - spiritvpn_node_plan.infrastructure.components.xray.digest is match('^sha256:[0-9a-f]{64}$')
@@ -66,6 +72,7 @@
     common_manage_deploy_user: "{{ spiritvpn_manage_deploy_user }}"
     common_authorized_keys: "{{ spiritvpn_operator_ssh_public_keys }}"
     common_manage_sshd: true
+    common_ssh_port: "{{ spiritvpn_node_plan.infrastructure.networking.ssh.port }}"
     common_manage_firewall: true
     common_enable_fail2ban: true
     common_manage_sysctl: true

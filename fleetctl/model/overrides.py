@@ -52,6 +52,7 @@ def common_from_values(
                 management_listen_port=networking["management"]["listen_port"],
                 management_mtu=networking["management"]["mtu"],
                 persistent_keepalive_seconds=networking["management"]["persistent_keepalive_seconds"],
+                ssh_port=networking["ssh"]["port"],
                 agent_port=networking["agent"]["port"],
                 dns_ttl_seconds=networking["dns"]["ttl_seconds"],
                 dns_proxied=networking["dns"]["proxied"],

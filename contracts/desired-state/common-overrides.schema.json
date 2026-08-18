@@ -37,6 +37,11 @@
             "persistent_keepalive_seconds": {"type": "integer", "minimum": 0, "maximum": 65535}
           }
         },
+        "ssh": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"port": {"type": "integer", "minimum": 1, "maximum": 65535}}
+        },
         "agent": {
           "type": "object",
           "additionalProperties": false,

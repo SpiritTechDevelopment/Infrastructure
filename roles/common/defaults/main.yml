@@ -19,11 +19,24 @@ common_manage_sysctl: false
 common_enable_unattended_upgrades: false
 common_enable_auditd: false
 
+# --- sshd port (rendered only when common_manage_sshd) ---
+# The port the role makes sshd listen on. Empty means the role does not own the
+# port at all: no Port directive is emitted and sshd keeps whatever it already
+# listens on. That is the default on purpose — the platform hub runs this role
+# without declaring a port, and silently moving its sshd would be the most
+# expensive possible mistake. Compiled traffic nodes set it from desired state.
+common_ssh_port: ""
+
 # --- Firewall (nftables) — rendered only when common_manage_firewall is true.
 # Safe defaults: empty lists render a minimal ruleset, and an empty
 # ssh_allowed_cidrs falls back to SSH-from-anywhere so enabling the firewall
 # without setting admin sources cannot lock you out. Set per host/group.
-ssh_port: "{{ ansible_port | default(22) }}"
+# The firewall and fail2ban must follow the port the role is moving sshd to, not
+# the port the current connection came in on — during first bootstrap those
+# differ (connection on 22, sshd headed for common_ssh_port).
+ssh_port: >-
+  {{ common_ssh_port if (common_ssh_port | string | length > 0)
+  else (ansible_port | default(22)) }}
 ssh_allowed_cidrs: []                      # [] = allow SSH from anywhere (fallback)
 common_public_tcp_ports: []                # ports open to the internet (input chain)
 common_public_udp_ports: []
@@ -37,7 +50,7 @@ common_restricted_interface: ""
 
 # --- fail2ban (rendered only when common_enable_fail2ban) ---
 # SSH brute-force protection via the systemd journal backend. `port` derives from
-# ssh_port so the ban action targets the real SSH port (232 on entry-1, 22 else).
+# ssh_port so the ban action targets the real SSH port.
 common_fail2ban_maxretry: 5
 common_fail2ban_findtime: 600
 common_fail2ban_bantime: 3600

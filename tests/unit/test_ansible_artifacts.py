@@ -51,6 +51,17 @@ class CompiledAnsibleArtifactTests(unittest.TestCase):
             with self.assertRaises(CompiledArtifactsError):
                 validate_ansible_artifacts(output, "develop")
 
+    def test_inventory_ssh_port_must_agree_with_the_node_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = self.render(Path(temporary))
+            path = output / "ansible-inventory.json"
+            inventory = json.loads(path.read_text(encoding="utf-8"))
+            hosts = inventory["all"]["children"]["spiritvpn_fleet"]["children"]["entry"]["hosts"]
+            hosts["develop-entry-nl-01"]["ansible_port"] = 22
+            path.write_text(json.dumps(inventory), encoding="utf-8")
+            with self.assertRaises(CompiledArtifactsError):
+                validate_ansible_artifacts(output, "develop")
+
     def test_stale_node_plan_not_referenced_by_inventory_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = self.render(Path(temporary))

@@ -33,6 +33,7 @@ def common_source_values(common: CommonConfig) -> dict[str, Any]:
                 "mtu": common.networking.management_mtu,
                 "persistent_keepalive_seconds": common.networking.persistent_keepalive_seconds,
             },
+            "ssh": {"port": common.networking.ssh_port},
             "agent": {"port": common.networking.agent_port},
             "dns": {
                 "ttl_seconds": common.networking.dns_ttl_seconds,

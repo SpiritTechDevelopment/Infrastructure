@@ -57,6 +57,7 @@ class NetworkingConfig:
     management_listen_port: int
     management_mtu: int
     persistent_keepalive_seconds: int
+    ssh_port: int
     agent_port: int
     dns_ttl_seconds: int
     dns_proxied: bool

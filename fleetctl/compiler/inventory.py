@@ -23,8 +23,12 @@ def compile_ansible_inventory(state: DesiredState) -> dict[str, Any]:
         if instance.target_state == "retired":
             continue
         address = management_address(state.environment, node, instance)
+        # Steady-state phase reaches an already-bootstrapped node on the declared
+        # sshd port. The bootstrap inventory deliberately keeps the default 22 —
+        # that is the only port a clean VPS answers on.
         hostvars = {
             "ansible_host": address,
+            "ansible_port": state.common_for_node(node.object_id).networking.ssh_port,
             "spiritvpn_node_plan_file": f"node-plans/{instance.object_id}.json",
         }
         role_hosts[node.role][instance.object_id] = hostvars

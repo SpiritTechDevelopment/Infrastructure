@@ -73,7 +73,7 @@ def _validate_configure_inventory(
                 raise CompiledArtifactsError(f"host appears in more than one role group: {host}")
             seen_hosts.add(host)
             hostvars = _expect_mapping(raw_hostvars, f"inventory host {host}")
-            if set(hostvars) != {"ansible_host", "spiritvpn_node_plan_file"}:
+            if set(hostvars) != {"ansible_host", "ansible_port", "spiritvpn_node_plan_file"}:
                 raise CompiledArtifactsError(
                     f"inventory host {host} must contain only connection data and spiritvpn_node_plan_file"
                 )
@@ -91,6 +91,13 @@ def _validate_configure_inventory(
             instance = _mapping(plan, "instance", f"node plan {host}")
             if hostvars["ansible_host"] != instance.get("management_address"):
                 raise CompiledArtifactsError(f"inventory ansible_host disagrees with node plan for {host}")
+            networking = _mapping(
+                _mapping(plan, "infrastructure", f"node plan {host}"),
+                "networking",
+                f"node plan {host} infrastructure",
+            )
+            if hostvars["ansible_port"] != _mapping(networking, "ssh", f"node plan {host} networking").get("port"):
+                raise CompiledArtifactsError(f"inventory ansible_port disagrees with node plan for {host}")
             plan_files.add(plan_path.resolve())
 
     return plan_files

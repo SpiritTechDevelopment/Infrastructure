@@ -4,6 +4,8 @@ management:
   listen_port: 51820
   mtu: 1420
   persistent_keepalive_seconds: 25
+ssh:
+  port: 232
 agent:
   port: 9443
 dns:

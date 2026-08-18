@@ -6,7 +6,7 @@ JSON Schemas in this directory define the structural contract for
 singleton files under `desired/common/`:
 
 - `components.yml` — image repository, human-readable tag, and immutable digest;
-- `networking.yml` — management WireGuard, agent port, and DNS policy;
+- `networking.yml` — management WireGuard, sshd port, agent port, and DNS policy;
 - `observability.yml` — retention, scrape, and probe intervals;
 - `rollout.yml` — fleet concurrency and convergence/drain timeouts;
 - `xray.yml` — stable tag conventions and access-log policy;

@@ -21,6 +21,22 @@
     - role: bootstrap_wireguard
     - role: node_limits
     - role: pki_agent
+  # This play connected on the default port because that is all a clean VPS
+  # answers on; the common role has since moved sshd to the compiled port and
+  # closed the old one in nftables. The current session survives on conntrack,
+  # a new one would not — so hand the port over explicitly here instead of
+  # trusting handler ordering, and drop the connection before readiness.yml
+  # opens its own.
+  post_tasks:
+    - name: Reload sshd onto the compiled port before handing the connection over
+      ansible.builtin.meta: flush_handlers
+
+    - name: Point later plays at the compiled sshd port
+      ansible.builtin.set_fact:
+        ansible_port: "{{ spiritvpn_node_plan.infrastructure.networking.ssh.port }}"
+
+    - name: Drop the bootstrap-port connection
+      ansible.builtin.meta: reset_connection
 
 - name: Run read-only bootstrap readiness checks
   ansible.builtin.import_playbook: readiness.yml

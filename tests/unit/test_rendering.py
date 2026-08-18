@@ -216,8 +216,17 @@ class RenderingTests(unittest.TestCase):
         )
         self.assertEqual(
             set(entry_hosts["develop-entry-nl-01"]),
-            {"ansible_host", "spiritvpn_node_plan_file"},
+            {"ansible_host", "ansible_port", "spiritvpn_node_plan_file"},
         )
+
+    def test_inventory_connects_on_the_declared_ssh_port(self) -> None:
+        files = render_files(self.state)
+        inventory = json.loads(files["ansible-inventory.json"])
+        groups = inventory["all"]["children"]["spiritvpn_fleet"]["children"]
+        entry = groups["entry"]["hosts"]["develop-entry-nl-01"]
+        plan = json.loads(files["node-plans/develop-entry-nl-01.json"])
+        self.assertEqual(entry["ansible_port"], 232)
+        self.assertEqual(plan["infrastructure"]["networking"]["ssh"]["port"], 232)
 
     def test_bootstrap_inventory_uses_public_address_and_same_node_plan(self) -> None:
         inventory = json.loads(render_files(self.state)["bootstrap-inventory.json"])
@@ -227,6 +236,13 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(entry["ansible_user"], "root")
         self.assertEqual(entry["spiritvpn_connection_phase"], "bootstrap")
         self.assertEqual(entry["spiritvpn_node_plan_file"], "node-plans/develop-entry-nl-01.json")
+
+    def test_bootstrap_inventory_keeps_the_default_ssh_port(self) -> None:
+        # A clean VPS answers on 22 only; the compiled sshd port becomes reachable
+        # after the common role has moved it, never before.
+        inventory = json.loads(render_files(self.state)["bootstrap-inventory.json"])
+        hosts = inventory["all"]["children"]["spiritvpn_bootstrap"]["hosts"]
+        self.assertNotIn("ansible_port", hosts["develop-entry-nl-01"])
 
     def test_entry_plan_contains_stable_logical_exit_projection(self) -> None:
         files = render_files(self.state)

@@ -212,6 +212,13 @@ class DesiredStateValidationTests(unittest.TestCase):
         codes = self.validate_mutated_fixture("common/networking.yml", mutate)
         self.assertIn("SCHEMA", codes)
 
+    def test_ssh_port_must_be_declared(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            del document["ssh"]
+
+        codes = self.validate_mutated_fixture("common/networking.yml", mutate)
+        self.assertIn("SCHEMA", codes)
+
     def test_broken_reference_fixture_is_rejected(self) -> None:
         desired_root = REPO_ROOT / "tests" / "fixtures" / "invalid" / "broken-reference" / "desired"
         with self.assertRaises(DesiredStateInvalid) as raised:

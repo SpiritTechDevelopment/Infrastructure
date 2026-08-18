@@ -4,6 +4,11 @@ management:
   listen_port: 51820
   mtu: 1420
   persistent_keepalive_seconds: 25
+ssh:
+  # Steady-state sshd port on every traffic node. First-time bootstrap still
+  # connects on 22 (a clean VPS has nothing else); the common role moves sshd
+  # here, and every later phase reaches the node on this port.
+  port: 232
 agent:
   port: 9443
 dns:
