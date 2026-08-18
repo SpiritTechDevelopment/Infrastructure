@@ -100,11 +100,21 @@
   changed_when: "'changed' in _bootstrap_wireguard_configure.stdout_lines"
   no_log: true
 
-- name: Enable and start management WireGuard
+# `started` is a no-op on an already-running unit, so a node that arrives with a
+# pre-existing wg0 — an earlier overlay, a reinstall — would keep serving the old
+# address and the old peer while the freshly rendered config sat unread on disk.
+# That is not hypothetical: it left entry-ru on a 10.20.0.11 tunnel pointing at a
+# decommissioned hub, with its new key already registered on the real one.
+#
+# Restarting is safe here precisely because this role only ever runs during
+# bootstrap, which connects over the public address; the tunnel being replaced is
+# never the path this play is talking over. `wg syncconf` would be gentler but
+# cannot apply a changed Address or route.
+- name: Enable management WireGuard, applying the configuration if it changed
   ansible.builtin.systemd_service:
     name: "wg-quick@{{ bootstrap_wireguard_interface }}"
     enabled: true
-    state: started
+    state: "{{ 'restarted' if _bootstrap_wireguard_configure.changed else 'started' }}"
     daemon_reload: true
 
 - name: Require management hub reachability after peer registration

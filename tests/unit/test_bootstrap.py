@@ -182,6 +182,22 @@ class BootstrapContourTests(unittest.TestCase):
         self.assertIn("refusing bootstrap SSH/mutation: set APPLY=1 explicitly", makefile)
         self.assertIn("no SSH attempted (set CONNECT=1 explicitly)", makefile)
 
+    def test_wireguard_config_is_applied_not_just_written(self) -> None:
+        """A rendered config that nothing applies is a config that does nothing.
+
+        `state: started` leaves an already-running wg-quick alone, so a node that
+        arrives with a pre-existing wg0 keeps the old address and the old peer —
+        while its new public key is already registered on the real hub, which
+        then waits for a handshake that never comes.
+        """
+        tasks = (
+            REPO_ROOT / "roles" / "bootstrap_wireguard" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "'restarted' if _bootstrap_wireguard_configure.changed else 'started'",
+            tasks,
+        )
+
     def test_node_local_wireguard_configurator_has_valid_shell(self) -> None:
         path = REPO_ROOT / "roles" / "bootstrap_wireguard" / "templates" / "configure-wireguard.sh.j2"
         rendered = re.sub(r"{{[^\n{}]+}}", "fixture", path.read_text(encoding="utf-8"))

@@ -32,10 +32,20 @@ read -r run_id name conclusion sha created <<<"$(
 
 printf '=== %s  %s  %s  %s ===\n' "$name" "$conclusion" "$sha" "$created"
 
+# Логов у незавершённого прогона ещё нет, и запрос за ними вернёт ошибку. Это
+# не сбой разбора, поэтому выходим спокойно.
+if [[ "$conclusion" == "in_progress" ]]; then
+  printf '\nпрогон ещё идёт; для ожидания:\n  gh run watch %s --exit-status\n' "$run_id"
+  exit 0
+fi
+
 job="$(gh api "repos/$repository/actions/runs/$run_id/attempts/1/jobs" --jq '.jobs[0].id')"
 log="$(mktemp)"
 trap 'rm -f -- "$log"' EXIT
-gh api "repos/$repository/actions/jobs/$job/logs" >"$log" 2>&1
+if ! gh api "repos/$repository/actions/jobs/$job/logs" >"$log" 2>&1 || [[ ! -s "$log" ]]; then
+  printf '\nлог недоступен (job %s)\n' "$job" >&2
+  exit 1
+fi
 
 # Режим запуска. check и apply дают одинаково зелёный recap, поэтому глазами их
 # не различить — а разница между "показал бы диф" и "применил" максимальная.
@@ -64,8 +74,9 @@ if [[ -n "$recap_line" ]]; then
     grep -vE '##\[(group|endgroup)\]|^\S+ +shell: |Node 20 is being deprecated|Post job cleanup' |
     sed 's/^[0-9T:.Z-]* //' | head -6
 else
-  printf '(recap не найден; последние строки лога)\n'
-  tail -12 "$log" | sed 's/^[0-9T:.Z-]* //'
+  # До Ansible не дошло — значит упал шаг workflow или проверка исполнителя.
+  # Хвост лога здесь бесполезен, он весь состоит из post-job cleanup.
+  printf '(до Ansible не дошло — смотри ошибки шагов ниже)\n'
 fi
 
 printf '\n--- ошибки шагов workflow ---\n'
