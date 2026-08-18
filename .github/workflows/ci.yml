@@ -77,7 +77,12 @@ jobs:
               if target["kind"] == "metrics" and target["collection"] == "management"
           ]
           services = {target["service"] for target in scraped}
-          assert services == {"node-exporter", "agent-metrics", "backend-metrics"}, services
+          assert services == {
+              "node-exporter",
+              "agent-metrics",
+              "backend-metrics",
+              "postgres-metrics",
+          }, services
           print(f"fixture: {len(targets)} targets, {len(scraped)} scraped")
           PYTHON
 
