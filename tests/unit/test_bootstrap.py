@@ -30,7 +30,7 @@ def compiled_node_facts() -> dict[str, object]:
 
 def ansible_jinja() -> Environment:
     """Stock Jinja plus the two Ansible filters these templates use."""
-    environment = Environment()
+    environment = Environment(trim_blocks=True, lstrip_blocks=True)
     environment.filters["to_json"] = json.dumps
     environment.filters["bool"] = lambda value: (
         value
@@ -41,120 +41,57 @@ def ansible_jinja() -> Environment:
 
 
 class SmokeAdapterTests(unittest.TestCase):
-    """The readiness gates are fail-closed, and an adapter that only proves the
-    node has internet would pass on a node whose tunnel is dead."""
+    """Every other gate checks state; these check that traffic can move.
 
-    XRAY_VARIABLES = {
-        "xray_loglevel": "info",
-        "xray_access_log": "none",
-        "xray_error_log": "/var/log/xray/error.log",
-        "xray_mask_address": "",
-        "xray_dns_servers": [],
-        "xray_enable_api": True,
-        "xray_api_services": ["HandlerService"],
-        "xray_api_bind": "127.0.0.1",
-        "xray_api_port": 10085,
-        "xray_metrics_enabled": True,
-        "xray_metrics_bind": "127.0.0.1",
-        "xray_metrics_port": 11111,
-        "xray_stats_user_traffic": "true",
-        "xray_listen_port": 443,
-        "xray_inbound_tag": "xi-vless",
-        "xray_static_clients": [],
-        "reality_dest": "127.0.0.1:8443",
-        "reality_server_names": ["node.example.invalid"],
-        "reality_private_key_eff": "k" * 43,
-        "reality_short_ids": ["8456802426f0b3c1"],
-        "xray_sniffing_route_only": True,
-        "xray_direct_outbound_tag": "direct",
-        "xray_block_outbound_tag": "block",
-        "xray_domain_strategy": "AsIs",
-        "xray_block_domains": [],
-        "xray_manage_routing_via_agent": True,
-        "entry_default_exit_tag": "",
-        "xray_entry_block_unmatched": True,
-        "xray_smoke_inbound_tag": "xi-smoke",
-        "xray_smoke_socks_port": 10808,
-    }
-    EXITS = [
-        {
-            "tag": "xo-example-exit",
-            "address": "192.0.2.20",
-            "port": 443,
-            "uuid": "u",
-            "reality_sni": "exit.example.invalid",
-            "reality_password": "p",
-            "reality_short_id": "294753b602c08325",
-            "fingerprint": "chrome",
-            "flow": "xtls-rprx-vision",
-            "email": "bridge-x",
-        }
-    ]
+    A node can pass all nine remaining gates — containers up, ports listening,
+    certificate valid, qdisc applied — and serve nobody.
+    """
+
     PLAN = {
         "instance": {"public_address": "192.0.2.10"},
-        "routing": {"bridges_as_entry": [{"target": {"address": "192.0.2.20"}}]},
+        "routing": {
+            "bridges_as_entry": [
+                {"target": {"address": "192.0.2.20", "port": 443}},
+                {"target": {"address": "192.0.2.30", "port": 8443}},
+            ]
+        },
     }
 
-    def render_config(self, **overrides: object) -> dict:
-        source = (
+    def render(self, name: str) -> str:
+        command = compiled_node_facts()[name][2]
+        rendered = ansible_jinja().from_string(command).render(
+            spiritvpn_smoke_curl_timeout_seconds=10,
+            spiritvpn_smoke_echo_url="https://echo.example.invalid",
+            spiritvpn_node_plan=self.PLAN,
+        )
+        return " ".join(rendered.split())
+
+    def test_exit_must_be_seen_under_its_own_address(self) -> None:
+        direct = self.render("spiritvpn_direct_smoke_argv")
+        # A proxied or NATed egress answers with a different address, and mere
+        # reachability of the internet would not notice.
+        self.assertIn('= "192.0.2.10"', direct)
+        # Without -4 a dual-stack node answers with its IPv6 address and the
+        # comparison fails while the node is perfectly healthy.
+        self.assertIn("curl -4", direct)
+
+    def test_every_bridge_is_probed_and_not_just_the_first(self) -> None:
+        entry = self.render("spiritvpn_entry_exit_smoke_argv")
+        self.assertIn("/dev/tcp/192.0.2.20/443", entry)
+        self.assertIn("/dev/tcp/192.0.2.30/8443", entry)
+
+    def test_the_probe_leaves_no_local_proxy_behind(self) -> None:
+        # An unauthenticated SOCKS inbound would hand every process on the node
+        # — including four host-networked containers — a standing, unaccounted
+        # egress through the exit, bought for a two-second check.
+        config = (
             REPO_ROOT / "roles" / "xray" / "templates" / "config.json.j2"
         ).read_text(encoding="utf-8")
-        rendered = ansible_jinja().from_string(source).render(
-            **self.XRAY_VARIABLES, **overrides
+        defaults = (REPO_ROOT / "roles" / "xray" / "defaults" / "main.yml").read_text(
+            encoding="utf-8"
         )
-        # A conditional block that breaks a comma produces a file Xray refuses
-        # to load, and the deployment would only find out on the node.
-        return json.loads(rendered)
-
-    def test_smoke_inbound_exists_only_where_it_has_somewhere_to_go(self) -> None:
-        exit_side = self.render_config(
-            node_role="exit", entry_exits=[], xray_smoke_inbound_enabled=False
-        )
-        self.assertNotIn("xi-smoke", [item["tag"] for item in exit_side["inbounds"]])
-
-        entry_side = self.render_config(
-            node_role="entry", entry_exits=self.EXITS, xray_smoke_inbound_enabled=True
-        )
-        smoke = next(
-            item for item in entry_side["inbounds"] if item["tag"] == "xi-smoke"
-        )
-        # Reachable from the node and from nowhere else.
-        self.assertEqual(smoke["listen"], "127.0.0.1")
-        self.assertEqual(smoke["protocol"], "socks")
-
-        rules = [
-            rule
-            for rule in entry_side["routing"]["rules"]
-            if rule.get("inboundTag") == ["xi-smoke"]
-        ]
-        # The point of the test is the route, so the smoke traffic must leave
-        # through the very outbound customer traffic uses.
-        self.assertEqual([rule["outboundTag"] for rule in rules], ["xo-example-exit"])
-
-    def test_adapters_compare_the_visible_address_with_the_expected_one(self) -> None:
-        facts = compiled_node_facts()
-        environment = ansible_jinja()
-        common = {
-            "spiritvpn_smoke_curl_timeout_seconds": 10,
-            "spiritvpn_smoke_echo_url": "https://echo.example.invalid",
-            "spiritvpn_smoke_socks_port": 10808,
-            "spiritvpn_node_plan": self.PLAN,
-        }
-        direct = environment.from_string(
-            facts["spiritvpn_direct_smoke_argv"][2]
-        ).render(**common)
-        # An exit must be seen under its own address: a proxied or NATed egress
-        # answers with a different one.
-        self.assertIn('= "192.0.2.10"', direct)
-
-        entry = environment.from_string(
-            facts["spiritvpn_entry_exit_smoke_argv"][2]
-        ).render(**common)
-        self.assertIn("--socks5-hostname 127.0.0.1:10808", entry)
-        # And an entry must be seen under the exit's address, never its own —
-        # that difference is the whole proof that the bridge carries traffic.
-        self.assertIn('= "192.0.2.20"', entry)
-        self.assertNotIn("192.0.2.10", entry)
+        self.assertNotIn("socks", config)
+        self.assertNotIn("xray_smoke", defaults)
 
 
 class XrayAccessLogTests(unittest.TestCase):

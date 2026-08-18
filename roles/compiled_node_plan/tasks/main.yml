@@ -163,10 +163,6 @@
     xray_inbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.inbound }}"
     xray_direct_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.direct_outbound }}"
     xray_block_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.block_outbound }}"
-    # Вход для дым-теста нужен только там, где есть куда светить: на входной
-    # ноде с скомпилированными мостами.
-    xray_smoke_inbound_enabled: "{{ (spiritvpn_node_plan.routing.bridges_as_entry | length) > 0 }}"
-    xray_smoke_socks_port: "{{ spiritvpn_smoke_socks_port }}"
     xray_enable_api: true
     xray_api_bind: 127.0.0.1
     xray_metrics_enabled: true
@@ -222,23 +218,28 @@
       - /bin/sh
       - -c
       - >-
-        test "$(curl -fsS --max-time {{ spiritvpn_smoke_curl_timeout_seconds }}
+        test "$(curl -4 -fsS --max-time {{ spiritvpn_smoke_curl_timeout_seconds }}
         {{ spiritvpn_smoke_echo_url }})" = "{{ spiritvpn_node_plan.instance.public_address }}"
 
-# Доказывает, что трафик входной ноды уходит через exit: запрос идёт в локальный
-# вход Xray, оттуда тем же outbound, что и клиентский, и наружу должен выйти под
-# адресом exit-ноды. Совпадение адресов — это и есть проверка маршрута; проверка
-# доступности его бы не заметила.
-- name: Compile the entry-to-exit smoke adapter
+# Доказывает, что входная нода дотягивается до публичного порта каждой своей
+# exit-ноды. Проверяется сеть между странами — то, что живёт своей жизнью и
+# ломается чаще всего.
+#
+# Что трафик пошёл бы правильным outbound, проверять не нужно: агент спрашивает
+# это у самого Xray через TestUserRoute при каждом применении пользователя и в
+# self-heal. А REALITY-рукопожатие остаётся непроверенным до появления живого
+# трафика — сознательный пробел, цена которого меньше, чем постоянный открытый
+# прокси на ноде ради двухсекундной проверки.
+- name: Compile the entry-to-exit reachability adapter
   ansible.builtin.set_fact:
     spiritvpn_entry_exit_smoke_argv:
-      - /bin/sh
+      - /bin/bash
       - -c
       - >-
-        test "$(curl -fsS --max-time {{ spiritvpn_smoke_curl_timeout_seconds }}
-        --socks5-hostname 127.0.0.1:{{ spiritvpn_smoke_socks_port }}
-        {{ spiritvpn_smoke_echo_url }})" =
-        "{{ spiritvpn_node_plan.routing.bridges_as_entry[0].target.address }}"
+        {% for bridge in spiritvpn_node_plan.routing.bridges_as_entry %}
+        echo > /dev/tcp/{{ bridge.target.address }}/{{ bridge.target.port }} &&
+        {% endfor %}
+        true
   when: (spiritvpn_node_plan.routing.bridges_as_entry | length) > 0
 
 - name: Initialize compiled Xray infrastructure identities

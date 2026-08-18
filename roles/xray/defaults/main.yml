@@ -43,17 +43,6 @@ reality_private_key: ""
 # Infrastructure/service identities only. Customer users are added at runtime.
 xray_static_clients: []
 
-# Вход для дым-теста на входной ноде. Нужен потому, что немаршрутизированный
-# трафик основного инбаунда блокируется, а маршруты по пользователям ставит
-# агент: отправить пакет тем же путём, которым пойдёт клиент, иначе нечем — без
-# него пришлось бы заводить клиентскую личность и класть её UUID на ноду.
-#
-# Только loopback и без UDP: снаружи он недоступен, а правило маршрутизации
-# отправляет его в тот же outbound до exit-ноды, что и клиентский трафик.
-xray_smoke_inbound_enabled: false
-xray_smoke_inbound_tag: xi-smoke
-xray_smoke_socks_port: 10808
-
 # Entry-only exit outbounds are compiled from fleet bridge relations.
 entry_exits: []
 entry_default_exit_tag: ""
