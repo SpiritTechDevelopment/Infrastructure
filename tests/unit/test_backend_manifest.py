@@ -41,6 +41,48 @@ class BackendManifestTests(unittest.TestCase):
             allow_destructive=False,
         )
 
+    def test_manifest_egress_tags_are_the_tags_the_entry_node_actually_has(self) -> None:
+        # The backend hands egress_tag to the agent verbatim as User.egress_key,
+        # and the agent writes it onto a user in Xray. Two compilers derive that
+        # string independently: this one and node_plans. If they ever disagree,
+        # every side stays internally consistent, no gate notices, and customer
+        # traffic is routed to an outbound the node does not have.
+        from fleetctl.compiler import render_files
+
+        manifest = self.compile_initial()
+        files = render_files(self.state)
+        bridges = [
+            bridge for fleet in manifest["fleets"] for bridge in fleet["bridges"]
+        ]
+        self.assertTrue(bridges, "the fixture must exercise at least one bridge")
+
+        for bridge in bridges:
+            entry_plans = [
+                json.loads(payload)
+                for name, payload in files.items()
+                if name.startswith("node-plans/")
+                and json.loads(payload)["logical_node"]["id"] == bridge["entry_node_id"]
+            ]
+            self.assertTrue(
+                entry_plans,
+                f"no compiled plan for entry node {bridge['entry_node_id']}",
+            )
+            for plan in entry_plans:
+                routing = plan["routing"]
+                self.assertIn(
+                    bridge["egress_tag"],
+                    routing["egress_table"],
+                    f"{plan['instance']['id']} has no outbound for {bridge['egress_tag']}",
+                )
+                self.assertEqual(
+                    {
+                        item["routing_key"]: item["egress_tag"]
+                        for item in routing["bridges_as_entry"]
+                        if item["routing_key"] == bridge["routing_key"]
+                    },
+                    {bridge["routing_key"]: bridge["egress_tag"]},
+                )
+
     def test_contract_is_pinned_byte_for_byte(self) -> None:
         proto = REPO_ROOT / "contracts" / "manifest" / "v1" / "manifest.proto"
         self.assertEqual(
