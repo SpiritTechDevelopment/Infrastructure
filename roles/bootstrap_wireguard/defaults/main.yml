@@ -13,3 +13,8 @@ bootstrap_wireguard_public_key_path: "/etc/wireguard/{{ bootstrap_wireguard_inte
 bootstrap_wireguard_config_path: "/etc/wireguard/{{ bootstrap_wireguard_interface }}.conf"
 bootstrap_wireguard_script_path: /usr/local/sbin/spiritvpn-configure-management-wireguard
 bootstrap_wireguard_hub_peer_command: /usr/local/sbin/spiritvpn-wireguard-peer
+# Сколько ждать, пока туннель сойдётся, прежде чем считать хаб недостижимым.
+# Шесть попыток по пять секунд — это тридцать секунд сверх таймаута самого ping,
+# с запасом больше, чем период повторного рукопожатия WireGuard.
+bootstrap_wireguard_hub_ping_retries: 6
+bootstrap_wireguard_hub_ping_delay_seconds: 5

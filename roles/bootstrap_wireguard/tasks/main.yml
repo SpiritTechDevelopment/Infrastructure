@@ -140,7 +140,17 @@
          else 'started' }}
     daemon_reload: true
 
+# WireGuard устанавливает сессию лениво, по первому же пакету, и если этот пакет
+# потерян, повтор уходит только через несколько секунд. Одна попытка сразу после
+# старта интерфейса — гонка: на entry-ru пинг упал в 10:44:25, а рукопожатие с
+# хабом состоялось примерно через полминуты, то есть связность была в порядке, а
+# бутстрап всё равно свалился. Проверка должна дать туннелю сойтись и только
+# потом объявлять узел недоступным.
 - name: Require management hub reachability after peer registration
   ansible.builtin.command:
     argv: [ping, -c, "1", -W, "5", "{{ bootstrap_wireguard_hub_management_address }}"]
+  register: _bootstrap_wireguard_hub_ping
+  until: _bootstrap_wireguard_hub_ping.rc == 0
+  retries: "{{ bootstrap_wireguard_hub_ping_retries }}"
+  delay: "{{ bootstrap_wireguard_hub_ping_delay_seconds }}"
   changed_when: false

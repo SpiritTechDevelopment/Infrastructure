@@ -200,6 +200,28 @@ class BootstrapContourTests(unittest.TestCase):
         self.assertIn("_bootstrap_wireguard_live_peers.stdout", tasks)
         self.assertIn("'restarted'", tasks)
 
+    def test_hub_reachability_waits_for_the_tunnel_to_converge(self) -> None:
+        """One ping right after `wg-quick up` is a race, not a check.
+
+        WireGuard brings the session up lazily on the first packet, and a lost
+        first packet is retried only seconds later. entry-ru failed this at
+        10:44:25 while its handshake with the hub completed about half a minute
+        afterwards — connectivity was fine, the check was simply too early.
+        """
+        tasks = (
+            REPO_ROOT / "roles" / "bootstrap_wireguard" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("until: _bootstrap_wireguard_hub_ping.rc == 0", tasks)
+        defaults = yaml.safe_load(
+            (REPO_ROOT / "roles" / "bootstrap_wireguard" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        retries = defaults["bootstrap_wireguard_hub_ping_retries"]
+        delay = defaults["bootstrap_wireguard_hub_ping_delay_seconds"]
+        # Must outlast WireGuard's rekey interval, or the retry buys nothing.
+        self.assertGreaterEqual(retries * delay, 25)
+
     def test_node_local_wireguard_configurator_has_valid_shell(self) -> None:
         path = REPO_ROOT / "roles" / "bootstrap_wireguard" / "templates" / "configure-wireguard.sh.j2"
         rendered = re.sub(r"{{[^\n{}]+}}", "fixture", path.read_text(encoding="utf-8"))
