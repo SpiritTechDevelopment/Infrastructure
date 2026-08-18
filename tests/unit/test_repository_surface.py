@@ -64,6 +64,11 @@ class RepositorySurfaceTests(unittest.TestCase):
                 "enroll-runner-overlay.sh",
                 "vault-secret-resolver.py",
                 "vendor-backend-contract.sh",
+                # Read-only triage of a deployment run. Lives here because the
+                # job-level log endpoint is the only one reachable from the
+                # workstation, and because a green PLAY RECAP on a red run means
+                # the coordinator failed between steps — a place nobody looks.
+                "deploy-log.sh",
             },
         )
 

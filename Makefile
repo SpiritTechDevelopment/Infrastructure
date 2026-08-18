@@ -89,6 +89,9 @@ fleet-bootstrap: fleet-ansible-check ## Bootstrap clean hosts; requires APPLY=1 
 fleet-deploy: ## Infrastructure coordinator; dry-run by default, APPLY=1 enables SSH
 	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) $(if $(FLEET_STATE_DIR),--state-dir "$(FLEET_STATE_DIR)",) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",) $(if $(CA_STATE),--ca-state "$(CA_STATE)",)
 
+fleet-deploy-log: ## Why the last workflow run failed; WORKFLOW=fleet-deploy BACK=1
+	@scripts/deploy-log.sh "$(WORKFLOW)" "$(or $(BACK),1)"
+
 fleet-platform-check: ## Validate the minimal bootstrap inventory; never connects
 	python3 scripts/platform-sops.py check --bundle "$(PLATFORM_BUNDLE)"
 
@@ -137,4 +140,4 @@ check: fleet-validate fleet-test ## Run local v1 static checks
 .PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-manifest \
 	fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check \
 	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-platform-check \
-	fleet-platform-bootstrap-check fleet-platform-bootstrap syntax lint check
+	fleet-platform-bootstrap-check fleet-platform-bootstrap fleet-deploy-log syntax lint check
