@@ -81,6 +81,15 @@
         "routeOnly": {{ xray_sniffing_route_only | lower }}
       }
     }
+{% if xray_smoke_inbound_enabled | bool %}
+    ,{
+      "listen": "127.0.0.1",
+      "port": {{ xray_smoke_socks_port }},
+      "protocol": "socks",
+      "tag": "{{ xray_smoke_inbound_tag }}",
+      "settings": {"auth": "noauth", "udp": false}
+    }
+{% endif %}
   ],
   "outbounds": [
 {% if node_role == 'entry' %}
@@ -124,6 +133,9 @@
     "rules": [
 {% if xray_enable_api | bool %}
       { "type": "field", "inboundTag": ["api"], "outboundTag": "api" },
+{% endif %}
+{% if xray_smoke_inbound_enabled | bool and entry_exits | length > 0 %}
+      { "type": "field", "inboundTag": ["{{ xray_smoke_inbound_tag }}"], "outboundTag": "{{ entry_exits[0].tag }}" },
 {% endif %}
       { "type": "field", "ip": ["geoip:private"], "outboundTag": "{{ xray_block_outbound_tag }}" }
 {% if xray_block_domains | length > 0 %}

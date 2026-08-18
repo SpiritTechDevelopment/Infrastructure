@@ -163,6 +163,10 @@
     xray_inbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.inbound }}"
     xray_direct_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.direct_outbound }}"
     xray_block_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.block_outbound }}"
+    # Вход для дым-теста нужен только там, где есть куда светить: на входной
+    # ноде с скомпилированными мостами.
+    xray_smoke_inbound_enabled: "{{ (spiritvpn_node_plan.routing.bridges_as_entry | length) > 0 }}"
+    xray_smoke_socks_port: "{{ spiritvpn_smoke_socks_port }}"
     xray_enable_api: true
     xray_api_bind: 127.0.0.1
     xray_metrics_enabled: true
@@ -208,6 +212,34 @@
     node_limits_nat: "{{ spiritvpn_node_plan.instance.bandwidth.qdisc.nat }}"
     node_limits_rtt: "{{ spiritvpn_node_plan.instance.bandwidth.qdisc.rtt }}"
   no_log: true
+
+# Доказывает, что выходная нода действительно выходит в интернет и делает это
+# под своим адресом: подменённый или проксированный выход даст другой ответ.
+# Только чтение, никаких побочных действий на той стороне.
+- name: Compile the direct exit smoke adapter
+  ansible.builtin.set_fact:
+    spiritvpn_direct_smoke_argv:
+      - /bin/sh
+      - -c
+      - >-
+        test "$(curl -fsS --max-time {{ spiritvpn_smoke_curl_timeout_seconds }}
+        {{ spiritvpn_smoke_echo_url }})" = "{{ spiritvpn_node_plan.instance.public_address }}"
+
+# Доказывает, что трафик входной ноды уходит через exit: запрос идёт в локальный
+# вход Xray, оттуда тем же outbound, что и клиентский, и наружу должен выйти под
+# адресом exit-ноды. Совпадение адресов — это и есть проверка маршрута; проверка
+# доступности его бы не заметила.
+- name: Compile the entry-to-exit smoke adapter
+  ansible.builtin.set_fact:
+    spiritvpn_entry_exit_smoke_argv:
+      - /bin/sh
+      - -c
+      - >-
+        test "$(curl -fsS --max-time {{ spiritvpn_smoke_curl_timeout_seconds }}
+        --socks5-hostname 127.0.0.1:{{ spiritvpn_smoke_socks_port }}
+        {{ spiritvpn_smoke_echo_url }})" =
+        "{{ spiritvpn_node_plan.routing.bridges_as_entry[0].target.address }}"
+  when: (spiritvpn_node_plan.routing.bridges_as_entry | length) > 0
 
 - name: Initialize compiled Xray infrastructure identities
   ansible.builtin.set_fact:
