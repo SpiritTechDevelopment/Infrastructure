@@ -26,15 +26,26 @@
   changed_when: false
   check_mode: false
 
-# Только те, что действительно установлены: маскировать несуществующий юнит
-# значит оставить на узле ссылку в /dev/null на имя, которого здесь никогда не
-# было, и объяснять её потом.
+# Гасим триггер, а не пытаемся замаскировать: файлы этих юнитов лежат в
+# /etc/systemd/system, то есть ровно там, куда systemctl mask ставит симлинк на
+# /dev/null. Замаскировать их нельзя, не удалив файлы, которых эта выкатка не
+# создавала. Работу же им даёт таймер, и выключенный таймер её не даст: сервисы
+# static, сами по себе они не запускаются.
+#
+# Только по действительно установленным юнитам — на узле, где их не было,
+# трогать нечего.
 - name: Retire superseded self-heal units
   ansible.builtin.systemd_service:
     name: "{{ item }}"
     state: stopped
-    enabled: false
-    masked: true
+    # Снимаем с автозапуска только то, что на нём стоит. Решать по суффиксу
+    # имени значило бы звать disable для static-юнита и снова падать на том,
+    # что systemd отказывается делать бессмысленное.
+    enabled: >-
+      {{ false
+         if _compiled_runtime_unit_files.stdout is search(
+              '^' ~ (item | regex_escape) ~ '\s+enabled', multiline=True)
+         else omit }}
   loop: "{{ compiled_runtime_superseded_units }}"
   when:
     - not ansible_check_mode
