@@ -21,6 +21,8 @@ from fleetctl.compiler import (
     render_files,
 )
 from fleetctl.model import DesiredState
+from fleetctl.pki import PkiError
+from fleetctl.pki.issuance import sign_agent_certificate
 from fleetctl.planning import ImpactPlan, build_impact_plan, build_initial_baseline
 from fleetctl.provisioning import ManualProvisioningAdapter
 from fleetctl.validation import validate_environment
@@ -45,6 +47,9 @@ class DeploymentOptions:
     bootstrap_vars: Path | None = None
     compiled_secrets: Path | None = None
     readiness_vars: Path | None = None
+    # Root of the offline CA. Required only when nodes are actually bootstrapped,
+    # because that is the only step that needs to sign anything.
+    ca_state: Path | None = None
 
 
 class DeploymentCoordinator:
@@ -202,6 +207,31 @@ class DeploymentCoordinator:
                         | set(bootstrap_targets)
                     )
                 )
+                # Machine identity is a two-phase handshake: the node keeps its
+                # private key, so the CA can only sign a CSR it is handed. The
+                # bootstrap step is split accordingly and each phase is recorded
+                # separately, so a resume does not re-collect signed requests.
+                pki_directory = self._agent_pki_directory(record_path, deployment_id)
+                self._reconcile_ansible_step(
+                    record=record,
+                    record_path=record_path,
+                    step="bootstrap_csr",
+                    targets=bootstrap_targets,
+                    inventory=build_directory / "bootstrap-inventory.json",
+                    playbook=self.root / "playbooks" / "bootstrap" / "csr.yml",
+                    variables=options.bootstrap_vars,
+                    extra_variables={
+                        "pki_agent_csr_collect_directory": str(pki_directory / "csr"),
+                    },
+                )
+                chain_variables = self._reconcile_agent_certificates(
+                    record=record,
+                    record_path=record_path,
+                    targets=bootstrap_targets,
+                    current=current,
+                    options=options,
+                    pki_directory=pki_directory,
+                )
                 self._reconcile_ansible_step(
                     record=record,
                     record_path=record_path,
@@ -210,6 +240,7 @@ class DeploymentCoordinator:
                     inventory=build_directory / "bootstrap-inventory.json",
                     playbook=self.root / "playbooks" / "bootstrap" / "bootstrap.yml",
                     variables=options.bootstrap_vars,
+                    extra_files=(chain_variables,) if chain_variables else (),
                 )
                 self._reconcile_ansible_step(
                     record=record,
@@ -230,7 +261,13 @@ class DeploymentCoordinator:
                     variables=options.readiness_vars,
                 )
             else:
-                for step in ("bootstrap", "configure", "readiness_gates"):
+                for step in (
+                    "bootstrap_csr",
+                    "sign_agent_certificates",
+                    "bootstrap",
+                    "configure",
+                    "readiness_gates",
+                ):
                     self._skip_step(record, record_path, step, "SKIPPED_DRY_RUN; no SSH or mutation")
 
             write_rendered_files(build_directory, files)
@@ -358,6 +395,102 @@ class DeploymentCoordinator:
         if missing:
             raise DeploymentError(f"--apply requires readable {', '.join(missing)} files")
 
+    @staticmethod
+    def _agent_pki_directory(record_path: Path, deployment_id: str) -> Path:
+        # Beside the deployment record rather than inside the build directory:
+        # render_files replaces that directory wholesale, which would delete the
+        # collected requests between the two bootstrap phases.
+        directory = record_path.parent.parent / "agent-pki" / deployment_id
+        if directory.is_symlink():
+            raise DeploymentError(f"refusing symlink agent PKI directory: {directory}")
+        directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(directory, 0o700)
+        return directory
+
+    def _reconcile_agent_certificates(
+        self,
+        *,
+        record: dict[str, Any],
+        record_path: Path,
+        targets: tuple[str, ...],
+        current: DesiredState,
+        options: DeploymentOptions,
+        pki_directory: Path,
+    ) -> Path | None:
+        """Sign every collected CSR and return the chain variables file."""
+        chain_path = pki_directory / "agent-chains.json"
+        if self._step_is_completed(record, "sign_agent_certificates"):
+            return chain_path if chain_path.is_file() else None
+        if not targets:
+            self._complete_step(
+                record,
+                record_path,
+                "sign_agent_certificates",
+                "no bootstrapped nodes; nothing to sign",
+            )
+            return None
+        if options.ca_state is None:
+            raise DeploymentError(
+                "bootstrapping nodes requires --ca-state; the agent CSRs cannot be signed without it"
+            )
+        chains = self._sign_agent_certificates(
+            targets=targets,
+            current=current,
+            ca_state=options.ca_state,
+            pki_directory=pki_directory,
+        )
+        missing = [instance for instance in targets if instance not in chains]
+        if missing:
+            raise DeploymentError(
+                "the CSR phase collected no request for: " + ", ".join(sorted(missing))
+            )
+        payload = json.dumps(
+            {"spiritvpn_agent_certificate_chains": chains},
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ).encode("utf-8")
+        descriptor = os.open(chain_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+        self._complete_step(
+            record,
+            record_path,
+            "sign_agent_certificates",
+            f"signed {len(chains)} machine certificate(s): {', '.join(sorted(chains))}",
+        )
+        return chain_path
+
+    @staticmethod
+    def _sign_agent_certificates(
+        *,
+        targets: tuple[str, ...],
+        current: DesiredState,
+        ca_state: Path,
+        pki_directory: Path,
+    ) -> dict[str, str]:
+        csr_directory = pki_directory / "csr"
+        signed_directory = pki_directory / "signed"
+        chains: dict[str, str] = {}
+        for instance_id in sorted(targets):
+            csr_path = csr_directory / f"{instance_id}.csr"
+            if csr_path.is_symlink() or not csr_path.is_file():
+                continue
+            try:
+                sign_agent_certificate(
+                    current,
+                    instance_id,
+                    ca_state=ca_state,
+                    csr_pem=csr_path.read_bytes(),
+                    output=signed_directory,
+                )
+            except PkiError as exc:
+                raise DeploymentError(f"cannot sign the CSR for {instance_id}: {exc}") from exc
+            chains[instance_id] = (signed_directory / f"{instance_id}-chain.pem").read_text(
+                encoding="utf-8"
+            )
+        return chains
+
     def _reconcile_ansible_step(
         self,
         *,
@@ -368,13 +501,22 @@ class DeploymentCoordinator:
         inventory: Path,
         playbook: Path,
         variables: Path | None,
+        extra_files: tuple[Path, ...] = (),
+        extra_variables: dict[str, str] | None = None,
     ) -> None:
         if self._step_is_completed(record, step):
             return
         if not targets:
             self._complete_step(record, record_path, step, "no affected nodes; no Ansible invocation")
             return
-        self._run_ansible(inventory, playbook, variables, limit=targets)
+        self._run_ansible(
+            inventory,
+            playbook,
+            variables,
+            limit=targets,
+            extra_files=extra_files,
+            extra_variables=extra_variables,
+        )
         self._complete_step(
             record,
             record_path,
@@ -389,6 +531,8 @@ class DeploymentCoordinator:
         variables: Path | None,
         *,
         limit: tuple[str, ...],
+        extra_files: tuple[Path, ...] = (),
+        extra_variables: dict[str, str] | None = None,
     ) -> None:
         if not limit:
             raise DeploymentError("internal error: refusing an unbounded Ansible invocation")
@@ -396,6 +540,12 @@ class DeploymentCoordinator:
         arguments.extend(("--limit", ",".join(limit)))
         if variables is not None:
             arguments.extend(("--extra-vars", f"@{variables}"))
+        for path in extra_files:
+            arguments.extend(("--extra-vars", f"@{path}"))
+        if extra_variables:
+            arguments.extend(
+                ("--extra-vars", json.dumps(extra_variables, ensure_ascii=False, sort_keys=True))
+            )
         try:
             result = subprocess.run(arguments, cwd=self.root, check=False)
         except OSError as exc:

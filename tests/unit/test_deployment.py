@@ -16,6 +16,20 @@ from tests.unit.test_git_adapter import TemporaryFleetRepository
 
 
 class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
+    def fake_signer(self, coordinator: DeploymentCoordinator):
+        """Stand in for the offline CA.
+
+        Signing is covered by the PKI tests; here the only thing that matters is
+        that the coordinator collects, signs and hands the chains to the install
+        phase in the right order.
+        """
+
+        def sign(*, targets, current, ca_state, pki_directory):
+            del current, ca_state, pki_directory
+            return {instance: f"-----BEGIN CERTIFICATE-----\n{instance}\n" for instance in targets}
+
+        return mock.patch.object(coordinator, "_sign_agent_certificates", side_effect=sign)
+
     def prepare_repository(self, parent: Path) -> TemporaryFleetRepository:
         root = parent / "repository"
         root.mkdir()
@@ -59,6 +73,8 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
         self.assertFalse(record["deployment_ref_updated"])
         self.assertEqual(record["source_git_sha"], source)
         self.assertEqual(ref, "")
+        self.assertEqual(statuses["bootstrap_csr"], "SKIPPED_DRY_RUN")
+        self.assertEqual(statuses["sign_agent_certificates"], "SKIPPED_DRY_RUN")
         self.assertEqual(statuses["bootstrap"], "SKIPPED_DRY_RUN")
         self.assertEqual(statuses["configure"], "SKIPPED_DRY_RUN")
         self.assertEqual(statuses["readiness_gates"], "SKIPPED_DRY_RUN")
@@ -204,7 +220,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 path = repository.root / name
                 path.write_text("{}\n", encoding="utf-8")
                 variables[name] = path
-            with mock.patch.object(coordinator, "_run_ansible"):
+            with mock.patch.object(coordinator, "_run_ansible"), self.fake_signer(coordinator):
                 resumed = coordinator.run(
                     DeploymentOptions(
                         environment="develop",
@@ -214,6 +230,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                         bootstrap_vars=variables["bootstrap.yml"],
                         compiled_secrets=variables["secrets.yml"],
                         readiness_vars=variables["readiness.yml"],
+                        ca_state=repository.root / "ca",
                     )
                 )
 
@@ -240,7 +257,9 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 path = repository.root / name
                 path.write_text("{}\n", encoding="utf-8")
                 variables[name] = path
-            with mock.patch.object(coordinator, "_run_ansible") as ansible:
+            with mock.patch.object(coordinator, "_run_ansible") as ansible, self.fake_signer(
+                coordinator
+            ):
                 coordinator.run(
                     DeploymentOptions(
                         environment="develop",
@@ -249,15 +268,124 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                         bootstrap_vars=variables["bootstrap.yml"],
                         compiled_secrets=variables["secrets.yml"],
                         readiness_vars=variables["readiness.yml"],
+                        ca_state=repository.root / "ca",
                     )
                 )
 
-        self.assertEqual(ansible.call_count, 3)
+        # csr, bootstrap, configure, readiness — the CSR phase is its own run.
+        self.assertEqual(ansible.call_count, 4)
         for call in ansible.call_args_list:
             self.assertEqual(
                 call.kwargs["limit"],
                 ("develop-entry-nl-01", "develop-exit-de-01"),
             )
+
+    def test_bootstrapping_nodes_refuses_to_start_without_a_ca(self) -> None:
+        # Fail before the CSR phase mutates anything: collecting requests that
+        # nothing can sign would leave keys on nodes and no way forward.
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            coordinator = DeploymentCoordinator(repository.root)
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            with mock.patch.object(coordinator, "_run_ansible"):
+                with self.assertRaisesRegex(DeploymentError, "requires --ca-state"):
+                    coordinator.run(
+                        DeploymentOptions(
+                            environment="develop",
+                            initial=True,
+                            apply=True,
+                            bootstrap_vars=variables["bootstrap.yml"],
+                            compiled_secrets=variables["secrets.yml"],
+                            readiness_vars=variables["readiness.yml"],
+                        )
+                    )
+
+    def test_uncollected_csr_stops_the_deployment_before_install(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            coordinator = DeploymentCoordinator(repository.root)
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            playbooks: list[str] = []
+
+            def record(_inventory, playbook, _variables, *, limit, **_keywords):
+                del limit
+                playbooks.append(playbook.name)
+
+            # One node answered the CSR phase, the other did not.
+            def partial_sign(*, targets, current, ca_state, pki_directory):
+                del current, ca_state, pki_directory
+                return {targets[0]: "-----BEGIN CERTIFICATE-----\n"}
+
+            with mock.patch.object(
+                coordinator, "_run_ansible", side_effect=record
+            ), mock.patch.object(
+                coordinator, "_sign_agent_certificates", side_effect=partial_sign
+            ):
+                with self.assertRaisesRegex(DeploymentError, "collected no request for"):
+                    coordinator.run(
+                        DeploymentOptions(
+                            environment="develop",
+                            initial=True,
+                            apply=True,
+                            bootstrap_vars=variables["bootstrap.yml"],
+                            compiled_secrets=variables["secrets.yml"],
+                            readiness_vars=variables["readiness.yml"],
+                            ca_state=repository.root / "ca",
+                        )
+                    )
+
+        self.assertEqual(playbooks, ["csr.yml"])
+
+    def test_signed_chains_are_handed_to_the_install_phase_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            coordinator = DeploymentCoordinator(repository.root)
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            seen: dict[str, tuple[Path, ...]] = {}
+
+            def record(_inventory, playbook, _variables, *, limit, extra_files=(), **_keywords):
+                del limit
+                seen[playbook.name] = extra_files
+
+            with mock.patch.object(
+                coordinator, "_run_ansible", side_effect=record
+            ), self.fake_signer(coordinator):
+                coordinator.run(
+                    DeploymentOptions(
+                        environment="develop",
+                        initial=True,
+                        apply=True,
+                        bootstrap_vars=variables["bootstrap.yml"],
+                        compiled_secrets=variables["secrets.yml"],
+                        readiness_vars=variables["readiness.yml"],
+                        ca_state=repository.root / "ca",
+                    )
+                )
+
+            self.assertEqual(seen["csr.yml"], ())
+            self.assertEqual(len(seen["bootstrap.yml"]), 1)
+            chain_path = seen["bootstrap.yml"][0]
+            chains = json.loads(chain_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                sorted(chains["spiritvpn_agent_certificate_chains"]),
+                ["develop-entry-nl-01", "develop-exit-de-01"],
+            )
+            self.assertEqual(oct(chain_path.stat().st_mode & 0o777), "0o600")
+            # The chains outlive the second render: the build directory is
+            # replaced wholesale, so they cannot live there.
+            self.assertNotIn("build", chain_path.parts)
 
     def test_no_desired_change_touches_no_nodes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -289,7 +417,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
         node_steps = {
             step["name"]: step["diagnostic"]
             for step in record["steps"]
-            if step["name"] in {"bootstrap", "configure", "readiness_gates"}
+            if step["name"] in {"bootstrap_csr", "bootstrap", "configure", "readiness_gates"}
         }
         self.assertTrue(all("no affected nodes" in diagnostic for diagnostic in node_steps.values()))
 
@@ -309,26 +437,31 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 bootstrap_vars=variables["bootstrap.yml"],
                 compiled_secrets=variables["secrets.yml"],
                 readiness_vars=variables["readiness.yml"],
+                ca_state=repository.root / "ca",
             )
             first_calls: list[str] = []
 
-            def fail_configure(_inventory, playbook, _variables, *, limit):
+            def fail_configure(_inventory, playbook, _variables, *, limit, **_keywords):
                 del limit
                 first_calls.append(playbook.name)
                 if playbook.name == "configure.yml":
                     raise DeploymentError("fixture configure failure")
 
-            with mock.patch.object(coordinator, "_run_ansible", side_effect=fail_configure):
+            with mock.patch.object(
+                coordinator, "_run_ansible", side_effect=fail_configure
+            ), self.fake_signer(coordinator):
                 with self.assertRaisesRegex(DeploymentError, "fixture configure failure"):
                     coordinator.run(options)
 
             resumed_calls: list[str] = []
 
-            def record_call(_inventory, playbook, _variables, *, limit):
+            def record_call(_inventory, playbook, _variables, *, limit, **_keywords):
                 del limit
                 resumed_calls.append(playbook.name)
 
-            with mock.patch.object(coordinator, "_run_ansible", side_effect=record_call):
+            with mock.patch.object(
+                coordinator, "_run_ansible", side_effect=record_call
+            ), self.fake_signer(coordinator) as resumed_signer:
                 coordinator.run(
                     DeploymentOptions(
                         environment="develop",
@@ -338,11 +471,14 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                         bootstrap_vars=variables["bootstrap.yml"],
                         compiled_secrets=variables["secrets.yml"],
                         readiness_vars=variables["readiness.yml"],
+                        ca_state=repository.root / "ca",
                     )
                 )
 
-        self.assertEqual(first_calls, ["bootstrap.yml", "configure.yml"])
+        self.assertEqual(first_calls, ["csr.yml", "bootstrap.yml", "configure.yml"])
         self.assertEqual(resumed_calls, ["configure.yml", "readiness.yml"])
+        # A completed signing step must not send the CSRs back to the CA.
+        resumed_signer.assert_not_called()
 
     def test_environment_lock_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

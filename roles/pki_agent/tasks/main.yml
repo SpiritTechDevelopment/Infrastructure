@@ -94,6 +94,35 @@
     src: "{{ pki_agent_csr_path }}"
   register: _pki_agent_csr_public
 
+# The CSR is public — proof of key possession and a declaration of names, never
+# a secret. Handing it back as a file is what lets the coordinator sign it
+# without an operator transcribing it out of a log.
+#
+# Written from the slurp above rather than fetched: the request lives in a
+# 0700 root-owned directory, and the slurp has already crossed that boundary
+# under become. delegate_to writes on the controller, so become must be off.
+- name: Ensure the controller directory that collects CSRs
+  ansible.builtin.file:
+    path: "{{ pki_agent_csr_collect_directory }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when: pki_agent_csr_collect_directory | length > 0
+
+- name: Return the CSR to the controller for signing
+  ansible.builtin.copy:
+    content: "{{ _pki_agent_csr_public.content | b64decode }}"
+    dest: "{{ pki_agent_csr_collect_directory }}/{{ spiritvpn_node_plan.instance.id }}.csr"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  when:
+    - pki_agent_csr_collect_directory | length > 0
+    - pki_agent_certificate_chain | length == 0
+
+# Fallback for a hand-run bootstrap that collects nothing: without it the CSR
+# would exist only on the node and the operator would have no way to reach it.
 - name: Report CSR readiness without exposing the private key
   ansible.builtin.debug:
     msg:
@@ -102,7 +131,9 @@
       certificate_identity: "{{ pki_agent_identity }}"
       tls_server_name: "{{ pki_agent_server_name }}"
       csr_pem: "{{ _pki_agent_csr_public.content | b64decode }}"
-  when: pki_agent_certificate_chain | length == 0
+  when:
+    - pki_agent_certificate_chain | length == 0
+    - pki_agent_csr_collect_directory | length == 0
 
 - name: Install returned certificate chain
   ansible.builtin.copy:

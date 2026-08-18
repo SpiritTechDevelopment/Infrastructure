@@ -575,6 +575,10 @@ all:
             "vault-secret-resolver.py",
             "StrictHostKeyChecking=yes",
             "--state-dir",
+            # Nodes keep their agent private keys, so the CA has to be reachable
+            # from the executor or the bootstrap phase cannot complete.
+            "--ca-state",
+            '"ca/$environment/ca.key"',
         ):
             self.assertIn(required, text)
         self.assertNotIn("update-deployment-ref", text)

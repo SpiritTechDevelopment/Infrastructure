@@ -7,6 +7,11 @@ pki_agent_identity: "{{ spiritvpn_node_plan.instance.agent.certificate_identity 
 pki_agent_server_name: "{{ spiritvpn_node_plan.instance.agent.tls_server_name }}"
 pki_agent_certificate_chain: ""
 pki_agent_require_certificate: true
+# Controller-side directory the CSR is fetched into, one <instance-id>.csr per
+# node. Empty means "do not collect" — the role then reports the CSR in its
+# output instead, which is all a hand-run bootstrap can do. The deployment
+# coordinator sets this to its own state directory and signs what lands there.
+pki_agent_csr_collect_directory: ""
 pki_agent_minimum_validity_seconds: 604800
 pki_agent_renewal_script_path: /usr/local/sbin/spiritvpn-renew-agent-certificate
 pki_agent_renewal_service: spiritvpn-agent-certificate-renewal.service

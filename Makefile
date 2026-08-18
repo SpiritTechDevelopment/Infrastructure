@@ -87,7 +87,7 @@ fleet-bootstrap: fleet-ansible-check ## Bootstrap clean hosts; requires APPLY=1 
 	ansible-playbook -i "build/$(or $(ENVIRONMENT),develop)/bootstrap-inventory.json" playbooks/bootstrap/bootstrap.yml --extra-vars "@$(BOOTSTRAP_VARS)"
 
 fleet-deploy: ## Infrastructure coordinator; dry-run by default, APPLY=1 enables SSH
-	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) $(if $(FLEET_STATE_DIR),--state-dir "$(FLEET_STATE_DIR)",) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",)
+	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) $(if $(FLEET_STATE_DIR),--state-dir "$(FLEET_STATE_DIR)",) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",) $(if $(CA_STATE),--ca-state "$(CA_STATE)",)
 
 fleet-platform-check: ## Validate the minimal bootstrap inventory; never connects
 	python3 scripts/platform-sops.py check --bundle "$(PLATFORM_BUNDLE)"
@@ -104,15 +104,10 @@ fleet-platform-bootstrap: fleet-platform-check ## Reconcile Vault and management
 	  --operator-wireguard-private-key "$(PLATFORM_WIREGUARD_PRIVATE_KEY)"
 
 syntax: ## Syntax-check the active v1 playbooks
-	@for playbook in \
-		playbooks/bootstrap/bootstrap.yml \
-		playbooks/control/deploy.yml \
-		playbooks/deploy/configure.yml \
-		playbooks/operations/readiness.yml \
-		playbooks/platform/bootstrap.yml \
-		playbooks/platform/wireguard-bootstrap.yml \
-		playbooks/platform/steady.yml \
-		playbooks/platform/readiness.yml; do \
+	@# Discovered, not enumerated: a hand-maintained list is how a new playbook
+	@# reaches the deployment path without ever being parsed. `find` rather than
+	@# `git ls-files` so a playbook that is not staged yet is still checked.
+	@find playbooks -name '*.yml' -type f | sort | while IFS= read -r playbook; do \
 		ansible-playbook -i tests/fixtures/platform-bootstrap/platform.yml "$$playbook" --syntax-check || exit $$?; \
 	done
 

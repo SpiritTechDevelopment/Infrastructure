@@ -998,7 +998,22 @@ secret://kv/develop/bridges/develop-entry-nl.to-develop-exit-de#service_uuid
 /etc/spiritvpn/deploy/develop/readiness.yml
 /etc/spiritvpn/deploy/develop/known_hosts
 /etc/spiritvpn/deploy/develop/vault-approle/{role-id,secret-id,secret-id-accessor}
+/etc/spiritvpn/deploy/develop/ca/develop/{ca.crt,ca.key}
 ```
+
+`ca/` — корень CA среды. Он нужен здесь потому, что приватный ключ агента
+генерируется на ноде и никогда её не покидает: подписать CSR может только тот,
+кто исполняет bootstrap, а исполняет его management host. Каталог
+per-environment намеренно — исполнитель `develop` не должен читать корень
+`prod`. Внутренний подкаталог `develop/` создаёт сам CA-адаптер, поэтому имя
+среды в пути повторяется. Скопируйте туда `~/.config/spiritvpn/ca/<env>/` с
+машины оператора как root-owned `0600`; без него apply с новыми нодами
+останавливается до того, как тронет хоть одну машину.
+
+`known_hosts` должен содержать host key **и** для публичного bootstrap-адреса
+на порту 22, **и** для management address на объявленном `networking.ssh.port`
+— во второй форме это `[10.80.2.11]:232`. Фазы ходят на разные порты, и
+неполный файл обнаружится только на середине выкатки.
 
 Platform bootstrap автоматически создаёт базовый `bootstrap.yml` с public key и
 endpoint management WireGuard hub. `vault-approle/` создаётся командой:
@@ -1088,30 +1103,43 @@ make fleet-deploy ENVIRONMENT=develop SOURCE=HEAD INITIAL=1
 
 ### Шаг 10. Первый bootstrap fleet-нод: текущая граница
 
-При apply координатор должен:
+При apply координатор:
 
-1. подключиться к новым VPS по public address;
-2. установить hardening, Docker и WireGuard;
-3. зарегистрировать public WireGuard peer на management hub;
-4. сгенерировать agent private key и CSR непосредственно на ноде;
-5. получить подписанный certificate chain;
-6. применить Xray/runtime secrets;
-7. выполнить direct и entry-to-exit smoke tests.
+1. собирает CSR со всех новых нод (`playbooks/bootstrap/csr.yml`);
+2. подписывает их локальным CA и складывает цепочки рядом с deployment record;
+3. подключается к новым VPS по public address и гоняет полный bootstrap
+   (hardening, Docker, WireGuard, установка подписанной цепочки);
+4. применяет Xray/runtime secrets;
+5. выполняет direct и entry-to-exit smoke tests.
 
-На текущем этапе шаги 5 и 7 не автоматизированы для production:
+**Машинная идентичность — двухфазная по построению.** Приватный ключ агента
+генерируется на ноде и никогда её не покидает, поэтому CA видит только CSR, и
+чистая нода не бутстрапится одним проходом. Фаза CSR намеренно узкая: на ноде
+работает только `roles/pki_agent`, и `any_errors_fatal` там снят — недоступная
+нода не должна прятать запросы остальных. Установка цепочек падает fail-closed
+на тех, чей CSR собрать не удалось.
 
-- production CA adapter не подключён к coordinator;
-- `spiritvpn_agent_certificate_chains` нужно дополнить после получения CSR;
+Отсюда обязательный `CA_STATE` при apply с новыми нодами:
+
+```bash
+make fleet-deploy ENVIRONMENT=develop SOURCE=HEAD INITIAL=1 APPLY=1 \
+  CA_STATE=~/.config/spiritvpn/ca \
+  BOOTSTRAP_VARS=... COMPILED_SECRETS=... READINESS_VARS=...
+```
+
+Ручной путь (`make fleet-bootstrap`) остаётся односкачковым: там роль печатает
+CSR в вывод, оператор подписывает его `make fleet-pki-sign` и повторяет прогон,
+дополнив `spiritvpn_agent_certificate_chains`.
+
+Не автоматизировано до сих пор:
+
 - `readiness.yml` требует реальные `spiritvpn_direct_smoke_argv` и
   `spiritvpn_entry_exit_smoke_argv`;
 - backend ApplyFleetManifest, DNS promotion и deployment ref advancement ещё не
   реализованы.
 
-Поэтому сейчас репозиторий позволяет полностью описать, проверить,
-скомпилировать и начать bootstrap флота, но не следует обещать автономный
-production rollout до реализации этих адаптеров. Bootstrap останавливается
-fail-closed и может быть продолжен с тем же SHA через `RESUME=1` после установки
-certificate chain и protected inputs.
+Bootstrap останавливается fail-closed и может быть продолжен с тем же SHA через
+`RESUME=1`; уже подписанные цепочки при этом не выпускаются заново.
 
 ### Как добавить ещё одну новую LogicalNode?
 
@@ -1225,7 +1253,7 @@ gh secret set PLATFORM_SSH_KNOWN_HOSTS --env develop < /protected/known-hosts
 | `make fleet-bootstrap APPLY=1 BOOTSTRAP_VARS=...` | Установить чистые fleet-ноды |
 | `make fleet-configure-check CONNECT=1` | Ansible check по compiled inventory |
 | `make fleet-configure APPLY=1 COMPILED_SECRETS=...` | Применить compiled node plans |
-| `make fleet-deploy ...` | Координатор; без `APPLY=1` всегда dry-run |
+| `make fleet-deploy ...` | Координатор; без `APPLY=1` всегда dry-run. С новыми нодами требует `CA_STATE` — иначе их CSR некому подписать |
 
 ## Что делают скрипты?
 

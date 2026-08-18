@@ -200,14 +200,33 @@ Create these root-owned files on the management host:
 Use `examples/fleet-executor-bootstrap.yml` and
 `examples/fleet-executor-readiness.yml` as starting points. `known_hosts` must
 contain independently verified keys for every public bootstrap address and
-management address used by Ansible. The executor sets
-`StrictHostKeyChecking=yes`; it never invokes `ssh-keyscan`.
+management address used by Ansible — including the port, because the phases do
+not share one: bootstrap connects to the public address on 22, the steady phase
+to the management address on the declared `networking.ssh.port` (written
+`[10.80.2.11]:232`). The executor sets `StrictHostKeyChecking=yes`; it never
+invokes `ssh-keyscan`.
 
-The first node bootstrap intentionally pauses while the WireGuard public key is
-registered and its CSR is signed. WireGuard peer registration on the management
-hub is automatic; node and hub private keys never leave their hosts. Add returned public certificate chains to
-`spiritvpn_agent_certificate_chains`, keyed by instance ID, and resume the same
-SHA. Private WireGuard and agent keys never leave their node.
+The environment CA root is a protected input too, because the coordinator signs
+agent CSRs where it runs:
+
+```text
+/etc/spiritvpn/deploy/develop/ca/develop/{ca.crt,ca.key}
+```
+
+Per-environment on purpose: the develop executor must not be able to read the
+prod root. The inner `develop/` is the CA adapter's own layout, so the
+environment name appears twice. Without it, an apply that bootstraps nodes stops
+before touching any machine.
+
+Node bootstrap is two-phase and automatic: the coordinator collects every CSR
+first (`playbooks/bootstrap/csr.yml`), signs them against that root, and only
+then runs the bootstrap that installs the returned chains. WireGuard peer
+registration on the management hub is automatic as well. Private WireGuard and
+agent keys never leave their node.
+
+A hand-run `make fleet-bootstrap` is still single-pass: the role reports the CSR
+in its output, the operator signs it with `make fleet-pki-sign` and repeats the
+run with `spiritvpn_agent_certificate_chains` filled in.
 
 ## 6. GitHub readiness and deployment
 

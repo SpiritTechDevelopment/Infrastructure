@@ -1,0 +1,37 @@
+---
+# First half of the two-phase machine-identity handshake. The agent's private
+# key is generated on the node and never leaves it, so the CA can only ever see
+# a CSR — which means a clean node cannot be bootstrapped in a single pass.
+# This play collects those CSRs; the coordinator signs them and then runs
+# bootstrap.yml, which installs the returned chains.
+#
+# Deliberately narrow: only the PKI role runs here, so a node that is about to
+# be signed is not otherwise mutated before the real bootstrap.
+- name: Collect agent CSRs so the CA can sign before bootstrap installs them
+  hosts: spiritvpn_bootstrap
+  become: true
+  gather_facts: false
+  # An unreachable node must not hide the CSRs of the others: the coordinator
+  # signs whatever was collected and the install phase fails closed on the rest.
+  any_errors_fatal: false
+  vars:
+    spiritvpn_deploy_mode: bootstrap
+    spiritvpn_manage_deploy_user: false
+    spiritvpn_require_runtime_secrets: false
+    # This phase exists precisely because no chain has been issued yet.
+    pki_agent_require_certificate: false
+  pre_tasks:
+    - name: Load and validate the compiled bootstrap node plan
+      ansible.builtin.include_role:
+        name: compiled_node_plan
+
+    - name: Require a controller directory to collect CSRs into
+      ansible.builtin.assert:
+        that:
+          - pki_agent_csr_collect_directory | length > 0
+        fail_msg: >-
+          The CSR phase must be told where to put the requests it collects.
+          Set pki_agent_csr_collect_directory; the deployment coordinator does
+          this automatically.
+  roles:
+    - role: pki_agent

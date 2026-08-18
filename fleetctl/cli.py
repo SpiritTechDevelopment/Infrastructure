@@ -110,6 +110,13 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--bootstrap-vars", type=Path)
     deploy.add_argument("--compiled-secrets", type=Path)
     deploy.add_argument("--readiness-vars", type=Path)
+    # No default, for the same reason as pki-sign: the root key must not be
+    # reachable from a path the repository knows.
+    deploy.add_argument(
+        "--ca-state",
+        type=Path,
+        help="CA state directory; required only when the plan bootstraps nodes",
+    )
     pki_issue = commands.add_parser(
         "pki-issue",
         help="issue a control-plane certificate; names are taken from desired state",
@@ -286,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
                     bootstrap_vars=args.bootstrap_vars,
                     compiled_secrets=args.compiled_secrets,
                     readiness_vars=args.readiness_vars,
+                    ca_state=args.ca_state,
                 )
             )
         except (DeploymentError, GitAdapterError) as exc:
