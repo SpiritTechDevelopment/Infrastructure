@@ -59,10 +59,10 @@ spec:
       # CustomerService ещё не реализован; идентичность закреплена заранее,
       # чтобы сертификат и этот список не расходились. Reader отдаёт VLESS URI
       # с client_uuid, то есть сами учётные данные.
-      customer_access_writers: [spiffe://spiritvpn/develop/service/customer-service]
-      customer_access_readers: [spiffe://spiritvpn/develop/service/customer-service]
+      customer_access_writers: ['spiffe://spiritvpn/develop/service/customer-service']
+      customer_access_readers: ['spiffe://spiritvpn/develop/service/customer-service']
   common_overrides:
     components:
       node_agent:
         repository: ghcr.io/spirittechdevelopment/node-agent
-        digest: sha256:5e2b89734b02964669b79ce76014dada92ba58e89856fdc03b64aaebae8c8967
+        digest: sha256:5f59a0a884fcb3ba98ccb423d8458d69f03c669931a572b273d639e041f89f9a
