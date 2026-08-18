@@ -52,9 +52,16 @@ fi
 printf '\n--- режим ---\n'
 grep -oE 'REQUESTED_MODE: [a-z-]+' "$log" | tail -1 || echo '(не найден)'
 
-# Падения задач Ansible: сообщение целиком, оно обычно и есть диагноз.
-printf '\n--- падения задач ---\n'
-if ! grep -hoE '(fatal|failed): \[[^]]+\].*|.*UNREACHABLE!.*' "$log" | tail -5; then
+# Падения задач Ansible вместе с предшествующим TASK и телом сообщения. Ansible
+# печатает результат многострочным JSON, поэтому одной строки не хватает: имя
+# провалившегося ассерта и evaluated_to живут ниже первой скобки.
+printf '\n--- падение задачи ---\n'
+failure_line="$(grep -n 'FAILED!\|UNREACHABLE!' "$log" | tail -1 | cut -d: -f1 || true)"
+if [[ -n "$failure_line" ]]; then
+  task_line="$(head -n "$failure_line" "$log" | grep -n 'TASK \[' | tail -1 | cut -d: -f1 || true)"
+  sed -n "${task_line:-$failure_line},$((failure_line + 14))p" "$log" |
+    sed 's/^[0-9T:.Z-]* //' | cut -c1-300
+else
   echo '(нет)'
 fi
 

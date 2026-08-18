@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -9,6 +10,27 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class NodeLimitsRoleTests(unittest.TestCase):
+    def test_rtt_readback_tolerates_both_iproute2_spellings(self) -> None:
+        """iproute2 prints `rtt 100ms` on 22.04 and `rtt 100.0ms` on 24.04.
+
+        The assertion must check the policy, not the formatting of someone
+        else's tool — a literal match failed bootstrap on entry-ru while the
+        qdisc was in fact exactly what desired state asked for.
+        """
+        tasks = (REPO_ROOT / "roles" / "node_limits" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("search('rtt 100(\\\\.0)?ms')", tasks)
+        self.assertNotIn("'rtt 100.0ms' in", tasks)
+
+        pattern = re.compile(r"rtt 100(\.0)?ms")
+        for accepted in ("... split-gso rtt 100ms raw", "... split-gso rtt 100.0ms raw"):
+            self.assertIsNotNone(pattern.search(accepted), accepted)
+        # Must not degrade into accepting any rtt at all.
+        for rejected in ("rtt 10ms raw", "rtt 1000ms raw", "rtt 100s raw"):
+            self.assertIsNone(pattern.search(rejected), rejected)
+
+
     def test_cake_reconciler_template_is_valid_shell(self) -> None:
         template = (
             REPO_ROOT / "roles" / "node_limits" / "templates" / "apply-egress-qdisc.sh.j2"

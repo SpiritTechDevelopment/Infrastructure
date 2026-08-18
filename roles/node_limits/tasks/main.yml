@@ -82,7 +82,11 @@
           - node_limits_diffserv in node_limits_qdisc_readback.stdout
           - node_limits_flow_isolation in node_limits_qdisc_readback.stdout
           - "'nonat' in node_limits_qdisc_readback.stdout"
-          - "'rtt 100.0ms' in node_limits_qdisc_readback.stdout"
+          # `internet` — единственная разрешённая политика, и CAKE разворачивает
+          # её в 100ms. Печатает iproute2 это по-разному: 22.04 даёт `rtt 100ms`,
+          # 24.04 — `rtt 100.0ms`. Сверять надо политику, а не форматирование
+          # чужой утилиты, иначе ассерт валит бутстрап на ровном месте.
+          - "node_limits_qdisc_readback.stdout is search('rtt 100(\\.0)?ms')"
         fail_msg: >-
           CAKE read-back does not match profile {{ node_limits_bandwidth_profile }}:
           {{ node_limits_qdisc_readback.stdout }}
