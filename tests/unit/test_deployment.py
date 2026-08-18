@@ -280,6 +280,49 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 ("develop-entry-nl-01", "develop-exit-de-01"),
             )
 
+    def test_already_bootstrapped_nodes_skip_bootstrap_but_still_get_configured(self) -> None:
+        # The impact plan calls an instance "provision" whenever it is absent
+        # from the Git baseline, which is every instance while no baseline
+        # exists yet. The bootstrap inventory reaches nodes on port 22, and a
+        # hardened node no longer answers there: without this marker a live node
+        # drops out of the fleet precisely because the last deployment to it
+        # succeeded. Configuration must still reach it.
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            coordinator = DeploymentCoordinator(repository.root)
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            markers = repository.root / ".fleetctl-state" / "bootstrapped" / "develop"
+            markers.mkdir(parents=True)
+            for instance in ("develop-entry-nl-01", "develop-exit-de-01"):
+                (markers / f"{instance}.json").write_text("{}\n", encoding="utf-8")
+            with mock.patch.object(coordinator, "_run_ansible") as ansible:
+                # No ca_state and no signer: a fleet with nothing left to
+                # bootstrap must not demand the offline CA root at all.
+                coordinator.run(
+                    DeploymentOptions(
+                        environment="develop",
+                        initial=True,
+                        apply=True,
+                        bootstrap_vars=variables["bootstrap.yml"],
+                        compiled_secrets=variables["secrets.yml"],
+                        readiness_vars=variables["readiness.yml"],
+                    )
+                )
+
+        self.assertEqual(
+            [call.args[1].name for call in ansible.call_args_list],
+            ["configure.yml", "readiness.yml"],
+        )
+        for call in ansible.call_args_list:
+            self.assertEqual(
+                call.kwargs["limit"],
+                ("develop-entry-nl-01", "develop-exit-de-01"),
+            )
+
     def test_bootstrapping_nodes_refuses_to_start_without_a_ca(self) -> None:
         # Fail before the CSR phase mutates anything: collecting requests that
         # nothing can sign would leave keys on nodes and no way forward.

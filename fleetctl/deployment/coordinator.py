@@ -66,8 +66,8 @@ class DeploymentCoordinator:
         state_directory = options.state_directory or self.root / ".fleetctl-state"
         if not state_directory.is_absolute():
             state_directory = self.root / state_directory
-        record_directory, revision_directory = self._prepare_state_directories(
-            state_directory
+        record_directory, revision_directory, bootstrapped_directory = (
+            self._prepare_state_directories(state_directory)
         )
         deployment_id = f"{options.environment}-{source_git_sha[:12]}"
         record_path = record_directory / f"{deployment_id}.json"
@@ -89,6 +89,7 @@ class DeploymentCoordinator:
                 revision_state_path=(
                     revision_directory / f"{options.environment}.json"
                 ),
+                bootstrapped_directory=bootstrapped_directory,
             )
 
     def _run_locked(
@@ -100,6 +101,7 @@ class DeploymentCoordinator:
         build_directory: Path,
         record_path: Path,
         revision_state_path: Path,
+        bootstrapped_directory: Path,
     ) -> dict[str, Any]:
         existing = self._load_record(record_path)
         if existing is not None and not options.resume:
@@ -207,6 +209,25 @@ class DeploymentCoordinator:
                         | set(bootstrap_targets)
                     )
                 )
+                # A node is bootstrapped once in its life. The impact plan calls
+                # an instance "provision" whenever it is absent from the Git
+                # baseline, which is also true of every already-running node on
+                # any deployment that has no baseline yet — and the bootstrap
+                # inventory reaches nodes on port 22, the one port a hardened
+                # node no longer answers on. Left unfiltered, a node drops out
+                # of the fleet precisely because the previous deployment to it
+                # succeeded.
+                #
+                # Filtering happens after configure_targets is computed on
+                # purpose: skipping the bootstrap of a live node must never also
+                # skip its configuration.
+                pending_bootstrap = tuple(
+                    instance_id
+                    for instance_id in bootstrap_targets
+                    if not self._bootstrap_marker(
+                        bootstrapped_directory, options.environment, instance_id
+                    ).exists()
+                )
                 # Machine identity is a two-phase handshake: the node keeps its
                 # private key, so the CA can only sign a CSR it is handed. The
                 # bootstrap step is split accordingly and each phase is recorded
@@ -216,7 +237,7 @@ class DeploymentCoordinator:
                     record=record,
                     record_path=record_path,
                     step="bootstrap_csr",
-                    targets=bootstrap_targets,
+                    targets=pending_bootstrap,
                     inventory=build_directory / "bootstrap-inventory.json",
                     playbook=self.root / "playbooks" / "bootstrap" / "csr.yml",
                     variables=options.bootstrap_vars,
@@ -227,7 +248,7 @@ class DeploymentCoordinator:
                 chain_variables = self._reconcile_agent_certificates(
                     record=record,
                     record_path=record_path,
-                    targets=bootstrap_targets,
+                    targets=pending_bootstrap,
                     current=current,
                     options=options,
                     pki_directory=pki_directory,
@@ -236,12 +257,22 @@ class DeploymentCoordinator:
                     record=record,
                     record_path=record_path,
                     step="bootstrap",
-                    targets=bootstrap_targets,
+                    targets=pending_bootstrap,
                     inventory=build_directory / "bootstrap-inventory.json",
                     playbook=self.root / "playbooks" / "bootstrap" / "bootstrap.yml",
                     variables=options.bootstrap_vars,
                     extra_files=(chain_variables,) if chain_variables else (),
                 )
+                # Only once the step above has returned: a bootstrap that failed
+                # raises, and an instance must never be recorded as bootstrapped
+                # on the strength of an attempt.
+                for instance_id in pending_bootstrap:
+                    self._record_bootstrapped(
+                        bootstrapped_directory,
+                        options.environment,
+                        instance_id,
+                        source_git_sha=source_git_sha,
+                    )
                 self._reconcile_ansible_step(
                     record=record,
                     record_path=record_path,
@@ -365,24 +396,66 @@ class DeploymentCoordinator:
         return rendered
 
     @staticmethod
-    def _prepare_state_directories(state_directory: Path) -> tuple[Path, Path]:
+    def _bootstrap_marker(bootstrapped_directory: Path, environment: str, instance_id: str) -> Path:
+        return bootstrapped_directory / environment / f"{instance_id}.json"
+
+    @classmethod
+    def _record_bootstrapped(
+        cls,
+        bootstrapped_directory: Path,
+        environment: str,
+        instance_id: str,
+        *,
+        source_git_sha: str,
+    ) -> None:
+        marker = cls._bootstrap_marker(bootstrapped_directory, environment, instance_id)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(marker.parent, 0o700)
+        marker.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "instance_id": instance_id,
+                    "environment": environment,
+                    "source_git_sha": source_git_sha,
+                    "bootstrapped_at": _timestamp(),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _prepare_state_directories(state_directory: Path) -> tuple[Path, Path, Path]:
         if state_directory.is_symlink():
             raise DeploymentError(f"refusing symlink deployment state root: {state_directory}")
         state_directory.mkdir(parents=True, exist_ok=True)
         os.chmod(state_directory, 0o700)
         record_directory = state_directory / "deployment-records"
         revision_directory = state_directory / "manifest-revisions"
+        # Whether a machine has been bootstrapped is a property of the machine,
+        # not of a Git diff, and it outlives any single deployment record.
+        bootstrapped_directory = state_directory / "bootstrapped"
         if record_directory.is_symlink():
             raise DeploymentError(f"refusing symlink deployment record directory: {record_directory}")
         if revision_directory.is_symlink():
             raise DeploymentError(
                 f"refusing symlink manifest revision directory: {revision_directory}"
             )
+        if bootstrapped_directory.is_symlink():
+            raise DeploymentError(
+                f"refusing symlink bootstrap marker directory: {bootstrapped_directory}"
+            )
         record_directory.mkdir(parents=True, exist_ok=True)
         revision_directory.mkdir(parents=True, exist_ok=True)
+        bootstrapped_directory.mkdir(parents=True, exist_ok=True)
         os.chmod(record_directory, 0o700)
         os.chmod(revision_directory, 0o700)
-        return record_directory, revision_directory
+        os.chmod(bootstrapped_directory, 0o700)
+        return record_directory, revision_directory, bootstrapped_directory
 
     @staticmethod
     def _require_apply_inputs(options: DeploymentOptions) -> None:
