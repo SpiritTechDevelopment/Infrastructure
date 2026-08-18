@@ -100,21 +100,44 @@
   changed_when: "'changed' in _bootstrap_wireguard_configure.stdout_lines"
   no_log: true
 
-# `started` is a no-op on an already-running unit, so a node that arrives with a
-# pre-existing wg0 — an earlier overlay, a reinstall — would keep serving the old
-# address and the old peer while the freshly rendered config sat unread on disk.
-# That is not hypothetical: it left entry-ru on a 10.20.0.11 tunnel pointing at a
-# decommissioned hub, with its new key already registered on the real one.
+# What matters is whether the running interface matches the rendered config, not
+# whether that config was just written. Keying the restart off "the file changed"
+# is wrong twice over: `started` is a no-op on a running unit, and on the second
+# run the file is already correct, so nothing ever triggers. The kernel keeps
+# serving the old address and the old peer either way.
 #
+# Read the live state instead. Both commands fail benignly when the interface
+# does not exist yet, which reads as "disagrees" and starts it.
+- name: Read the address on the live management interface
+  ansible.builtin.command:
+    argv: [ip, -4, -brief, address, show, dev, "{{ bootstrap_wireguard_interface }}"]
+  register: _bootstrap_wireguard_live_address
+  changed_when: false
+  failed_when: false
+
+- name: Read the peers on the live management interface
+  ansible.builtin.command:
+    argv: [wg, show, "{{ bootstrap_wireguard_interface }}", peers]
+  register: _bootstrap_wireguard_live_peers
+  changed_when: false
+  failed_when: false
+
 # Restarting is safe here precisely because this role only ever runs during
 # bootstrap, which connects over the public address; the tunnel being replaced is
 # never the path this play is talking over. `wg syncconf` would be gentler but
 # cannot apply a changed Address or route.
-- name: Enable management WireGuard, applying the configuration if it changed
+- name: Enable management WireGuard, applying the config when the live interface disagrees
   ansible.builtin.systemd_service:
     name: "wg-quick@{{ bootstrap_wireguard_interface }}"
     enabled: true
-    state: "{{ 'restarted' if _bootstrap_wireguard_configure.changed else 'started' }}"
+    state: >-
+      {{ 'restarted'
+         if (_bootstrap_wireguard_configure.changed
+             or bootstrap_wireguard_address.split('/')[0]
+                not in _bootstrap_wireguard_live_address.stdout
+             or bootstrap_wireguard_hub_public_key
+                not in _bootstrap_wireguard_live_peers.stdout)
+         else 'started' }}
     daemon_reload: true
 
 - name: Require management hub reachability after peer registration

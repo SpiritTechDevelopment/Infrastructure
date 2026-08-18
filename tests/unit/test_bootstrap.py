@@ -193,10 +193,12 @@ class BootstrapContourTests(unittest.TestCase):
         tasks = (
             REPO_ROOT / "roles" / "bootstrap_wireguard" / "tasks" / "main.yml"
         ).read_text(encoding="utf-8")
-        self.assertIn(
-            "'restarted' if _bootstrap_wireguard_configure.changed else 'started'",
-            tasks,
-        )
+        # Keying off "the file changed" is not enough: on the second run the file
+        # is already correct while the kernel still holds the old tunnel, so the
+        # decision has to read live state.
+        self.assertIn("_bootstrap_wireguard_live_address.stdout", tasks)
+        self.assertIn("_bootstrap_wireguard_live_peers.stdout", tasks)
+        self.assertIn("'restarted'", tasks)
 
     def test_node_local_wireguard_configurator_has_valid_shell(self) -> None:
         path = REPO_ROOT / "roles" / "bootstrap_wireguard" / "templates" / "configure-wireguard.sh.j2"
