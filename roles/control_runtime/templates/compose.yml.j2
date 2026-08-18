@@ -27,6 +27,12 @@ services:
 
   backend:
     image: {{ control_plan.backend.image }}
+    # Both halves, explicitly. The image declares a numeric USER without a
+    # group, which makes the container's gid 0 — so the process never joins the
+    # group the secret files are prepared for, and /secrets (0750 root:gid) is
+    # not even traversable. Naming the gid here is what makes the ownership this
+    # role sets on those files mean anything.
+    user: "{{ control_backend_uid }}:{{ control_backend_gid }}"
     restart: unless-stopped
     stop_grace_period: 30s
     env_file: [{{ control_plan.paths.root }}/backend.env]

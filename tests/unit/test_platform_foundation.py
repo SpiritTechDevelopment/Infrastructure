@@ -417,6 +417,30 @@ all:
         self.assertNotIn("--force-recreate", tasks)
         self.assertNotIn("compose\n      - down", tasks)
 
+    def test_backend_runs_as_the_group_its_secrets_are_prepared_for(self) -> None:
+        """The role chowns /secrets to a gid the container must actually hold.
+
+        The image declares a numeric USER with no group, so the container's gid
+        defaults to 0. Without an explicit gid here the process never joins the
+        group, /secrets (0750 root:gid) is not traversable, and the backend dies
+        on `permission denied` after a green migration — an unhealthy container
+        with a healthy database behind it.
+        """
+        compose = (
+            REPO_ROOT / "roles" / "control_runtime" / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        tasks = (REPO_ROOT / "roles" / "control_runtime" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'user: "{{ control_backend_uid }}:{{ control_backend_gid }}"',
+            compose,
+        )
+        # The same two variables must be what the files are owned by, otherwise
+        # the declaration above is decorative.
+        self.assertIn("{{ control_backend_uid }}", tasks)
+        self.assertIn("{{ control_backend_gid }}", tasks)
+
     def test_metrics_surfaces_never_leave_the_management_overlay(self) -> None:
         control_compose = (
             REPO_ROOT / "roles" / "control_runtime" / "templates" / "compose.yml.j2"
