@@ -94,6 +94,71 @@ class XrayAccessLogTests(unittest.TestCase):
         self.assertFalse(state.common.xray.access_log_export_enabled)
 
 
+class BridgeCredentialGuardTests(unittest.TestCase):
+    """A bridge UUID goes straight into an Xray client id.
+
+    Unlike the REALITY key and the mask PEMs, nothing downstream would notice a
+    malformed one: the node comes up, accepts the config and silently refuses to
+    route the bridge.
+    """
+
+    def compiled_tasks(self) -> list[dict]:
+        return yaml.safe_load(
+            (REPO_ROOT / "roles" / "compiled_node_plan" / "tasks" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def test_bridge_credentials_are_trimmed_where_they_are_used(self) -> None:
+        facts = compiled_node_facts()
+        for name in ("entry_exits", "xray_static_clients"):
+            self.assertIn(
+                "service_credential_ref, '') | trim",
+                facts[name],
+                f"{name} must trim the bridge credential",
+            )
+
+    def test_malformed_bridge_credential_fails_the_deployment(self) -> None:
+        names = [task.get("name", "") for task in self.compiled_tasks()]
+        self.assertIn("Require bridge service credentials to be bare UUIDs", names)
+        collect = next(
+            task
+            for task in self.compiled_tasks()
+            if task.get("name") == "Collect bridge service credentials that are not bare UUIDs"
+        )
+        # The comparison touches secret values, so it must not be echoed; the
+        # assertion that reports them names references only.
+        self.assertTrue(collect["no_log"])
+        report = next(
+            task
+            for task in self.compiled_tasks()
+            if task.get("name") == "Require bridge service credentials to be bare UUIDs"
+        )
+        self.assertNotIn("no_log", report)
+
+    def test_guard_pattern_accepts_uuids_and_rejects_anything_else(self) -> None:
+        collect = next(
+            task
+            for task in self.compiled_tasks()
+            if task.get("name") == "Collect bridge service credentials that are not bare UUIDs"
+        )
+        body = collect["ansible.builtin.set_fact"]["_spiritvpn_malformed_bridge_credentials"]
+        match = re.search(r"'(\^\[0-9a-fA-F\]\{8\}[^']+)'", body)
+        self.assertIsNotNone(match, "the UUID pattern must be readable from the task")
+        pattern = re.compile(match.group(1))
+        self.assertTrue(pattern.match("3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8"))
+        self.assertTrue(pattern.match("11111111-2222-4333-8444-555555555555"))
+        for rejected in (
+            "not-a-uuid",
+            "",
+            "3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8x",
+            # The failure this guard exists for, in case trim is ever dropped.
+            "3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8\n",
+            " 3f2a1b4c-5d6e-4f70-8192-a3b4c5d6e7f8",
+        ):
+            self.assertIsNone(pattern.match(rejected), rejected)
+
+
 class BootstrapContourTests(unittest.TestCase):
     def test_bootstrap_and_steady_state_are_separate_playbooks(self) -> None:
         bootstrap = (REPO_ROOT / "playbooks" / "bootstrap" / "bootstrap.yml").read_text(encoding="utf-8")

@@ -65,6 +65,47 @@
   when: spiritvpn_require_runtime_secrets | bool
   no_log: true
 
+# A bridge credential is written straight into an Xray client id and outbound
+# UUID, neither of which tolerates surrounding whitespace. Unlike the REALITY key
+# and the mask PEMs — which roles/xray already trims, and which legitimately end
+# in a newline — nothing downstream would notice a malformed one: the node would
+# come up, accept the config and quietly refuse to route the bridge. Checked
+# here, against the trimmed value, so the deployment names the reference instead.
+# The pattern ends in \Z, not $: Python's `$` also matches before a trailing
+# newline, which is the exact defect being guarded against. trim already removes
+# it, and this makes the check hold even if that ever stops being true.
+- name: Collect bridge service credentials that are not bare UUIDs
+  ansible.builtin.set_fact:
+    _spiritvpn_malformed_bridge_credentials: >-
+      {{ _spiritvpn_bridge_credential_refs
+         | zip(_spiritvpn_bridge_credential_refs
+               | map('extract', spiritvpn_secret_values)
+               | map('string') | map('trim'))
+         | rejectattr('1', 'match',
+                      '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z')
+         | map(attribute='0') | list }}
+  vars:
+    _spiritvpn_bridge_credential_refs: >-
+      {{ ((spiritvpn_node_plan.routing.bridges_as_entry
+           | map(attribute='service_credential_ref') | list)
+          + (spiritvpn_node_plan.routing.bridges_as_exit
+             | map(attribute='service_credential_ref') | list)) | unique }}
+  when: spiritvpn_require_runtime_secrets | bool
+  no_log: true
+
+# Names only, never values — safe to show, which is the whole point of doing the
+# comparison in the task above under no_log.
+- name: Require bridge service credentials to be bare UUIDs
+  ansible.builtin.assert:
+    that:
+      - _spiritvpn_malformed_bridge_credentials | length == 0
+    fail_msg: >-
+      Bridge service credential is not a bare UUID:
+      {{ _spiritvpn_malformed_bridge_credentials | join(', ') }}.
+      Rewrite it in Vault without surrounding whitespace — a trailing newline is
+      the usual cause, and it produces a node that routes nothing.
+  when: spiritvpn_require_runtime_secrets | bool
+
 - name: Map compiled non-secret values into component role inputs
   ansible.builtin.set_fact:
     node_role: "{{ spiritvpn_node_plan.logical_node.role }}"
@@ -181,7 +222,7 @@
            'tag': item.egress_tag,
            'address': item.target.address,
            'port': item.target.port,
-           'uuid': spiritvpn_secret_values.get(item.service_credential_ref, ''),
+           'uuid': spiritvpn_secret_values.get(item.service_credential_ref, '') | trim,
            'reality_sni': item.target.server_name,
            'reality_password': item.target.reality_public_key,
            'reality_short_id': item.target.short_id,
@@ -195,7 +236,7 @@
   ansible.builtin.set_fact:
     xray_static_clients: >-
       {{ xray_static_clients + [{
-           'id': spiritvpn_secret_values.get(item.service_credential_ref, ''),
+           'id': spiritvpn_secret_values.get(item.service_credential_ref, '') | trim,
            'email': 'bridge-' ~ item.routing_key,
            'flow': spiritvpn_node_plan.logical_node.public.flow
          }] }}
