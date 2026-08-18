@@ -19,6 +19,27 @@
     mode: "0640"
   register: _compiled_runtime_definition
 
+- name: Read installed unit files
+  ansible.builtin.command:
+    argv: [systemctl, list-unit-files, --no-legend, --plain]
+  register: _compiled_runtime_unit_files
+  changed_when: false
+  check_mode: false
+
+# Только те, что действительно установлены: маскировать несуществующий юнит
+# значит оставить на узле ссылку в /dev/null на имя, которого здесь никогда не
+# было, и объяснять её потом.
+- name: Retire superseded self-heal units
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+    masked: true
+  loop: "{{ compiled_runtime_superseded_units }}"
+  when:
+    - not ansible_check_mode
+    - _compiled_runtime_unit_files.stdout is search('^' ~ (item | regex_escape) ~ '\s', multiline=True)
+
 - name: Find containers of superseded stacks
   ansible.builtin.command:
     argv:
@@ -40,10 +61,25 @@
   vars:
     _compiled_runtime_superseded_ids: >-
       {{ _compiled_runtime_superseded.results | map(attribute='stdout_lines') | flatten }}
+  register: _compiled_runtime_stop
   changed_when: true
   when:
     - not ansible_check_mode
     - _compiled_runtime_superseded_ids | length > 0
+
+# Пока порт был занят, Docker разводил попытки перезапуска по экспоненте и
+# дошёл до потолка в минуту. Компоуз столько не ждёт и ждать не умеет:
+# контейнер в состоянии Restarting он сразу считает нездоровым и возвращает
+# ошибку. Без явного сброса выкатка падает на последствии того, что сама же
+# только что починила, — ровно это и произошло на entry-ru: xray поднялся
+# здоровым через 45 секунд после того, как Ansible объявил его сбойным.
+- name: Clear the restart backoff the conflict left behind
+  ansible.builtin.command:
+    argv: [docker, compose, -f, "{{ vpn_stack_dir }}/compose.yml", restart]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - _compiled_runtime_stop is changed
 
 - name: Apply compiled node runtime
   ansible.builtin.command:

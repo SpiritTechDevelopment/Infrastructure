@@ -11,3 +11,17 @@ node_agent_runtime_inputs_changed: false
 # старта плейбука.
 compiled_runtime_superseded_projects:
   - vpn
+
+# Самолечение прежней сборки: таймеры дописывали пользователей в старый Xray и
+# тянули их с исчезнувшего бэкенда. Дотянуться до скомпилированного узла они не
+# могут — ищут инбаунд vless-in, которого в компилируемом конфиге нет, там
+# xi-vless, — но продолжают срабатывать по таймеру и копить отказы в журнале и
+# в systemctl --failed, пряча в шуме настоящие сбои.
+#
+# Маскируются, а не просто выключаются: отключённый юнит поднимется от первой
+# же зависимости или от чужой руки, а замаскированный не запустится вовсе.
+compiled_runtime_superseded_units:
+  - spirit-desired-users-sync.timer
+  - spirit-desired-users-sync.service
+  - spirit-xray-reconcile.timer
+  - spirit-xray-reconcile.service
