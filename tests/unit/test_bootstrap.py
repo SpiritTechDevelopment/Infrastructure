@@ -345,9 +345,15 @@ class BootstrapContourTests(unittest.TestCase):
             REPO_ROOT / "roles" / "node_agent" / "defaults" / "main.yml"
         ).read_text(encoding="utf-8"))
         self.assertNotIn("ansible.builtin.slurp", tasks)
-        # Readiness must probe the same overlay address the agent binds. A
+        # The gate must probe the same overlay address the agent binds. A
         # loopback probe would pass while Prometheus saw nothing.
-        self.assertIn("/health/ready", readiness)
+        #
+        # Liveness rather than readiness: readiness additionally means the
+        # backend has already reconciled this agent, which happens after these
+        # gates and asynchronously. Gating on it would wait on somebody else's
+        # work and could never pass on a new node.
+        self.assertIn("/health/live", readiness)
+        self.assertNotIn("/health/ready", readiness)
         self.assertNotIn("http://127.0.0.1:", readiness)
         self.assertIn(
             "node_agent_http_listen.split(':')[0]\n        == spiritvpn_node_plan.instance.management_address",

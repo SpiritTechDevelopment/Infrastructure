@@ -81,11 +81,23 @@
         that:
           - "'node-agent' in _readiness_node_agent_service.stdout_lines"
 
-    - name: Require local NodeAgent readiness
+    # Liveness, а не readiness, и это разделение ответственности, а не поблажка.
+    #
+    # Готовым агент считает себя, когда снят needs_bootstrap, а снимается тот
+    # ровно в одном месте — при обработке ReconcileUsers от backend. Backend же
+    # узнаёт о ноде из манифеста флота, который уходит после этих гейтов, да и
+    # доставка операций агентам по контракту асинхронна и статуса не сообщает.
+    # Гейт на готовность поэтому не проверял бы ноду, а ждал бы чужой работы —
+    # и на новой ноде не мог бы пройти никогда.
+    #
+    # Инфраструктура отвечает за то, чем владеет: агент запущен, слушает
+    # объявленный адрес, видит Xray, имеет валидный сертификат. Несошедшаяся
+    # сверка ловится правилом AgentNeedsBootstrap, а не остановкой выкатки.
+    - name: Require local NodeAgent liveness
       ansible.builtin.uri:
         url: >-
           http://{{ spiritvpn_node_plan.instance.management_address }}:{{
-          spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}/health/ready
+          spiritvpn_node_plan.infrastructure.observability.ports.agent_metrics }}/health/live
         method: GET
         status_code: 200
         return_content: false
