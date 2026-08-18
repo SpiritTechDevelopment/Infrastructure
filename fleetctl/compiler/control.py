@@ -6,7 +6,11 @@ from typing import Any
 
 from fleetctl.model import DesiredState
 
-from .addressing import CONTROL_BACKEND_METRICS_PORT, control_management_address
+from .addressing import (
+    CONTROL_BACKEND_METRICS_PORT,
+    CONTROL_POSTGRES_METRICS_PORT,
+    control_management_address,
+)
 
 
 def compile_control_plan(state: DesiredState) -> dict[str, Any] | None:
@@ -37,6 +41,7 @@ def compile_control_plan(state: DesiredState) -> dict[str, Any] | None:
             "backend_host_port": int(backend_port_text),
             "backend_container_port": 8443,
             "backend_metrics_port": CONTROL_BACKEND_METRICS_PORT,
+            "postgres_metrics_port": CONTROL_POSTGRES_METRICS_PORT,
         },
         "backend": {
             "source_git_sha": control.backend_source_git_sha,
@@ -53,6 +58,7 @@ def compile_control_plan(state: DesiredState) -> dict[str, Any] | None:
         },
         "postgres": {
             "image": control.postgres_image.image,
+            "exporter_image": control.postgres_exporter_image.image,
             "major_version": control.postgres_major_version,
             "database": control.postgres_database,
             "owner_user": control.postgres_owner_user,

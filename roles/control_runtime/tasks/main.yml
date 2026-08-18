@@ -536,6 +536,49 @@
   until: _control_backend_readiness.rc == 0
   when: not ansible_check_mode
 
+# After the backend, and with --no-deps, so a redeployed exporter never
+# restarts the database underneath a running backend.
+- name: Reconcile the PostgreSQL exporter
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - up
+      - -d
+      - --no-deps
+      - --wait
+      - --wait-timeout
+      - "60"
+      - --pull
+      - "{{ control_compose_pull_policy }}"
+      - postgres-exporter
+  register: _control_postgres_exporter_apply
+  changed_when: >-
+    _control_compose.changed
+    or 'Created' in (_control_postgres_exporter_apply.stdout ~ _control_postgres_exporter_apply.stderr)
+    or 'Started' in (_control_postgres_exporter_apply.stdout ~ _control_postgres_exporter_apply.stderr)
+    or 'Recreated' in (_control_postgres_exporter_apply.stdout ~ _control_postgres_exporter_apply.stderr)
+    or 'Pulled' in (_control_postgres_exporter_apply.stdout ~ _control_postgres_exporter_apply.stderr)
+  when: not ansible_check_mode
+
+- name: Require the PostgreSQL exporter to answer on the management address
+  ansible.builtin.uri:
+    url: >-
+      http://{{ control_plan.network.management_address }}:{{
+      control_plan.network.postgres_metrics_port }}/metrics
+    method: GET
+    status_code: 200
+    return_content: false
+    timeout: 10
+  register: _control_postgres_exporter_readiness
+  retries: 6
+  delay: 5
+  until: _control_postgres_exporter_readiness.status == 200
+  changed_when: false
+  when: not ansible_check_mode
+
 - name: Persist the successful exact control release identity
   ansible.builtin.copy:
     content: "{{ _control_release_id }}\n"

@@ -66,9 +66,9 @@ class RenderingTests(unittest.TestCase):
 
     def test_monitoring_targets_distinguish_instance_lifecycle_and_slo(self) -> None:
         plan = json.loads(render_files(self.state)["monitoring-targets.json"])
-        # Two instances contribute five targets each; the control plane's
-        # backend adds one that belongs to no fleet instance.
-        self.assertEqual(len(plan["targets"]), 11)
+        # Two instances contribute five targets each; the control plane adds
+        # two that belong to no fleet instance — the backend and the database.
+        self.assertEqual(len(plan["targets"]), 12)
         entry_targets = [
             target
             for target in plan["targets"]
@@ -95,6 +95,7 @@ class RenderingTests(unittest.TestCase):
             {target["id"] for target in scraped},
             {
                 "control-develop:backend-metrics",
+                "control-develop:postgres-metrics",
                 "develop-entry-nl-01:agent-metrics",
                 "develop-entry-nl-01:node-exporter",
                 "develop-exit-de-01:agent-metrics",

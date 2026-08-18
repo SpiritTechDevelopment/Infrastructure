@@ -22,6 +22,9 @@ spec:
       image:
         repository: example.invalid/postgres
         digest: sha256:1000000000000000000000000000000000000000000000000000000000000003
+      exporter_image:
+        repository: example.invalid/postgres-exporter
+        digest: sha256:1000000000000000000000000000000000000000000000000000000000000004
       major_version: 17
       database: spiritvpn
       owner_user: spiritvpn_owner

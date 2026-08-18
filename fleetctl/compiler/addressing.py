@@ -14,6 +14,12 @@ ROLE_SUBNET = {"entry": 1, "exit": 2}
 # ever binds the management overlay.
 CONTROL_BACKEND_METRICS_PORT = 8080
 
+# The PostgreSQL exporter's listener. The database itself never leaves the
+# control compose network; only this translated view of it is published, and
+# on the same management address and for the same reason as the backend's
+# /metrics — connection counts and table sizes describe the fleet.
+CONTROL_POSTGRES_METRICS_PORT = 9187
+
 
 def control_management_address(environment: Environment) -> str:
     """The management hub's own overlay address: the first host in the network."""

@@ -9,6 +9,7 @@ from fleetctl.model import DesiredState
 
 from .addressing import (
     CONTROL_BACKEND_METRICS_PORT,
+    CONTROL_POSTGRES_METRICS_PORT,
     agent_tls_server_name,
     control_management_address,
     management_address,
@@ -172,6 +173,7 @@ def _control_targets(state: DesiredState) -> list[dict[str, Any]]:
         "region": "management",
         "lifecycle": "serving",
     }
+    address = control_management_address(state.environment)
     return [
         {
             "id": f"control-{environment}:backend-metrics",
@@ -180,12 +182,29 @@ def _control_targets(state: DesiredState) -> list[dict[str, Any]]:
             "collection": "management",
             "endpoint": {
                 "scheme": "http",
-                "address": control_management_address(state.environment),
+                "address": address,
                 "port": CONTROL_BACKEND_METRICS_PORT,
                 "path": "/metrics",
             },
             "labels": labels,
             "slo_eligible": True,
             "readiness_expected": True,
-        }
+        },
+        {
+            "id": f"control-{environment}:postgres-metrics",
+            "service": "postgres-metrics",
+            "kind": "metrics",
+            "collection": "management",
+            "endpoint": {
+                "scheme": "http",
+                "address": address,
+                "port": CONTROL_POSTGRES_METRICS_PORT,
+                "path": "/metrics",
+            },
+            "labels": labels,
+            # The database is not a served path: a broken exporter is a hole in
+            # observability, not an outage, and must not colour an SLO.
+            "slo_eligible": False,
+            "readiness_expected": True,
+        },
     ]

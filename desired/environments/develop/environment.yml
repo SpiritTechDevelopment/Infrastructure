@@ -26,6 +26,14 @@ spec:
       image:
         repository: docker.io/library/postgres
         digest: sha256:e38411452a464af89e5adadb8d223bf53b898d47d6ef918b2d58c08707350449
+      # Переводит состояние базы в прометеевский формат. Ходит владельцем:
+      # без прав уровня pg_monitor экспортер видит в pg_stat_activity только
+      # свои сессии, и картина по соединениям и блокировкам получается дырявой.
+      # Пароль владельца уже лежит файлом в каталоге секретов, отдельной
+      # учётной записи и отдельного секрета это решение не заводит.
+      exporter_image:
+        repository: mirror.gcr.io/prometheuscommunity/postgres-exporter
+        digest: sha256:38606faa38c54787525fb0ff2fd6b41b4cfb75d455c1df294927c5f611699b17
       major_version: 17
       database: spiritvpn
       owner_user: spiritvpn_owner

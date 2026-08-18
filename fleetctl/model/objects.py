@@ -35,6 +35,7 @@ class ControlPlane:
     backend_image: ImmutableImage
     migration_image: ImmutableImage
     postgres_image: ImmutableImage
+    postgres_exporter_image: ImmutableImage
     postgres_major_version: int
     postgres_database: str
     postgres_owner_user: str

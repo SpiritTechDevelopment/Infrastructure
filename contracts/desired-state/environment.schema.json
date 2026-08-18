@@ -51,9 +51,10 @@
             "postgres": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["image", "major_version", "database", "owner_user", "runtime_user", "backup_required"],
+              "required": ["image", "exporter_image", "major_version", "database", "owner_user", "runtime_user", "backup_required"],
               "properties": {
                 "image": {"$ref": "#/$defs/immutableImage"},
+                "exporter_image": {"$ref": "#/$defs/immutableImage"},
                 "major_version": {"type": "integer", "minimum": 14, "maximum": 20},
                 "database": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
                 "owner_user": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},

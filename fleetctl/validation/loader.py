@@ -215,6 +215,9 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                     backend_image=ImmutableImage(**control_spec["backend_release"]["backend_image"]),
                     migration_image=ImmutableImage(**control_spec["backend_release"]["migration_image"]),
                     postgres_image=ImmutableImage(**control_spec["postgres"]["image"]),
+                    postgres_exporter_image=ImmutableImage(
+                        **control_spec["postgres"]["exporter_image"]
+                    ),
                     postgres_major_version=control_spec["postgres"]["major_version"],
                     postgres_database=control_spec["postgres"]["database"],
                     postgres_owner_user=control_spec["postgres"]["owner_user"],

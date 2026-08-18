@@ -19,6 +19,29 @@ services:
       start_period: 10s
     networks: [control]
 
+  postgres-exporter:
+    image: {{ control_plan.postgres.exporter_image }}
+    # The owner password file is root:{{ control_postgres_gid }} mode 0440, so the exporter
+    # joins that group rather than the file being loosened for it.
+    user: "{{ control_postgres_uid }}:{{ control_postgres_gid }}"
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_URI: "postgres:5432/{{ control_plan.postgres.database }}?sslmode=disable"
+      DATA_SOURCE_USER: "{{ control_plan.postgres.owner_user }}"
+      DATA_SOURCE_PASS_FILE: /run/spiritvpn-secrets/postgres-owner-password
+      PG_EXPORTER_WEB_LISTEN_ADDRESS: ":{{ control_plan.network.postgres_metrics_port }}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      # Same rule as the backend's metrics port: connection counts, table sizes
+      # and query activity describe the fleet, so this binds the management
+      # address and never a wildcard.
+      - "{{ control_plan.network.management_address }}:{{ control_plan.network.postgres_metrics_port }}:{{ control_plan.network.postgres_metrics_port }}"
+    volumes:
+      - {{ control_plan.paths.secrets }}/postgres-owner-password:/run/spiritvpn-secrets/postgres-owner-password:ro
+    networks: [control]
+
   migrate:
     image: {{ control_plan.backend.migration_image }}
     profiles: [migration]
