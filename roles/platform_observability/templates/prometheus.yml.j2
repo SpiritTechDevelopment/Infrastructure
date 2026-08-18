@@ -17,6 +17,18 @@ scrape_configs:
         labels:
           environment: management
           node_role: control
+
+  # The hub itself. Declared statically rather than through file_sd because it
+  # belongs to no environment and there is exactly one of it: a fragment would
+  # have to be written by some environment's control deployment, which would
+  # make the management host's own health an environment's property.
+  - job_name: management/node-exporter
+    static_configs:
+      - targets: ["{{ platform_node_exporter_bind_address }}:{{ platform_node_exporter_port }}"]
+        labels:
+          environment: management
+          node_role: control
+          instance_id: management
 {% for environment in platform_observability_environments %}
 {% for job in platform_observability_jobs %}
 

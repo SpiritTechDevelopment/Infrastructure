@@ -43,3 +43,44 @@ platform_observability_jobs:
     path: /metrics
   - name: backend-metrics
     path: /metrics
+
+# Хаб собирал метрики со всего флота и не собирал их с себя: под нагрузкой
+# оказывался невидим ровно тот хост, который держит Vault, коллектор и
+# исполнителя. Скрап идёт по loopback с той же машины, поэтому цель объявлена
+# статически в скелете, а не через file_sd: она не зависит от окружения и
+# существует ровно одна.
+#
+# Образ и digest — те же, что у нод в desired/common/components.yml. Одна
+# версия экспортера на весь контур означает, что запросы дашборда одинаково
+# верны и для нод, и для хаба.
+platform_node_exporter_image: "mirror.gcr.io/prom/node-exporter@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a"
+platform_node_exporter_bind_address: 127.0.0.1
+platform_node_exporter_port: 9100
+
+# Grafana — единственная поверхность, где собранное видно глазами. Слушает
+# только loopback по той же причине, что и коллектор: routable-слушатель на
+# хосте с Vault публиковал бы состав флота и объёмы трафика. Доступ —
+# SSH-туннелем на хаб.
+platform_grafana_image: "mirror.gcr.io/grafana/grafana@sha256:b5b59bfc7561634c2d7b136c4543d702ebcc94a3da477f21ff26f89ffd4214fa"
+# Upstream grafana/grafana работает под uid 472 и пишет в /var/lib/grafana.
+platform_grafana_uid: "472"
+platform_grafana_gid: "472"
+platform_grafana_bind_address: 127.0.0.1
+platform_grafana_port: 3000
+# Литералом, а не ссылкой на platform_observability_dir: дефолты этой роли
+# рендерятся в compose напрямую, и вложенный Jinja дал бы в YAML скаляр,
+# начинающийся с фигурной скобки.
+platform_grafana_dir: /opt/spiritvpn/platform/observability/grafana
+platform_grafana_state_dir: /var/lib/spiritvpn/grafana
+# Пароль администратора не живёт ни в репозитории, ни в SOPS-бандле: он нужен
+# только для изменений через UI, а всё, что показывает Grafana, провижинится
+# файлами. Генерируется один раз на хабе и лежит рядом с состоянием — тем же
+# приёмом, что канонический /var/lib/xray/reality.key на ноде.
+# Рядом с состоянием, а не внутри него: каталог состояния монтируется в
+# контейнер на запись, и секрет оказался бы там вторым, писчим путём.
+platform_grafana_admin_password_file: /var/lib/spiritvpn/grafana-admin-password
+# Смотреть можно без учётной записи, менять — нет. Достаточно того, что до
+# loopback хаба надо сначала дойти по SSH; но анонимный Admin отдал бы любому
+# локальному процессу API создания источников данных, то есть исходящие запросы
+# от имени хоста, на котором стоит Vault.
+platform_grafana_anonymous_role: Viewer

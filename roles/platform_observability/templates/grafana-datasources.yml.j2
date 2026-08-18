@@ -1,0 +1,17 @@
+{{ ansible_managed | comment }}
+# The one datasource Grafana is allowed to have. Provisioned rather than
+# created through the UI so that what a dashboard queries is reviewable in Git,
+# and `editable: false` so a viewer cannot repoint it at an arbitrary host —
+# Grafana proxies datasource requests from the hub itself.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: spiritvpn-prometheus
+    type: prometheus
+    access: proxy
+    url: http://{{ platform_prometheus_bind_address }}:{{ platform_prometheus_port }}
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: {{ platform_prometheus_scrape_interval_seconds }}s

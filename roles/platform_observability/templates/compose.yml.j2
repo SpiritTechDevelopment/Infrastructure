@@ -30,3 +30,47 @@ services:
       - {{ platform_observability_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - {{ platform_observability_targets_dir }}:{{ platform_prometheus_targets_container_dir }}:ro
       - {{ platform_observability_state_dir }}:/prometheus
+
+  node-exporter:
+    image: {{ platform_node_exporter_image }}
+    restart: unless-stopped
+    # Host networking and the host PID namespace are what make the readings
+    # describe the hub rather than the container: without them the exporter
+    # reports one namespace's interfaces and processes.
+    network_mode: host
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address={{ platform_node_exporter_bind_address }}:{{ platform_node_exporter_port }}
+    volumes:
+      - /:/host:ro,rslave
+
+  grafana:
+    image: {{ platform_grafana_image }}
+    user: "{{ platform_grafana_uid }}:{{ platform_grafana_gid }}"
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      GF_SERVER_HTTP_ADDR: "{{ platform_grafana_bind_address }}"
+      GF_SERVER_HTTP_PORT: "{{ platform_grafana_port }}"
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/grafana/admin-password
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "{{ platform_grafana_anonymous_role }}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # The hub reaches the internet, so every phone-home is a real outbound
+      # request from the machine that holds Vault. None of them are needed to
+      # render a provisioned dashboard.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - {{ platform_grafana_dir }}/provisioning:/etc/grafana/provisioning:ro
+      - {{ platform_grafana_dir }}/dashboards:/etc/grafana/dashboards:ro
+      - {{ platform_grafana_admin_password_file }}:/run/grafana/admin-password:ro
+      - {{ platform_grafana_state_dir }}:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://{{ platform_grafana_bind_address }}:{{ platform_grafana_port }}/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s

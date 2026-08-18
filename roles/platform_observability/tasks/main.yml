@@ -13,6 +13,21 @@
       # from a host that already holds Vault. Scraping is outbound and needs no
       # inbound listener at all.
       - platform_prometheus_bind_address == '127.0.0.1'
+      # Same reasoning for everything else on this host. Grafana renders fleet
+      # composition and traffic volumes; the exporter publishes the hub's own
+      # capacity. Neither has an inbound caller outside this machine.
+      - platform_grafana_bind_address == '127.0.0.1'
+      - platform_node_exporter_bind_address == '127.0.0.1'
+      - >-
+        platform_grafana_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - >-
+        platform_node_exporter_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      # An anonymous Admin would hand the datasource API to any local process,
+      # and a Grafana datasource is an outbound request made by the host that
+      # holds Vault.
+      - platform_grafana_anonymous_role in ['Viewer', 'None']
     fail_msg: >-
       The shared observability inputs are incomplete, unpinned, or would expose
       the collector beyond loopback.
@@ -36,6 +51,26 @@
     - path: "{{ platform_observability_state_dir }}"
       owner: "{{ platform_prometheus_uid }}"
       group: "{{ platform_prometheus_gid }}"
+      mode: "0700"
+    - path: "{{ platform_grafana_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_grafana_dir }}/provisioning/datasources"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_grafana_dir }}/provisioning/dashboards"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_grafana_dir }}/dashboards"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_grafana_state_dir }}"
+      owner: "{{ platform_grafana_uid }}"
+      group: "{{ platform_grafana_gid }}"
       mode: "0700"
 
 # Each environment owns exactly one directory. Creating them here rather than
@@ -95,6 +130,48 @@
     group: root
     mode: "0644"
 
+# Generated once and then left alone: `creates` means a redeploy keeps the
+# existing password rather than silently invalidating a session an operator is
+# in the middle of. Read it on the hub when an administrator login is needed;
+# viewing the dashboards needs no account at all.
+- name: Generate the Grafana administrator password once
+  ansible.builtin.shell:
+    cmd: >-
+      (umask 077 && openssl rand -base64 32
+      > {{ platform_grafana_admin_password_file | quote }})
+    creates: "{{ platform_grafana_admin_password_file }}"
+
+- name: Restrict the Grafana administrator password to the container user
+  ansible.builtin.file:
+    path: "{{ platform_grafana_admin_password_file }}"
+    owner: "{{ platform_grafana_uid }}"
+    group: "{{ platform_grafana_gid }}"
+    mode: "0400"
+
+- name: Render the Grafana provisioning definitions
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: grafana-datasources.yml.j2
+      dest: "{{ platform_grafana_dir }}/provisioning/datasources/prometheus.yml"
+    - src: grafana-dashboards.yml.j2
+      dest: "{{ platform_grafana_dir }}/provisioning/dashboards/spiritvpn.yml"
+  loop_control:
+    label: "{{ item.dest }}"
+  register: _platform_grafana_provisioning
+
+- name: Deploy the dashboards Grafana is allowed to show
+  ansible.builtin.copy:
+    src: dashboards/
+    dest: "{{ platform_grafana_dir }}/dashboards/"
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Render the shared collector compose definition
   ansible.builtin.template:
     src: compose.yml.j2
@@ -142,6 +219,8 @@
       - --pull
       - missing
       - prometheus
+      - node-exporter
+      - grafana
   register: _platform_prometheus_apply
   changed_when: >-
     _platform_prometheus_compose.changed
@@ -169,6 +248,24 @@
     - not _platform_prometheus_apply.changed
   changed_when: true
 
+# Dashboards are re-read by the file provider on its own interval; datasources
+# are read once at startup. Restarting only when provisioning actually changed
+# keeps a redeploy from interrupting whoever is looking at a graph.
+- name: Restart Grafana onto changed provisioning
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ platform_observability_dir }}/compose.yml"
+      - restart
+      - grafana
+  when:
+    - not ansible_check_mode
+    - _platform_grafana_provisioning.changed
+    - not _platform_prometheus_apply.changed
+  changed_when: true
+
 - name: Require collector readiness on loopback
   ansible.builtin.uri:
     url: >-
@@ -182,5 +279,33 @@
   retries: 12
   delay: 5
   until: _platform_prometheus_readiness.status == 200
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require the hub exporter to answer on loopback
+  ansible.builtin.uri:
+    url: >-
+      http://{{ platform_node_exporter_bind_address }}:{{
+      platform_node_exporter_port }}/metrics
+    method: GET
+    status_code: 200
+    return_content: false
+    timeout: 5
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require Grafana readiness on loopback
+  ansible.builtin.uri:
+    url: >-
+      http://{{ platform_grafana_bind_address }}:{{
+      platform_grafana_port }}/api/health
+    method: GET
+    status_code: 200
+    return_content: false
+    timeout: 5
+  register: _platform_grafana_readiness
+  retries: 12
+  delay: 5
+  until: _platform_grafana_readiness.status == 200
   changed_when: false
   when: not ansible_check_mode

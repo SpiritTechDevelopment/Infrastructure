@@ -1,0 +1,17 @@
+{{ ansible_managed | comment }}
+# Dashboards come from files on disk, deployed with the contour. `allowUiUpdates:
+# false` means an edit made in the browser cannot outlive a redeploy, which is
+# the point: a dashboard that drifted from the repository would describe the
+# fleet from memory rather than from desired state.
+apiVersion: 1
+
+providers:
+  - name: spiritvpn
+    orgId: 1
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false
