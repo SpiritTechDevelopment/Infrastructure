@@ -5,9 +5,15 @@
   gather_facts: false
   any_errors_fatal: true
   tasks:
+    # public: true — не косметика. Проверки ниже сверяют состояние узла с тем,
+    # что объявила роль, и берут ожидания из её defaults (spiritvpn_deployment_user
+    # и прочие). Без этого include_role оставляет их в своей области видимости, и
+    # плей падает на undefined variable — уже после того, как бутстрап отработал
+    # целиком.
     - name: Load compiled node plan for readiness expectations
       ansible.builtin.include_role:
         name: compiled_node_plan
+        public: true
       vars:
         spiritvpn_deploy_mode: bootstrap
         spiritvpn_manage_deploy_user: true

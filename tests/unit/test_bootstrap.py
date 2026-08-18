@@ -94,6 +94,40 @@ class XrayAccessLogTests(unittest.TestCase):
         self.assertFalse(state.common.xray.access_log_export_enabled)
 
 
+class BootstrapReadinessTests(unittest.TestCase):
+    def test_readiness_sees_the_expectations_it_checks_against(self) -> None:
+        """`include_role` keeps role defaults to itself unless made public.
+
+        readiness.yml compares the node against values the role declares — the
+        deployment user among them. Without `public: true` the play dies on an
+        undefined variable, and it dies *after* a fully successful bootstrap,
+        which makes it look like the node failed rather than the check.
+        """
+        readiness = yaml.safe_load(
+            (REPO_ROOT / "playbooks" / "bootstrap" / "readiness.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        include = next(
+            task["ansible.builtin.include_role"]
+            for task in readiness[0]["tasks"]
+            if "ansible.builtin.include_role" in task
+        )
+        self.assertTrue(include.get("public"))
+
+        defaults = yaml.safe_load(
+            (REPO_ROOT / "roles" / "compiled_node_plan" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        body = (REPO_ROOT / "playbooks" / "bootstrap" / "readiness.yml").read_text(
+            encoding="utf-8"
+        )
+        # At least one role default really is consumed here; if that ever stops
+        # being true the assertion above is just ceremony.
+        self.assertTrue(any(f"{{{{ {name} }}}}" in body for name in defaults))
+
+
 class SshPortHandoverTests(unittest.TestCase):
     """Bootstrap must not close the port it is talking over.
 
