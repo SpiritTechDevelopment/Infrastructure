@@ -10,6 +10,28 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class NodeLimitsRoleTests(unittest.TestCase):
+    def test_qdisc_unit_is_started_because_readiness_asks_if_it_is_active(self) -> None:
+        """`enabled` alone leaves a RemainAfterExit unit forever inactive.
+
+        playbooks/bootstrap/readiness.yml runs `systemctl is-active` on this
+        unit, so a role that only enables it fails bootstrap on a node whose
+        qdisc is exactly right.
+        """
+        tasks = (REPO_ROOT / "roles" / "node_limits" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        readiness = (REPO_ROOT / "playbooks" / "bootstrap" / "readiness.yml").read_text(
+            encoding="utf-8"
+        )
+        unit_template = (
+            REPO_ROOT / "roles" / "node_limits" / "templates"
+            / "spiritvpn-egress-qdisc.service.j2"
+        ).read_text(encoding="utf-8")
+        self.assertIn("is-active", readiness)
+        self.assertIn("spiritvpn-egress-qdisc.service", readiness)
+        self.assertIn("RemainAfterExit=yes", unit_template)
+        self.assertIn("state: started", tasks)
+
     def test_rtt_readback_tolerates_both_iproute2_spellings(self) -> None:
         """iproute2 prints `rtt 100ms` on 22.04 and `rtt 100.0ms` on 24.04.
 

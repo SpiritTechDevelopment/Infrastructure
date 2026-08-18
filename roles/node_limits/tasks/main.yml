@@ -54,11 +54,18 @@
         mode: "0644"
       register: node_limits_unit_template
 
-    - name: Enable boot-time CAKE reconciliation
+    # `started` вместе с RemainAfterExit=yes — это и есть наблюдаемое «политика
+    # применена»: без запуска юнит навсегда остаётся inactive, и readiness,
+    # который спрашивает systemctl is-active, валит бутстрап на узле с
+    # совершенно правильным qdisc. Скрипт идемпотентен, поэтому запуск здесь и
+    # повторное применение ниже друг другу не мешают.
+    - name: Enable boot-time CAKE reconciliation and record it as applied
       ansible.builtin.systemd:
         name: "{{ node_limits_systemd_unit }}"
         enabled: true
+        state: started
         daemon_reload: "{{ node_limits_unit_template.changed }}"
+      when: not ansible_check_mode
 
     - name: Reconcile CAKE policy now
       ansible.builtin.command:
