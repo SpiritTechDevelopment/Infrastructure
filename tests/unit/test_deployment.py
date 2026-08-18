@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import fcntl
 import hashlib
 import json
@@ -322,6 +323,68 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 call.kwargs["limit"],
                 ("develop-entry-nl-01", "develop-exit-de-01"),
             )
+
+    def test_manifest_is_sent_once_and_a_resume_does_not_send_it_again(self) -> None:
+        # The revision is durably allocated before anything is sent, so a resume
+        # that re-sent it would be asking the backend to reconsider a decision it
+        # has already made and recorded.
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            coordinator = DeploymentCoordinator(repository.root)
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            material = {}
+            for name in ("tls.crt", "tls.key", "ca.crt"):
+                path = repository.root / name
+                path.write_text("-----BEGIN CERTIFICATE-----\n", encoding="utf-8")
+                material[name] = path
+            markers = repository.root / ".fleetctl-state" / "bootstrapped" / "develop"
+            markers.mkdir(parents=True)
+            for instance in ("develop-entry-nl-01", "develop-exit-de-01"):
+                (markers / f"{instance}.json").write_text("{}\n", encoding="utf-8")
+
+            options = DeploymentOptions(
+                environment="develop",
+                initial=True,
+                apply=True,
+                bootstrap_vars=variables["bootstrap.yml"],
+                compiled_secrets=variables["secrets.yml"],
+                readiness_vars=variables["readiness.yml"],
+                backend_client_certificate=material["tls.crt"],
+                backend_client_private_key=material["tls.key"],
+                backend_certificate_authority=material["ca.crt"],
+            )
+            with mock.patch.object(coordinator, "_run_ansible"), mock.patch(
+                "fleetctl.deployment.coordinator.apply_fleet_manifest",
+                return_value="MANIFEST_APPLY_RESULT_APPLIED",
+            ) as send:
+                first = coordinator.run(options)
+                resumed = coordinator.run(
+                    dataclasses.replace(options, initial=True, resume=True)
+                )
+
+        self.assertEqual(send.call_count, 1)
+        request = send.call_args.args[0]
+        endpoint = send.call_args.kwargs["endpoint"]
+        self.assertEqual(request["revision"], first["backend_manifest"]["revision"])
+        # Reached over the management overlay, verified against the declared name.
+        self.assertEqual(endpoint.target, "10.80.0.1:9443")
+        self.assertEqual(endpoint.tls_server_name, "backend.develop.internal")
+
+        self.assertEqual(first["status"], "BACKEND_APPLIED")
+        self.assertEqual(
+            first["backend_apply"],
+            {
+                "status": "APPLIED",
+                "applied_revision": first["backend_manifest"]["revision"],
+                "result": "MANIFEST_APPLY_RESULT_APPLIED",
+            },
+        )
+        self.assertEqual(resumed["status"], "BACKEND_APPLIED")
+        self.assertEqual(resumed["backend_apply"], first["backend_apply"])
 
     def test_bootstrapping_nodes_refuses_to_start_without_a_ca(self) -> None:
         # Fail before the CSR phase mutates anything: collecting requests that

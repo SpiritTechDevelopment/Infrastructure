@@ -13,13 +13,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fleetctl.adapters import GitRepository, validate_ansible_artifacts, write_rendered_files
+from fleetctl.adapters import (
+    BackendCallError,
+    BackendEndpoint,
+    GitRepository,
+    apply_fleet_manifest,
+    validate_ansible_artifacts,
+    write_rendered_files,
+)
 from fleetctl.compiler import (
     backend_manifest_bytes,
     backend_manifest_payload_digest,
     compile_backend_manifest,
     render_files,
 )
+from fleetctl.compiler.addressing import control_management_address
 from fleetctl.model import DesiredState
 from fleetctl.pki import PkiError
 from fleetctl.pki.issuance import sign_agent_certificate
@@ -50,6 +58,12 @@ class DeploymentOptions:
     # Root of the offline CA. Required only when nodes are actually bootstrapped,
     # because that is the only step that needs to sign anything.
     ca_state: Path | None = None
+    # manifest-writer identity. Absent means the workflow stops at the contract
+    # boundary exactly as it did before: compiled, allocated, not sent.
+    backend_client_certificate: Path | None = None
+    backend_client_private_key: Path | None = None
+    backend_certificate_authority: Path | None = None
+    backend_timeout_seconds: int = 60
 
 
 class DeploymentCoordinator:
@@ -180,7 +194,7 @@ class DeploymentCoordinator:
             record["provisioning"] = [report.to_dict() for report in reports]
             self._complete_step(record, record_path, "manual_provisioning_preflight", "passed")
 
-            manifest_payload = self._prepare_backend_manifest(
+            manifest_payload, manifest_request = self._prepare_backend_manifest(
                 current=current,
                 plan=plan,
                 options=options,
@@ -305,11 +319,12 @@ class DeploymentCoordinator:
             impact_path = build_directory / "impact-plan.json"
             impact_path.write_bytes(plan.to_json_bytes())
             self._complete_step(record, record_path, "render_final_artifacts", str(build_directory))
-            record["status"] = "WAITING_FOR_BACKEND"
-            record["diagnostic"] = (
-                "Infrastructure-only workflow reached the backend/agent contract boundary. "
-                "The backend manifest revision is durably allocated and rendered, but no RPC was sent. "
-                "Backend apply, DNS/data-plane promotion, and deployment-ref update were not performed."
+            self._deliver_backend_manifest(
+                record=record,
+                record_path=record_path,
+                current=current,
+                options=options,
+                request=manifest_request,
             )
             record["updated_at"] = _timestamp()
             self._write_record(record_path, record)
@@ -334,7 +349,7 @@ class DeploymentCoordinator:
         record: dict[str, Any],
         record_path: Path,
         revision_state_path: Path,
-    ) -> bytes:
+    ) -> tuple[bytes, dict[str, Any]]:
         provisional = compile_backend_manifest(
             current,
             plan,
@@ -376,24 +391,111 @@ class DeploymentCoordinator:
                 "resume backend manifest differs from the revision pinned in the deployment record"
             )
         record["backend_manifest"] = metadata
-        backend_apply = {
-            "status": "NOT_SENT",
-            "applied_revision": None,
-            "result": None,
-        }
-        if record.get("backend_apply", backend_apply) != backend_apply:
+        # NOT_SENT is where every deployment starts; APPLIED is where it lands
+        # once the manifest has been handed over. Anything else was written by
+        # something this coordinator does not understand, and resuming on top of
+        # it would guess at what the backend has already accepted.
+        existing_apply = record.get("backend_apply")
+        if existing_apply is None:
+            record["backend_apply"] = {
+                "status": "NOT_SENT",
+                "applied_revision": None,
+                "result": None,
+            }
+        elif (
+            not isinstance(existing_apply, dict)
+            or existing_apply.get("status") not in {"NOT_SENT", "APPLIED"}
+        ):
             raise DeploymentError(
-                "deployment record contains backend apply state unsupported by the offline coordinator"
+                "deployment record contains backend apply state unsupported by this coordinator"
             )
-        record["backend_apply"] = backend_apply
         self._write_record(record_path, record)
         self._complete_step(
             record,
             record_path,
             "allocate_backend_manifest_revision",
-            f"revision {allocation.revision}; no backend RPC",
+            f"revision {allocation.revision} allocated",
         )
-        return rendered
+        return rendered, request
+
+    def _deliver_backend_manifest(
+        self,
+        *,
+        record: dict[str, Any],
+        record_path: Path,
+        current: DesiredState,
+        options: DeploymentOptions,
+        request: dict[str, Any],
+    ) -> None:
+        """Hand the compiled snapshot to the backend, or stop at the boundary."""
+
+        material = (
+            options.backend_client_certificate,
+            options.backend_client_private_key,
+            options.backend_certificate_authority,
+        )
+        # Sending is a mutation and needs an identity. Without either, the
+        # workflow ends exactly where it always did: compiled, durably
+        # allocated, and explicit that nothing was sent.
+        if not options.apply or any(path is None for path in material):
+            record["status"] = "WAITING_FOR_BACKEND"
+            record["diagnostic"] = (
+                "Infrastructure-only workflow reached the backend/agent contract boundary. "
+                "The backend manifest revision is durably allocated and rendered, but no RPC was sent. "
+                "Backend apply, DNS/data-plane promotion, and deployment-ref update were not performed."
+            )
+            return
+
+        revision = record["backend_manifest"]["revision"]
+        applied = record.get("backend_apply", {})
+        if applied.get("status") == "APPLIED" and applied.get("applied_revision") == revision:
+            # A resume must not re-send: the revision is already accepted, and
+            # asking again would be a second chance to be told something new
+            # about a decision the backend has already made.
+            record["status"] = "BACKEND_APPLIED"
+            record["diagnostic"] = (
+                f"Backend manifest revision {revision} was already applied in an earlier attempt "
+                f"({applied.get('result')}); nothing re-sent."
+            )
+            return
+
+        host, port = current.environment.backend_endpoint.rsplit(":", 1)
+        endpoint = BackendEndpoint(
+            # The backend publishes its service port on the management overlay
+            # only, so that is where it is reached; the certificate is issued
+            # for the declared name, which has no DNS.
+            target=f"{control_management_address(current.environment)}:{port}",
+            tls_server_name=host,
+            client_certificate=options.backend_client_certificate,
+            client_private_key=options.backend_client_private_key,
+            certificate_authority=options.backend_certificate_authority,
+        )
+        try:
+            result = apply_fleet_manifest(
+                request,
+                endpoint=endpoint,
+                timeout_seconds=options.backend_timeout_seconds,
+            )
+        except BackendCallError as exc:
+            raise DeploymentError(str(exc)) from exc
+
+        record["backend_apply"] = {
+            "status": "APPLIED",
+            "applied_revision": revision,
+            "result": result,
+        }
+        record["status"] = "BACKEND_APPLIED"
+        record["diagnostic"] = (
+            f"Backend accepted manifest revision {revision} ({result}). "
+            "DNS/data-plane promotion and the deployment-ref update remain separate, "
+            "deliberately manual steps."
+        )
+        self._complete_step(
+            record,
+            record_path,
+            "apply_backend_manifest",
+            f"revision {revision}: {result}",
+        )
 
     @staticmethod
     def _bootstrap_marker(bootstrapped_directory: Path, environment: str, instance_id: str) -> Path:

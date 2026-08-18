@@ -110,6 +110,15 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--bootstrap-vars", type=Path)
     deploy.add_argument("--compiled-secrets", type=Path)
     deploy.add_argument("--readiness-vars", type=Path)
+    # All three or none: a half-configured identity would fail at the wire
+    # rather than at the boundary, after the fleet has already been mutated.
+    deploy.add_argument(
+        "--backend-client-certificate",
+        type=Path,
+        help="manifest-writer certificate; without it the workflow stops before the RPC",
+    )
+    deploy.add_argument("--backend-client-private-key", type=Path)
+    deploy.add_argument("--backend-ca", type=Path, help="CA that signs the backend server")
     # No default, for the same reason as pki-sign: the root key must not be
     # reachable from a path the repository knows.
     deploy.add_argument(
@@ -294,6 +303,9 @@ def main(argv: list[str] | None = None) -> int:
                     compiled_secrets=args.compiled_secrets,
                     readiness_vars=args.readiness_vars,
                     ca_state=args.ca_state,
+                    backend_client_certificate=args.backend_client_certificate,
+                    backend_client_private_key=args.backend_client_private_key,
+                    backend_certificate_authority=args.backend_ca,
                 )
             )
         except (DeploymentError, GitAdapterError) as exc:

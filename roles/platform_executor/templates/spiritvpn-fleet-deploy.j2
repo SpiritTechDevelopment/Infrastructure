@@ -146,6 +146,20 @@ if test "$mode" = apply; then
     --readiness-vars "$config_dir/readiness.yml"
     --ca-state "$config_dir/ca"
   )
+  # Личность manifest-writer — операторский вход, как ca/ и vault-approle.
+  # Пока её нет, выкатка ведёт себя ровно как прежде: манифест скомпилирован,
+  # ревизия закреплена, ничего не отправлено. Все три файла или ни одного:
+  # половина личности упала бы уже на проводе, когда флот изменён.
+  backend_identity="$config_dir/backend-client"
+  if test -s "$backend_identity/tls.crt" &&
+     test -s "$backend_identity/tls.key" &&
+     test -s "$backend_identity/ca.crt"; then
+    arguments+=(
+      --backend-client-certificate "$backend_identity/tls.crt"
+      --backend-client-private-key "$backend_identity/tls.key"
+      --backend-ca "$backend_identity/ca.crt"
+    )
+  fi
 fi
 
 cd "$worktree"
