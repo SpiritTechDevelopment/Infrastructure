@@ -1,0 +1,117 @@
+---
+# Правила сигнализации контура SpiritVPN.
+#
+# Каждое правило опирается на метрику, которая действительно собирается: цели
+# скрапа объявлены в скелете коллектора, метрики агентов и бэкенда — в их
+# реестрах, метрики базы — экспортером рядом с ней. Правило на несобираемую
+# метрику молчит вечно и выглядит при этом исправным.
+#
+# Пороги подобраны так, чтобы будить по поломке, а не по всплеску: короткие
+# провалы гасятся выдержкой `for`.
+groups:
+  - name: доступность
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: >-
+            Prometheus десять минут не может снять метрики с {{ $labels.job }}
+            ({{ $labels.instance }}).
+
+      - alert: AgentXrayUnreachable
+        expr: spirit_agent_xray_up == 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: >-
+            Агент на {{ $labels.instance_id }} не достучался до локального API
+            Xray: узел не обслуживает пользователей.
+
+      - alert: BackendSeesNodeXrayUnreachable
+        expr: spiritvpn_node_xray_reachable == 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: >-
+            Бэкенд считает Xray на узле {{ $labels.node }} недоступным.
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: Экспортер не может подключиться к базе контрольного контура.
+
+  - name: конвейер учёта
+    rules:
+      # Очередь, которая не рассасывается, означает, что учтённый трафик не
+      # доезжает до бэкенда — то есть тарифицировать нечем.
+      - alert: UsageOutboxStuck
+        expr: spirit_agent_usage_outbox_batches > 10
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: >-
+            На {{ $labels.instance_id }} полчаса висит
+            {{ $value }} неподтверждённых пачек usage.
+
+      - alert: UsagePullStalled
+        expr: spiritvpn_node_usage_pull_age_seconds > 3600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: >-
+            Бэкенд больше часа не забирал usage с узла {{ $labels.node }}.
+
+      - alert: AgentNeedsBootstrap
+        expr: spirit_agent_needs_bootstrap > 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: >-
+            Агент на {{ $labels.instance_id }} полчаса ждёт полной
+            авторитетной сверки и сам из этого состояния не выйдет.
+
+  - name: ёмкость
+    rules:
+      - alert: RootFilesystemFillingUp
+        expr: >-
+          100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+          / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) > 85
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: >-
+            Корневая файловая система на {{ $labels.instance_id }} занята более
+            чем на 85 процентов.
+
+      - alert: MemoryPressure
+        expr: >-
+          100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: >-
+            На {{ $labels.instance_id }} свободно менее десяти процентов памяти.
+
+      - alert: PostgresConnectionsNearLimit
+        expr: >-
+          sum(pg_stat_database_numbackends) / max(pg_settings_max_connections) > 0.8
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: >-
+            Занято более 80 процентов соединений к базе; при исчерпании
+            запросы начнут ждать.

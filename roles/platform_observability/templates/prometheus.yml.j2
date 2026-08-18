@@ -10,6 +10,16 @@ global:
   scrape_interval: {{ platform_prometheus_scrape_interval_seconds }}s
   scrape_timeout: {{ platform_prometheus_scrape_timeout_seconds }}s
 
+# Rules are deployed with the contour, like dashboards: an alert that exists
+# only in the running process cannot be reviewed and does not survive a rebuild.
+rule_files:
+  - {{ platform_prometheus_rules_container_dir }}/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["{{ platform_alertmanager_bind_address }}:{{ platform_alertmanager_port }}"]
+
 scrape_configs:
   - job_name: prometheus
     static_configs:

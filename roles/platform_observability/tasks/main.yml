@@ -28,6 +28,10 @@
       # and a Grafana datasource is an outbound request made by the host that
       # holds Vault.
       - platform_grafana_anonymous_role in ['Viewer', 'None']
+      - platform_alertmanager_bind_address == '127.0.0.1'
+      - >-
+        platform_alertmanager_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
     fail_msg: >-
       The shared observability inputs are incomplete, unpinned, or would expose
       the collector beyond loopback.
@@ -72,6 +76,18 @@
       owner: "{{ platform_grafana_uid }}"
       group: "{{ platform_grafana_gid }}"
       mode: "0700"
+    - path: "{{ platform_prometheus_rules_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_alertmanager_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_alertmanager_state_dir }}"
+      owner: "{{ platform_alertmanager_uid }}"
+      group: "{{ platform_alertmanager_gid }}"
+      mode: "0700"
 
 # Each environment owns exactly one directory. Creating them here rather than
 # in the control contour means Prometheus never references a path that does not
@@ -100,6 +116,66 @@
   loop: "{{ platform_observability_environments | product(platform_observability_jobs) | list }}"
   loop_control:
     label: "{{ item.0 }}/{{ item.1.name }}"
+
+# Rules ship with the contour so an alert can be reviewed in a diff. They are
+# installed before the skeleton is validated: promtool reads the rule files the
+# configuration points at, so a broken rule fails the deployment here rather
+# than leaving the collector running with one group silently dropped.
+- name: Deploy the alerting rules
+  ansible.builtin.copy:
+    src: rules/
+    dest: "{{ platform_prometheus_rules_dir }}/"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _platform_prometheus_rules
+
+- name: Require the protected Telegram notification input
+  ansible.builtin.stat:
+    path: "{{ platform_alertmanager_telegram_file }}"
+  register: _platform_alertmanager_telegram_state
+
+- name: Refuse to deploy alerting that would notify nobody
+  ansible.builtin.assert:
+    that:
+      - _platform_alertmanager_telegram_state.stat.exists
+    fail_msg: >-
+      {{ platform_alertmanager_telegram_file }} is missing. Alerting without a
+      receiver looks deployed and wakes nobody; place the protected operator
+      input on the management host, with bot_token and chat_id, and deploy again.
+
+- name: Read the protected Telegram notification input
+  ansible.builtin.slurp:
+    src: "{{ platform_alertmanager_telegram_file }}"
+  register: _platform_alertmanager_telegram_raw
+  no_log: true
+
+- name: Load the Telegram notification input
+  ansible.builtin.set_fact:
+    _platform_alertmanager_telegram: >-
+      {{ _platform_alertmanager_telegram_raw.content | b64decode | from_yaml }}
+  no_log: true
+
+- name: Require both halves of the Telegram receiver
+  ansible.builtin.assert:
+    that:
+      - _platform_alertmanager_telegram.bot_token | default('') | length > 0
+      - _platform_alertmanager_telegram.chat_id | default('') | string | length > 0
+    fail_msg: >-
+      {{ platform_alertmanager_telegram_file }} must declare both bot_token and
+      chat_id.
+  no_log: true
+
+- name: Render the Alertmanager configuration
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ platform_alertmanager_dir }}/alertmanager.yml"
+    owner: "{{ platform_alertmanager_uid }}"
+    group: "{{ platform_alertmanager_gid }}"
+    mode: "0400"
+  register: _platform_alertmanager_configuration
+  no_log: true
+  diff: false
 
 - name: Render the shared collector skeleton
   ansible.builtin.template:
@@ -195,6 +271,8 @@
       - "{{ platform_observability_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
       - -v
       - "{{ platform_observability_targets_dir }}:{{ platform_prometheus_targets_container_dir }}:ro"
+      - -v
+      - "{{ platform_prometheus_rules_dir }}:{{ platform_prometheus_rules_container_dir }}:ro"
       - --entrypoint
       - promtool
       - "{{ platform_prometheus_image }}"
@@ -221,6 +299,7 @@
       - prometheus
       - node-exporter
       - grafana
+      - alertmanager
   register: _platform_prometheus_apply
   changed_when: >-
     _platform_prometheus_compose.changed
@@ -230,10 +309,12 @@
     or 'Pulled' in (_platform_prometheus_apply.stdout ~ _platform_prometheus_apply.stderr)
   when: not ansible_check_mode
 
-# Only the skeleton needs this. Fragment changes are picked up by file_sd on
-# their own, which is the whole reason the environments write files instead of
-# rewriting this configuration.
-- name: Restart the collector onto a changed skeleton
+# The skeleton and the rules need this; fragment changes are picked up by
+# file_sd on their own, which is the whole reason the environments write files
+# instead of rewriting this configuration. Rules are not file_sd: with the
+# lifecycle API deliberately disabled, a restart is the only way a changed rule
+# reaches the running process.
+- name: Restart the collector onto a changed skeleton or changed rules
   ansible.builtin.command:
     argv:
       - docker
@@ -244,7 +325,22 @@
       - prometheus
   when:
     - not ansible_check_mode
-    - _platform_prometheus_configuration.changed
+    - _platform_prometheus_configuration.changed or _platform_prometheus_rules.changed
+    - not _platform_prometheus_apply.changed
+  changed_when: true
+
+- name: Restart Alertmanager onto a changed configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ platform_observability_dir }}/compose.yml"
+      - restart
+      - alertmanager
+  when:
+    - not ansible_check_mode
+    - _platform_alertmanager_configuration.changed
     - not _platform_prometheus_apply.changed
   changed_when: true
 
@@ -291,6 +387,22 @@
     status_code: 200
     return_content: false
     timeout: 5
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Require Alertmanager readiness on loopback
+  ansible.builtin.uri:
+    url: >-
+      http://{{ platform_alertmanager_bind_address }}:{{
+      platform_alertmanager_port }}/-/ready
+    method: GET
+    status_code: 200
+    return_content: false
+    timeout: 5
+  register: _platform_alertmanager_readiness
+  retries: 12
+  delay: 5
+  until: _platform_alertmanager_readiness.status == 200
   changed_when: false
   when: not ansible_check_mode
 

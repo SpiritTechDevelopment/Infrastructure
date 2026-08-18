@@ -29,7 +29,27 @@ services:
     volumes:
       - {{ platform_observability_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - {{ platform_observability_targets_dir }}:{{ platform_prometheus_targets_container_dir }}:ro
+      - {{ platform_prometheus_rules_dir }}:{{ platform_prometheus_rules_container_dir }}:ro
       - {{ platform_observability_state_dir }}:/prometheus
+
+  alertmanager:
+    image: {{ platform_alertmanager_image }}
+    user: "{{ platform_alertmanager_uid }}:{{ platform_alertmanager_gid }}"
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address={{ platform_alertmanager_bind_address }}:{{ platform_alertmanager_port }}
+    volumes:
+      - {{ platform_alertmanager_dir }}/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - {{ platform_alertmanager_state_dir }}:/alertmanager
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://{{ platform_alertmanager_bind_address }}:{{ platform_alertmanager_port }}/-/ready >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
   node-exporter:
     image: {{ platform_node_exporter_image }}

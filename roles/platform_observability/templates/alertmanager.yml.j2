@@ -1,0 +1,32 @@
+{{ ansible_managed | comment }}
+# Rendered with the bot token inline and kept at 0400. A bot_token_file would
+# isolate the secret better, but it is a newer field than the pinned release is
+# guaranteed to accept, and a receiver that fails to load is alerting that
+# silently does not exist. The file is as protected as a separate secret would
+# have been.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: telegram
+  # Grouped by what broke and where, so one bad node is one message rather than
+  # one message per rule.
+  group_by: ['alertname', 'environment']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: {{ platform_alertmanager_repeat_interval }}
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: {{ _platform_alertmanager_telegram.bot_token | to_json }}
+        chat_id: {{ _platform_alertmanager_telegram.chat_id | int }}
+        parse_mode: HTML
+        send_resolved: true
+        message: |-
+{% raw %}
+          {{ range .Alerts }}<b>{{ .Status | toUpper }}</b> {{ .Labels.alertname }}
+          {{ .Annotations.summary }}
+          {{ if .Labels.instance_id }}узел: {{ .Labels.instance_id }}{{ end }}
+          {{ end }}
+{% endraw %}

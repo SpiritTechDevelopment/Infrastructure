@@ -43,6 +43,8 @@ platform_observability_jobs:
     path: /metrics
   - name: backend-metrics
     path: /metrics
+  - name: postgres-metrics
+    path: /metrics
 
 # Хаб собирал метрики со всего флота и не собирал их с себя: под нагрузкой
 # оказывался невидим ровно тот хост, который держит Vault, коллектор и
@@ -84,3 +86,27 @@ platform_grafana_admin_password_file: /var/lib/spiritvpn/grafana-admin-password
 # локальному процессу API создания источников данных, то есть исходящие запросы
 # от имени хоста, на котором стоит Vault.
 platform_grafana_anonymous_role: Viewer
+
+# Сигнализация. Дашборд показывает, но не будит: пока никто не разбудит,
+# наблюдаемость работает ровно в те минуты, когда оператор сам смотрит.
+platform_alertmanager_image: "mirror.gcr.io/prom/alertmanager@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba"
+# Upstream prom/alertmanager работает под uid 65534.
+platform_alertmanager_uid: "65534"
+platform_alertmanager_gid: "65534"
+platform_alertmanager_bind_address: 127.0.0.1
+platform_alertmanager_port: 9093
+platform_alertmanager_dir: /opt/spiritvpn/platform/observability/alertmanager
+platform_alertmanager_state_dir: /var/lib/spiritvpn/alertmanager
+platform_prometheus_rules_dir: /opt/spiritvpn/platform/observability/rules
+platform_prometheus_rules_container_dir: /etc/prometheus/rules
+# Защищённый операторский вход, как known_hosts и vault-approle: кладётся на
+# хаб руками и в репозитории не хранится. Не через SOPS-бандл сознательно —
+# переменные бандла доезжают до хаба белым списком в platform_executor, то есть
+# новый ключ стал бы виден лишь прогону, следующему за тем, который его завёл.
+#
+# Ожидаемое содержимое:
+#   bot_token: "123456:AA..."
+#   chat_id: "-1001234567890"
+platform_alertmanager_telegram_file: /etc/spiritvpn/platform/alertmanager-telegram.yml
+# Как часто повторять напоминание о том, что уже горит.
+platform_alertmanager_repeat_interval: 4h
