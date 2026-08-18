@@ -42,14 +42,17 @@ class DesiredStateValidationTests(unittest.TestCase):
 
     def test_develop_declares_the_live_fleet(self) -> None:
         state = validate_environment(REPO_ROOT, "develop")
+        # develop-exit-nl (82.24.174.244) выведен из эксплуатации 2026-08-18.
         self.assertEqual(
             [node.object_id for node in state.nodes],
-            ["develop-entry-ru", "develop-exit-nl", "develop-exit-ro"],
+            ["develop-entry-ru", "develop-exit-ro"],
         )
-        # Slots are unique per role, so the second exit is 02 rather than 01.
+        # Slots are unique per role, and the remaining exit keeps the 02 it was
+        # given when it was the second one — renumbering would rewrite its
+        # management address and its agent identity for no reason.
         self.assertEqual(
             [instance.object_id for instance in state.instances],
-            ["develop-entry-ru-01", "develop-exit-nl-01", "develop-exit-ro-02"],
+            ["develop-entry-ru-01", "develop-exit-ro-02"],
         )
         # The entry is what clients dial, so its public name has to be the one
         # that actually resolves; the exits are reached by address and carry

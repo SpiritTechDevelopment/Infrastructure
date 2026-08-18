@@ -4,13 +4,8 @@ metadata:
   id: develop-fleet-eu
 spec:
   entries: [develop-entry-ru]
-  exits: [develop-exit-nl, develop-exit-ro]
+  exits: [develop-exit-ro]
   bridges:
-    - routing_key: develop-entry-ru.to-develop-exit-nl
-      entry: develop-entry-ru
-      exit: develop-exit-nl
-      display_name: Netherlands
-      service_credential_ref: secret://kv/develop/bridges/develop-entry-ru.to-develop-exit-nl#service_uuid
     - routing_key: develop-entry-ru.to-develop-exit-ro
       entry: develop-entry-ru
       exit: develop-exit-ro
