@@ -3,7 +3,14 @@
 # Port is additive in sshd_config: naming one here replaces the implicit 22 only
 # because no other Port directive is in effect. An uncommented Port elsewhere
 # would keep that port listening too.
-Port {{ common_ssh_port }}
+#
+# During bootstrap this deliberately lists the default port as well — the run
+# that is installing this file arrived on it, and dropping it mid-play would cut
+# the connection Ansible is still using. The steady-state phase renders only the
+# declared port and closes the door behind itself.
+{% for port in common_ssh_ports %}
+Port {{ port }}
+{% endfor %}
 {% endif %}
 PasswordAuthentication no
 PermitRootLogin prohibit-password

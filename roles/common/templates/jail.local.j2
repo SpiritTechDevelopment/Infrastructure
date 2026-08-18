@@ -11,4 +11,4 @@ backend  = systemd
 
 [sshd]
 enabled = true
-port    = {{ ssh_port }}
+port    = {{ common_ssh_ports | join(',') }}

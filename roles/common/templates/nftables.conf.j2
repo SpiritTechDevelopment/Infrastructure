@@ -20,13 +20,13 @@ table inet spiritvpn_filter {
 {% if ssh_allowed_cidrs | length > 0 %}
 {% for cidr in ssh_allowed_cidrs %}
 {% if ':' in cidr %}
-    ip6 saddr {{ cidr }} tcp dport {{ ssh_port }} accept
+    ip6 saddr {{ cidr }} tcp dport { {{ common_ssh_ports | join(', ') }} } accept
 {% else %}
-    ip saddr {{ cidr }} tcp dport {{ ssh_port }} accept
+    ip saddr {{ cidr }} tcp dport { {{ common_ssh_ports | join(', ') }} } accept
 {% endif %}
 {% endfor %}
 {% else %}
-    tcp dport {{ ssh_port }} accept
+    tcp dport { {{ common_ssh_ports | join(', ') }} } accept
 {% endif %}
 
 {% if common_public_tcp_ports | length > 0 %}

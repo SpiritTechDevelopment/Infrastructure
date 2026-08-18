@@ -37,6 +37,19 @@ common_ssh_port: ""
 ssh_port: >-
   {{ common_ssh_port if (common_ssh_port | string | length > 0)
   else (ansible_port | default(22)) }}
+# Порты, которые слушает sshd и пропускает firewall.
+#
+# В фазе бутстрапа их два. Роль меняет sshd и nftables в середине своей работы,
+# а Ansible держит соединение через ControlPersist и переоткрывает его когда
+# сочтёт нужным — то есть узел обязан оставаться достижимым по тому порту, по
+# которому бутстрап пришёл, до самого конца прогона. Иначе роль рубит сук, на
+# котором сидит: так и вышло на exit-ro, оборвавшемся посреди `common`.
+#
+# Установившаяся фаза оставляет только объявленный порт: к ней узел уже
+# слушает оба, и путь под ней ничего не меняет.
+common_ssh_ports: >-
+  {{ ([22, ssh_port | int] | unique | list) if deploy_mode == 'bootstrap'
+  else [ssh_port | int] }}
 ssh_allowed_cidrs: []                      # [] = allow SSH from anywhere (fallback)
 common_public_tcp_ports: []                # ports open to the internet (input chain)
 common_public_udp_ports: []

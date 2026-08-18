@@ -94,6 +94,53 @@ class XrayAccessLogTests(unittest.TestCase):
         self.assertFalse(state.common.xray.access_log_export_enabled)
 
 
+class SshPortHandoverTests(unittest.TestCase):
+    """Bootstrap must not close the port it is talking over.
+
+    The role rewrites sshd and nftables in the middle of its own run, while
+    Ansible holds the session through ControlPersist and may reopen it at any
+    moment. Closing the default port there cost two nodes mid-play: exit-ro died
+    inside `common`, exit-nl inside `pki_agent`. Handing the port over in
+    post_tasks cannot help — the break happens long before they run.
+    """
+
+    def render_ports(self, deploy_mode: str, common_ssh_port: object) -> list[int]:
+        defaults = yaml.safe_load(
+            (REPO_ROOT / "roles" / "common" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        environment = Environment()
+        context = {
+            "deploy_mode": deploy_mode,
+            "common_ssh_port": common_ssh_port,
+            "ansible_port": 22,
+        }
+        context["ssh_port"] = environment.from_string(defaults["ssh_port"]).render(**context).strip()
+        rendered = environment.from_string(defaults["common_ssh_ports"]).render(**context)
+        return [int(value) for value in re.findall(r"\d+", rendered)]
+
+    def test_bootstrap_keeps_the_default_port_open_alongside_the_declared_one(self) -> None:
+        self.assertEqual(self.render_ports("bootstrap", 232), [22, 232])
+
+    def test_steady_state_closes_the_default_port(self) -> None:
+        self.assertEqual(self.render_ports("hardened", 232), [232])
+
+    def test_undeclared_port_never_duplicates_the_default(self) -> None:
+        # A node that declares nothing must not render `{ 22, 22 }` into nft,
+        # which nftables rejects as a duplicate set element.
+        self.assertEqual(self.render_ports("bootstrap", ""), [22])
+
+    def test_bootstrap_playbook_no_longer_switches_the_connection(self) -> None:
+        playbook = (REPO_ROOT / "playbooks" / "bootstrap" / "bootstrap.yml").read_text(
+            encoding="utf-8"
+        )
+        # readiness.yml runs against the same inventory; moving it to a port the
+        # controller has no known_hosts entry for is a different way to fail.
+        self.assertNotIn("reset_connection", playbook)
+        self.assertNotIn("ansible_port", playbook)
+
+
 class BridgeCredentialGuardTests(unittest.TestCase):
     """A bridge UUID goes straight into an Xray client id.
 
