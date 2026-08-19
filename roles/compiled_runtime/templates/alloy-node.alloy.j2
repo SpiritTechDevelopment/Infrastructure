@@ -1,0 +1,58 @@
+// GENERATED — DO NOT EDIT. Источник: roles/compiled_runtime.
+//
+// Собирает логи контейнеров ноды и шлёт их на хаб через управляющий оверлей.
+//
+// Access-лог Xray сюда не попадает и попасть не может: он пишется файлом в
+// /var/log/xray, а этот конфиг читает только stdout/stderr контейнеров и
+// каталог с логами внутрь Alloy не смонтирован. Это не настройка фильтра —
+// запрет на вывоз access-лога зафиксирован валидацией desired state
+// (ACCESS_LOG_EXPORT), потому что в нём адреса клиентов и адреса назначения.
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.containers.output
+  forward_to       = [loki.write.hub.receiver]
+  refresh_interval = "15s"
+}
+
+loki.write "hub" {
+  // Адрес приезжает из скомпилированного плана и указывает на оверлейный адрес
+  // хаба. Публичной сетью логи не идут никогда.
+  endpoint {
+    url = "{{ spiritvpn_node_plan.logs.endpoint }}"
+  }
+
+  external_labels = {
+    environment   = "{{ spiritvpn_node_plan.environment }}",
+    logical_node  = "{{ spiritvpn_node_plan.logical_node.id }}",
+    instance      = "{{ spiritvpn_node_plan.instance.id }}",
+    role          = "{{ spiritvpn_node_plan.logical_node.role }}",
+    region        = "{{ spiritvpn_node_plan.logical_node.region }}",
+    tier          = "node",
+  }
+}

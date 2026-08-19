@@ -5,6 +5,7 @@ import contextlib
 import copy
 import importlib.util
 import io
+import ipaddress
 import json
 import os
 import re
@@ -19,6 +20,7 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment
 
+from fleetctl.compiler import compile_node_plans
 from fleetctl.validation import validate_environment
 
 
@@ -640,6 +642,86 @@ all:
             "grpc_server_ca_ref",
         ):
             self.assertIn(reference, checked)
+
+    def test_every_required_node_component_is_actually_deployed(self) -> None:
+        """Обязательный компонент, который никто не разворачивает, — ложь.
+
+        `alloy` был объявлен обязательным для ноды и закреплён digest'ом, но не
+        упоминался ни в одном compose и ни в одном компиляторе. Валидация
+        требовала его наличия в desired state, на нодах его не было, и заметить
+        это было нечем. Тест перечисляет требуемое из кода валидации, а не
+        списком здесь.
+        """
+        semantic = (REPO_ROOT / "fleetctl" / "validation" / "semantic.py").read_text(
+            encoding="utf-8"
+        )
+        declared = re.search(r"required_node_components = \{([^}]*)\}", semantic)
+        self.assertIsNotNone(declared)
+        required = set(re.findall(r'"([a-z_]+)"', declared.group(1)))
+        self.assertIn("alloy", required)
+
+        compose = (
+            REPO_ROOT / "roles" / "compiled_runtime" / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        plan = (REPO_ROOT / "roles" / "compiled_node_plan" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        for component in sorted(required):
+            with self.subTest(component=component):
+                # Образ обязан приезжать из плана, а не из умолчания роли.
+                self.assertIn(f"components.{component}.digest", plan)
+                self.assertIn(f"{{{{ {component}_image }}}}", compose)
+
+    def test_logs_never_carry_the_xray_access_log(self) -> None:
+        """Запрет на вывоз access-лога держится в трёх местах сразу.
+
+        В нём адреса клиентов и адреса назначения — ровно то, ради неведения
+        чего сервис существует. Валидация запрещает включать экспорт, компилятор
+        фиксирует решение в плане ноды, а шипер физически не видит каталог.
+        """
+        semantic = (REPO_ROOT / "fleetctl" / "validation" / "semantic.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ACCESS_LOG_EXPORT", semantic)
+
+        plans = (REPO_ROOT / "fleetctl" / "compiler" / "node_plans.py").read_text(encoding="utf-8")
+        self.assertIn('"xray_access_log_exported": False', plans)
+
+        compose = yaml.safe_load(
+            re.sub(
+                r"{{[^\n{}]+}}",
+                "fixture",
+                (
+                    REPO_ROOT / "roles" / "compiled_runtime" / "templates" / "compose.yml.j2"
+                ).read_text(encoding="utf-8"),
+            )
+        )
+        alloy_volumes = compose["services"]["alloy"]["volumes"]
+        self.assertTrue(alloy_volumes)
+        for volume in alloy_volumes:
+            self.assertNotIn("/var/log/xray", volume)
+        # Xray свой каталог монтирует — значит проверка выше не проходит просто
+        # потому, что каталога нет ни у кого.
+        self.assertTrue(
+            any("/var/log/xray" in volume for volume in compose["services"]["xray"]["volumes"])
+        )
+
+    def test_logs_leave_the_node_only_over_the_overlay(self) -> None:
+        """Тот же инвариант, что у скрейп-целей, но в другую сторону.
+
+        Скрейп из-за пределов оверлея просто не соберётся; отправка логов на
+        адрес вне оверлея выпустила бы их наружу. Адрес поэтому выводится из
+        сети управления, а не объявляется в desired state.
+        """
+        state = validate_environment(REPO_ROOT, "develop")
+        plans = compile_node_plans(state)
+        self.assertTrue(plans)
+        network = ipaddress.ip_network(state.environment.management_network, strict=True)
+        for instance_id, plan in plans.items():
+            with self.subTest(instance=instance_id):
+                endpoint = plan["logs"]["endpoint"]
+                host = endpoint.split("//", 1)[1].split(":", 1)[0]
+                self.assertIn(ipaddress.ip_address(host), network)
 
     def test_bot_migrations_ship_with_the_bot_image(self) -> None:
         """Схема и код приезжают одной парой.

@@ -117,3 +117,36 @@ platform_alertmanager_telegram_chat_id: ""
 platform_alertmanager_telegram_thread_id: ""
 # Как часто повторять напоминание о том, что уже горит.
 platform_alertmanager_repeat_interval: 4h
+
+# --- Логи ---
+#
+# Loki — единственное место, где логи собираются вместе, и один инстанс на обе
+# среды, как Prometheus и Vault. Изоляция по меткам, а не по инстансам: у
+# каждой записи есть environment.
+platform_loki_image: "mirror.gcr.io/grafana/loki@sha256:70b9f699fc9bb868b62f1cfd4f787dfa50242f1fd92e6089787d5d7daea75fe8"
+# Upstream grafana/loki работает под uid 10001.
+platform_loki_uid: "10001"
+platform_loki_gid: "10001"
+# Единственный слушатель этой роли, который обязан быть маршрутизируемым, и
+# единственный, кто не может выбрать один адрес: писать в него должны ноды
+# обеих сред, а хаб держит по оверлейному адресу на среду. Prometheus в такой
+# ситуации привязан к петле, потому что скрейп исходящий и routable-слушатель
+# ему не даёт ничего; здесь всё наоборот — приём и есть смысл сервиса.
+#
+# Ограничивает его фаервол, а не привязка: цепочка input в inet
+# spiritvpn_filter имеет policy drop и принимает только lo и wg0. Снаружи и с
+# мостов Docker порт недостижим.
+platform_loki_bind_address: 0.0.0.0
+platform_loki_port: 3100
+platform_loki_dir: /opt/spiritvpn/platform/observability/loki
+platform_loki_state_dir: /var/lib/spiritvpn/loki
+# Общий, как ретеншен Prometheus и по той же причине: хранилище одно. Сверяется
+# с activity_retention_days среды в roles/control_observability, чтобы desired
+# state не описывал срок, которого никто не применяет.
+platform_loki_retention_days: 7
+
+# Alloy на хабе собирает логи его собственных контейнеров. На нодах тот же
+# компонент разворачивает roles/compiled_runtime и шлёт сюда через оверлей.
+platform_alloy_image: "mirror.gcr.io/grafana/alloy@sha256:4f6ddc56ffdcf8a6316748fc5162972e20cb301523cac1bb4a31957df733ae9b"
+platform_alloy_dir: /opt/spiritvpn/platform/observability/alloy
+platform_alloy_state_dir: /var/lib/spiritvpn/alloy

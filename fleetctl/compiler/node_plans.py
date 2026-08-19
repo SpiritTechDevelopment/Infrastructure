@@ -7,9 +7,11 @@ from typing import Any
 from fleetctl.model import DesiredState, Fleet, Instance, LogicalNode, XrayConfig, common_values
 
 from .addressing import (
+    PLATFORM_LOKI_PORT,
     agent_certificate_identity,
     agent_endpoint,
     agent_tls_server_name,
+    control_management_address,
     management_address,
 )
 
@@ -101,8 +103,32 @@ def compile_node_plans(state: DesiredState) -> dict[str, dict[str, Any]]:
                 serving_instances,
                 common.xray,
             ),
+            "logs": _logs_projection(state),
         }
     return plans
+
+
+def _logs_projection(state: DesiredState) -> dict[str, Any]:
+    """Where this node ships its logs, and what it must never ship.
+
+    The endpoint is derived, not declared: it is the hub's own overlay address,
+    the same one Prometheus scrapes from. Declaring it would let desired state
+    name a host outside the management network, and log shipping is the one
+    direction where that would send data out rather than fail to collect it.
+
+    `xray_access_log` is stated here as a compiled fact rather than left to the
+    shipper's configuration. Desired state already forbids exporting it —
+    validation refuses `access_log_export_enabled` — and repeating the decision
+    where the shipper is configured is what keeps a later edit to an Alloy
+    template from quietly undoing it.
+    """
+    return {
+        "endpoint": (
+            f"http://{control_management_address(state.environment)}"
+            f":{PLATFORM_LOKI_PORT}/loki/api/v1/push"
+        ),
+        "xray_access_log_exported": False,
+    }
 
 
 def _fleets_by_node(state: DesiredState) -> dict[str, Fleet]:

@@ -143,4 +143,7 @@ def _observability_projection(state: DesiredState) -> dict[str, Any]:
     """
     return {
         "scrape_interval_seconds": state.environment_common.observability.scrape_interval_seconds,
+        # Same rule, same reason: one shared Loki cannot hold two retentions, so
+        # this is asserted against the deployed store rather than applied.
+        "log_retention_days": state.environment_common.observability.activity_retention_days,
     }

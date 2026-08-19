@@ -88,6 +88,24 @@
       owner: "{{ platform_alertmanager_uid }}"
       group: "{{ platform_alertmanager_gid }}"
       mode: "0700"
+    - path: "{{ platform_loki_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+    - path: "{{ platform_loki_state_dir }}"
+      owner: "{{ platform_loki_uid }}"
+      group: "{{ platform_loki_gid }}"
+      mode: "0700"
+    - path: "{{ platform_alloy_dir }}"
+      owner: root
+      group: root
+      mode: "0755"
+    # Root: Alloy работает под root ради сокета Docker, и каталог позиций
+    # должен принадлежать тому, кто в него пишет.
+    - path: "{{ platform_alloy_state_dir }}"
+      owner: root
+      group: root
+      mode: "0700"
 
 # Each environment owns exactly one directory. Creating them here rather than
 # in the control contour means Prometheus never references a path that does not
@@ -174,6 +192,8 @@
         "schema_version": 1,
         "scrape_interval_seconds": {{ platform_prometheus_scrape_interval_seconds | int }},
         "retention_days": {{ platform_prometheus_retention_days | int }},
+        "log_retention_days": {{ platform_loki_retention_days | int }},
+        "log_endpoint_port": {{ platform_loki_port | int }},
         "environments": {{ platform_observability_environments | to_json }},
         "jobs": {{ platform_observability_jobs | map(attribute='name') | list | to_json }},
         "targets_dir": "{{ platform_observability_targets_dir }}"
@@ -210,12 +230,22 @@
     mode: "0644"
   loop:
     - src: grafana-datasources.yml.j2
-      dest: "{{ platform_grafana_dir }}/provisioning/datasources/prometheus.yml"
+      dest: "{{ platform_grafana_dir }}/provisioning/datasources/datasources.yml"
     - src: grafana-dashboards.yml.j2
       dest: "{{ platform_grafana_dir }}/provisioning/dashboards/spiritvpn.yml"
   loop_control:
     label: "{{ item.dest }}"
   register: _platform_grafana_provisioning
+
+# Файл переименован, когда к Prometheus добавился Loki. Прежний обязан
+# исчезнуть, а не просто перестать обновляться: Grafana читает каталог целиком,
+# и два файла с одним uid источника — это конфликт провижининга, который
+# оставил бы дашборды без данных.
+- name: Remove the superseded single-datasource provisioning file
+  ansible.builtin.file:
+    path: "{{ platform_grafana_dir }}/provisioning/datasources/prometheus.yml"
+    state: absent
+  register: _platform_grafana_superseded_datasource
 
 - name: Deploy the dashboards Grafana is allowed to show
   ansible.builtin.copy:
@@ -224,6 +254,22 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Render the log store and shipper configuration
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: loki-config.yml.j2
+      dest: "{{ platform_loki_dir }}/config.yml"
+    - src: alloy-hub.alloy.j2
+      dest: "{{ platform_alloy_dir }}/config.alloy"
+  loop_control:
+    label: "{{ item.dest }}"
+  register: _platform_logs_configuration
 
 - name: Render the shared collector compose definition
   ansible.builtin.template:
@@ -277,6 +323,11 @@
       - node-exporter
       - grafana
       - alertmanager
+      # Loki перечислен до alloy, но порядок здесь ничего не решает: его
+      # задаёт depends_on с condition: service_healthy. Шипер, стартовавший
+      # раньше хранилища, копил бы отказы записи вместо логов.
+      - loki
+      - alloy
   register: _platform_prometheus_apply
   changed_when: >-
     _platform_prometheus_compose.changed
@@ -321,6 +372,28 @@
     - not _platform_prometheus_apply.changed
   changed_when: true
 
+# Ни Loki, ни Alloy не перечитывают конфигурацию на ходу.
+#
+# Порядок обратный запуску, и это не симметрия ради симметрии: перезапуск Loki
+# рвёт запись, поэтому шипер поднимается после хранилища и перезапускается
+# последним. Позиции чтения Alloy переживают перезапуск в каталоге состояния,
+# так что несколько секунд простоя не теряют строк.
+- name: Restart the log store onto a changed configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ platform_observability_dir }}/compose.yml"
+      - restart
+      - loki
+      - alloy
+  when:
+    - not ansible_check_mode
+    - _platform_logs_configuration.changed
+    - not _platform_prometheus_apply.changed
+  changed_when: true
+
 # Dashboards are re-read by the file provider on its own interval; datasources
 # are read once at startup. Restarting only when provisioning actually changed
 # keeps a redeploy from interrupting whoever is looking at a graph.
@@ -335,7 +408,10 @@
       - grafana
   when:
     - not ansible_check_mode
-    - _platform_grafana_provisioning.changed
+    # Удаление прежнего файла — тоже изменение провижининга: без перезапуска
+    # Grafana продолжила бы держать источник, прочитанный из уже несуществующего
+    # файла, до следующего своего рестарта.
+    - _platform_grafana_provisioning.changed or _platform_grafana_superseded_datasource.changed
     - not _platform_prometheus_apply.changed
   changed_when: true
 
@@ -364,6 +440,23 @@
     status_code: 200
     return_content: false
     timeout: 5
+  changed_when: false
+  when: not ansible_check_mode
+
+# По петле, хотя принимает Loki на всех адресах: проверяется, что процесс
+# готов, а не что до него дотянулся оверлей. Достижимость с ноды — вопрос
+# фаервола, и её ловит уже сама выкатка ноды.
+- name: Require the log store to be ready
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ platform_loki_port }}/ready"
+    method: GET
+    status_code: 200
+    return_content: false
+    timeout: 5
+  register: _platform_loki_readiness
+  retries: 12
+  delay: 5
+  until: _platform_loki_readiness.status == 200
   changed_when: false
   when: not ansible_check_mode
 

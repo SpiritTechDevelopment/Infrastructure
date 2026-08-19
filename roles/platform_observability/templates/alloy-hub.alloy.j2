@@ -1,0 +1,64 @@
+// GENERATED — DO NOT EDIT. Источник: roles/platform_observability.
+//
+// Собирает логи контейнеров самого хаба и пишет их в локальный Loki. Ноды
+// шлют сюда же через оверлей, но своим конфигом — см. roles/compiled_runtime.
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  // Docker отдаёт имя с ведущей косой чертой.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  // Среда выводится из имени compose-проекта, потому что control-стек
+  // называется spiritvpn-control-<среда>. У платформенных контейнеров метки не
+  // будет вовсе: Vault и коллектор общие и ничьей среде не принадлежат.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "spiritvpn-control-(develop|prod)"
+    target_label  = "environment"
+  }
+}
+
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.containers.output
+  forward_to       = [loki.write.hub.receiver]
+  refresh_interval = "15s"
+}
+
+loki.write "hub" {
+  // Петля, а не оверлейный адрес: Loki стоит на этом же хосте, и выпускать
+  // собственные логи в сеть, чтобы вернуть их себе же, незачем.
+  endpoint {
+    url = "http://127.0.0.1:{{ platform_loki_port }}/loki/api/v1/push"
+  }
+
+  external_labels = {
+    host = "{{ ansible_hostname }}",
+    tier = "hub",
+  }
+}

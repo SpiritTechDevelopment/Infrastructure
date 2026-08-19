@@ -150,6 +150,9 @@
     node_agent_image: >-
       {{ spiritvpn_node_plan.infrastructure.components.node_agent.repository
          ~ '@' ~ spiritvpn_node_plan.infrastructure.components.node_agent.digest }}
+    alloy_image: >-
+      {{ spiritvpn_node_plan.infrastructure.components.alloy.repository
+         ~ '@' ~ spiritvpn_node_plan.infrastructure.components.alloy.digest }}
     node_agent_grpc_listen: "{{ spiritvpn_node_plan.instance.agent.endpoint }}"
     node_agent_allowed_client_identities:
       - >-

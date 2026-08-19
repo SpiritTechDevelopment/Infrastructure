@@ -20,6 +20,12 @@ CONTROL_BACKEND_METRICS_PORT = 8080
 # /metrics — connection counts and table sizes describe the fleet.
 CONTROL_POSTGRES_METRICS_PORT = 9187
 
+# The shared log store on the hub. Unlike every metrics port here this one is
+# written *to* rather than read from: nodes push, which is why it is the one
+# listener on the hub that is not confined to loopback. It stays on the overlay
+# for the same reason the scraped ports do.
+PLATFORM_LOKI_PORT = 3100
+
 
 def control_management_address(environment: Environment) -> str:
     """The management hub's own overlay address: the first host in the network."""

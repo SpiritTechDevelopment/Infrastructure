@@ -9,6 +9,20 @@
   loop:
     - {path: "{{ vpn_stack_dir }}", mode: "0755"}
     - {path: /var/log/xray, mode: "0750"}
+    - {path: "{{ vpn_stack_dir }}/alloy", mode: "0755"}
+    - {path: "{{ alloy_state_dir }}", mode: "0700"}
+
+# До compose: он ссылается на этот файл, а `docker compose` разбирает проект
+# целиком при любом вызове. Отсутствующий bind-mount источника ломал бы команды,
+# направленные на совсем другие сервисы.
+- name: Render the log shipper configuration
+  ansible.builtin.template:
+    src: alloy-node.alloy.j2
+    dest: "{{ vpn_stack_dir }}/alloy/config.alloy"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _compiled_runtime_alloy_configuration
 
 - name: Render compiled node runtime definition
   ansible.builtin.template:
@@ -110,9 +124,29 @@
   register: _compiled_runtime_apply
   changed_when: >-
     _compiled_runtime_definition.changed
+    or _compiled_runtime_alloy_configuration.changed
     or node_agent_runtime_inputs_changed | bool
     or 'Created' in _compiled_runtime_apply.stderr
     or 'Started' in _compiled_runtime_apply.stderr
     or 'Recreated' in _compiled_runtime_apply.stderr
     or 'Pulled' in _compiled_runtime_apply.stderr
   when: not ansible_check_mode
+
+# Конфигурация приезжает bind-mount'ом, поэтому её правка не пересоздаёт
+# контейнер, а Alloy не перечитывает файл на ходу. Без этого изменённый конфиг
+# лежал бы на диске, а работал бы прежний — до следующего пересоздания по
+# другой причине.
+- name: Restart the log shipper onto a changed configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ vpn_stack_dir }}/compose.yml"
+      - restart
+      - alloy
+  when:
+    - not ansible_check_mode
+    - _compiled_runtime_alloy_configuration.changed
+    - not _compiled_runtime_apply.changed
+  changed_when: true

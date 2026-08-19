@@ -1,8 +1,13 @@
 {{ ansible_managed | comment }}
-# The one datasource Grafana is allowed to have. Provisioned rather than
-# created through the UI so that what a dashboard queries is reviewable in Git,
-# and `editable: false` so a viewer cannot repoint it at an arbitrary host —
-# Grafana proxies datasource requests from the hub itself.
+# Every datasource Grafana is allowed to have, and there are exactly two.
+# Provisioned rather than created through the UI so that what a dashboard
+# queries is reviewable in Git, and `editable: false` so a viewer cannot
+# repoint one at an arbitrary host — Grafana proxies datasource requests from
+# the hub itself.
+#
+# This file said "the one datasource" until logs arrived. The rule it was
+# guarding was never "exactly one" but "only what this file declares": a
+# datasource is an outbound request made by the machine that holds Vault.
 apiVersion: 1
 
 datasources:
@@ -15,3 +20,13 @@ datasources:
     editable: false
     jsonData:
       timeInterval: {{ platform_prometheus_scrape_interval_seconds }}s
+
+  # Loopback, а не адрес, на котором Loki принимает запись с нод: Grafana стоит
+  # на том же хосте, и ходить к соседу через оверлей ей незачем.
+  - name: Loki
+    uid: spiritvpn-loki
+    type: loki
+    access: proxy
+    url: http://127.0.0.1:{{ platform_loki_port }}
+    isDefault: false
+    editable: false

@@ -1,0 +1,60 @@
+# GENERATED — DO NOT EDIT. Источник: roles/platform_observability.
+#
+# Однобинарный Loki на файловой системе. Ни S3, ни кластера: объём здесь —
+# логи десятка контейнеров на трёх хостах, и распределённый режим стоил бы
+# дороже, чем всё, что он хранит.
+auth_enabled: false
+
+server:
+  http_listen_address: {{ platform_loki_bind_address }}
+  http_listen_port: {{ platform_loki_port }}
+  # Внутренний gRPC остаётся на петле: наружу из однобинарного режима он не
+  # нужен никому.
+  grpc_listen_address: 127.0.0.1
+  log_level: info
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2026-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Ретеншен общий: хранилище одно, как и TSDB Prometheus.
+  retention_period: {{ platform_loki_retention_days }}d
+  # Запись задним числом отвергается: перезапущенный Alloy иначе зальёт заново
+  # всё, что успел прочитать, и дубликаты будут выглядеть как всплеск.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  # Потолок на источник. Нода, у которой что-то зациклилось в логах, не должна
+  # вытеснять из хранилища всех остальных.
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  max_label_names_per_series: 20
+
+# Без этого retention_period не применяется вовсе — компактор и есть тот, кто
+# удаляет просроченное.
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+# Аналитика наружу не отправляется.
+analytics:
+  reporting_enabled: false

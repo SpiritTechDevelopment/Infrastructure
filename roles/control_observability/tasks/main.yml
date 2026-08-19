@@ -57,6 +57,17 @@
       - >-
         collector_contract.scrape_interval_seconds | int
         == control_plan.observability.scrape_interval_seconds | int
+      # То же для логов: хранилище одно на обе среды, и ретеншен у него один.
+      # Расхождение означало бы desired state, описывающий срок хранения,
+      # которого никто не применяет.
+      #
+      # `default(-1)`, а не голое обращение: контракт мог быть опубликован
+      # платформенной выкаткой прежней версии, где поля ещё нет. Без умолчания
+      # это была бы ошибка шаблона про неопределённую переменную вместо
+      # внятного отказа с причиной ниже.
+      - >-
+        collector_contract.log_retention_days | default(-1) | int
+        == control_plan.observability.log_retention_days | int
     fail_msg: >-
       The observability inputs disagree with the deployed shared collector.
 

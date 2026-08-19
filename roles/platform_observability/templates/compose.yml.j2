@@ -78,6 +78,56 @@ services:
     volumes:
       - /:/host:ro,rslave
 
+  loki:
+    image: {{ platform_loki_image }}
+    user: "{{ platform_loki_uid }}:{{ platform_loki_gid }}"
+    restart: unless-stopped
+    logging: *logging
+    # Host networking, как у всех здесь. Слушатель при этом единственный в этой
+    # роли, который обязан быть достижим извне хоста: в него пишут ноды обеих
+    # сред через оверлей. Держит его закрытым фаервол — цепочка input имеет
+    # policy drop и принимает только lo и wg0.
+    network_mode: host
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - {{ platform_loki_dir }}/config.yml:/etc/loki/config.yml:ro
+      - {{ platform_loki_state_dir }}:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:{{ platform_loki_port }}/ready >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  alloy:
+    image: {{ platform_alloy_image }}
+    # Root, и это следствие доступа к сокету Docker, а не небрежность: сокет
+    # принадлежит root:docker, а членство в группе docker равносильно root на
+    # хосте ровно так же. Прятать это за непривилегированным uid в группе
+    # docker значило бы делать вид, что доступ меньше, чем он есть.
+    #
+    # Цена решения названа прямо: скомпрометированный Alloy на этом хосте — это
+    # управление всеми контейнерами, включая Vault. Взамен в Grafana видны
+    # имена сервисов, а не идентификаторы контейнеров.
+    user: "0:0"
+    restart: unless-stopped
+    logging: *logging
+    network_mode: host
+    command:
+      - run
+      - --storage.path=/var/lib/alloy
+      # Слушателя нет вовсе: UI Alloy показывает конвейер и содержимое
+      # обрабатываемых строк, то есть ещё одну поверхность с теми же данными.
+      - --server.http.listen-addr=127.0.0.1:12345
+      - /etc/alloy/config.alloy
+    depends_on:
+      loki:
+        condition: service_healthy
+    volumes:
+      - {{ platform_alloy_dir }}/config.alloy:/etc/alloy/config.alloy:ro
+      - {{ platform_alloy_state_dir }}:/var/lib/alloy
+      - /var/run/docker.sock:/var/run/docker.sock
+
   grafana:
     image: {{ platform_grafana_image }}
     user: "{{ platform_grafana_uid }}:{{ platform_grafana_gid }}"

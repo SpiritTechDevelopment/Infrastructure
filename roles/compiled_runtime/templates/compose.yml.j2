@@ -59,6 +59,28 @@ services:
     volumes:
       - /:/host:ro,rslave
 
+  alloy:
+    image: {{ alloy_image }}
+    # Root ради сокета Docker — та же цена, что и на хабе, и по той же причине:
+    # членство в группе docker равносильно root, прятать это за иным uid значило
+    # бы делать вид, что доступ меньше.
+    user: "0:0"
+    restart: unless-stopped
+    network_mode: host
+    logging: *logging
+    command:
+      - run
+      - --storage.path=/var/lib/alloy
+      # UI Alloy показывает обрабатываемые строки, то есть ещё одну поверхность
+      # с теми же данными. На ноде, стоящей в интернете, — только петля.
+      - --server.http.listen-addr=127.0.0.1:12345
+      - /etc/alloy/config.alloy
+    volumes:
+      - {{ vpn_stack_dir }}/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - {{ alloy_state_dir }}:/var/lib/alloy
+      - /var/run/docker.sock:/var/run/docker.sock
+      # /var/log/xray здесь намеренно отсутствует: access-лог наружу не едет.
+
   node-agent:
     image: {{ node_agent_image }}
     user: "{{ node_agent_uid }}:{{ node_agent_gid }}"
