@@ -101,7 +101,6 @@ class ContainerLogCeilingTests(unittest.TestCase):
         ("compiled_runtime", "compiled_runtime_log"),
         ("control_runtime", "control_log"),
         ("platform_observability", "platform_observability_log"),
-        ("platform_vault", "platform_vault_log"),
     )
 
     def test_every_compose_service_declares_a_log_ceiling(self) -> None:
@@ -129,6 +128,27 @@ class ContainerLogCeilingTests(unittest.TestCase):
                 # Значения, а не только имена: пустой предел — это отсутствие предела.
                 self.assertRegex(str(values[f"{prefix}_max_size"]), r"^[0-9]+[kmg]$")
                 self.assertGreaterEqual(int(values[f"{prefix}_max_files"]), 1)
+
+    def test_vault_is_deliberately_left_without_a_ceiling(self) -> None:
+        """Touching Vault's compose file seals Vault.
+
+        Изменение файла даёт `Recreated` на ближайшем `docker compose up -d`, а
+        стансы `seal` в конфиге нет — Vault раскрывается вручную shamir-долями.
+        Запечатанный Vault останавливает fleet-deploy и control-deploy. Тест
+        держит это решение осознанным: если предел здесь однажды понадобится,
+        добавлять его придётся вместе с церемонией раскрытия, а не мимоходом.
+        """
+        compose = (REPO_ROOT / "roles" / "platform_vault" / "templates" / "compose.yml.j2").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("logging:", compose)
+        self.assertIn("запечатанным", compose)
+        configuration = (
+            REPO_ROOT / "roles" / "platform_vault" / "templates" / "vault.hcl.j2"
+        ).read_text(encoding="utf-8")
+        # Появится auto-unseal — перезапуск перестанет быть церемонией, и
+        # причина исключения исчезнет вместе с этой проверкой.
+        self.assertNotIn("seal ", configuration)
 
     def test_the_ceiling_is_not_set_through_the_docker_daemon(self) -> None:
         """The daemon route would need a Docker restart on a live hub.
