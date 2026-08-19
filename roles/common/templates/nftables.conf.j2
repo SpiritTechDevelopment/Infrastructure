@@ -60,6 +60,22 @@ table inet spiritvpn_filter {
     iifname "{{ interface }}" accept
     oifname "{{ interface }}" accept
 {% endfor %}
+{% if common_container_egress_interfaces | length > 0 %}
+    # Container-initiated egress. Only `iifname`, deliberately: this lets a
+    # container open an outbound connection and lets the reply back through the
+    # `established,related` rule above, without accepting anything forwarded
+    # *into* a container. Published ports keep arriving through the DNAT rules
+    # below and nowhere else.
+    #
+    # Needed because almost everything here runs with `network_mode: host` and
+    # so never reaches this chain at all. The control stack is the exception —
+    # it uses a bridge network — and the first thing in it that had to dial out
+    # found this policy the hard way: every connection timed out while the same
+    # connection from the host succeeded.
+{% for interface in common_container_egress_interfaces %}
+    iifname "{{ interface }}" accept
+{% endfor %}
+{% endif %}
     # Docker-published ports are DNATed before filtering and therefore traverse
     # this forward chain (not the input chain) when userland-proxy is disabled.
 {% if common_restricted_tcp_rules | length > 0 %}

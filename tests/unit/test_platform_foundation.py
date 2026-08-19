@@ -256,6 +256,42 @@ all:
         self.assertIn("common_trusted_interfaces", firewall)
         self.assertIn("table inet spiritvpn_filter", firewall)
 
+    def test_bridged_containers_on_the_hub_may_dial_out(self) -> None:
+        """Политика forward — drop, и это ловушка ровно для control-стека.
+
+        На нодах и во всём платформенном контуре контейнеры стоят в сети хоста
+        и цепочку forward не проходят вовсе. Мостовая сеть только у control, и
+        первый же его контейнер, которому понадобился интернет (туннель мини-
+        аппа), упёрся в таймаут на любом порту при живом выходе с самого хоста.
+
+        Проверяется вместе с тем, что разрешение осталось односторонним:
+        `oifname` для мостов не добавляется, иначе внутрь контейнеров начало бы
+        проходить всё, а не только DNAT опубликованных портов.
+        """
+        firewall = (REPO_ROOT / "roles" / "common" / "templates" / "nftables.conf.j2").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("common_container_egress_interfaces", firewall)
+        self.assertIn('iifname "{{ interface }}" accept', firewall)
+        # Умолчание пустое: ноде это не нужно и открывать ей нечего.
+        defaults = yaml.safe_load(
+            (REPO_ROOT / "roles" / "common" / "defaults" / "main.yml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(defaults["common_container_egress_interfaces"], [])
+
+        # Оба платформенных playbook'а обязаны объявлять одно и то же: хаб, у
+        # которого выход из контейнеров зависит от того, каким путём его
+        # раскатывали, — это тот же таймаут, только позже.
+        for name in ("steady", "bootstrap"):
+            with self.subTest(playbook=name):
+                playbook = yaml.safe_load(
+                    (REPO_ROOT / "playbooks" / "platform" / f"{name}.yml").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                declared = playbook[0]["vars"]["common_container_egress_interfaces"]
+                self.assertEqual(declared, ["docker0", "br-*"])
+
     def test_two_phase_platform_script_verifies_tunnel_before_hardening(self) -> None:
         script = (REPO_ROOT / "scripts" / "bootstrap-platform.py").read_text(
             encoding="utf-8"

@@ -18,6 +18,9 @@
     common_public_tcp_ports: []
     common_public_udp_ports: ["{{ platform_wireguard_listen_port }}"]
     common_trusted_interfaces: ["{{ platform_wireguard_interface }}"]
+    # То же, что в steady.yml: расхождение между bootstrap и steady означало бы
+    # хаб, у которого выход из контейнеров то появляется, то пропадает.
+    common_container_egress_interfaces: ["docker0", "br-*"]
     ssh_allowed_cidrs: "{{ platform_ssh_allowed_cidrs }}"
     common_fail2ban_ignoreip: >-
       127.0.0.1/8 ::1 {{ platform_fail2ban_ignore_cidrs | default([]) | join(' ') }}

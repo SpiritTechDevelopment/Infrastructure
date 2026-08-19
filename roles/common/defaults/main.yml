@@ -56,6 +56,10 @@ common_public_udp_ports: []
 # Fully trusted pre-existing tunnel interfaces. Platform bootstrap discovers
 # active WireGuard interfaces and uses this only to preserve operator access.
 common_trusted_interfaces: []
+# Bridges whose containers may open outbound connections. Empty by default:
+# a host whose containers all run with `network_mode: host` never needs it, and
+# that is every node in the fleet.
+common_container_egress_interfaces: []
 # Source-scoped rules. `forward_ports` optionally describes the post-DNAT
 # container port when it differs from the host-facing `ports`.
 common_restricted_tcp_rules: []            # [{ports, forward_ports?, cidrs, interface}]
