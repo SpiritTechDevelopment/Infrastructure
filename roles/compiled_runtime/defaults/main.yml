@@ -2,6 +2,11 @@
 vpn_stack_dir: /opt/vpn
 compose_project: spiritvpn-node
 compiled_runtime_pull_policy: missing
+# Потолок на логи одного контейнера: max-size × max-file. Через xray идёт
+# трафик, и на этих хостах он самый разговорчивый — предел общий, чтобы
+# «сколько занимают логи» был один расчёт, а не четыре.
+compiled_runtime_log_max_size: 10m
+compiled_runtime_log_max_files: "5"
 node_agent_runtime_inputs_changed: false
 
 # Ноды, собранные вручную до перехода на скомпилированный контур, держат свои

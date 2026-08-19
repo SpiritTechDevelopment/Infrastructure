@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
+
+import yaml
 
 from fleetctl.adapters import (
     CompiledArtifactsError,
@@ -83,6 +86,63 @@ class CompiledAnsibleArtifactTests(unittest.TestCase):
         self.assertNotIn("fleet-exits.yml", playbook)
         self.assertIn("common_restricted_tcp_rules", loader)
         self.assertIn("infrastructure.networking.agent.port", loader)
+
+
+class ContainerLogCeilingTests(unittest.TestCase):
+    """Every container declares a log ceiling.
+
+    У драйвера json-file нет предела по умолчанию, и растёт он молча: место на
+    диске кончается раньше, чем кто-нибудь посмотрит в `docker logs`. Проверяется
+    перечислением сервисов из самих шаблонов, а не списком в тесте, — иначе
+    новый сервис приезжает на хост без предела и никто об этом не узнает.
+    """
+
+    TEMPLATES = (
+        ("compiled_runtime", "compiled_runtime_log"),
+        ("control_runtime", "control_log"),
+        ("platform_observability", "platform_observability_log"),
+        ("platform_vault", "platform_vault_log"),
+    )
+
+    def test_every_compose_service_declares_a_log_ceiling(self) -> None:
+        for role, prefix in self.TEMPLATES:
+            with self.subTest(role=role):
+                path = REPO_ROOT / "roles" / role / "templates" / "compose.yml.j2"
+                source = path.read_text(encoding="utf-8")
+                # Jinja-выражения заменяются заглушкой: проверяется структура
+                # отрендеренного compose, а не значения подстановок.
+                rendered = re.sub(r"{{[^\n{}]+}}", "fixture", source)
+                document = yaml.safe_load(rendered)
+                services = document["services"]
+                self.assertTrue(services)
+                for name, service in services.items():
+                    logging = service.get("logging")
+                    self.assertIsNotNone(logging, f"{role}/{name} declares no log ceiling")
+                    self.assertEqual(logging["driver"], "json-file")
+                    self.assertIn("max-size", logging["options"])
+                    self.assertIn("max-file", logging["options"])
+
+                defaults = (REPO_ROOT / "roles" / role / "defaults" / "main.yml").read_text(
+                    encoding="utf-8"
+                )
+                values = yaml.safe_load(defaults)
+                # Значения, а не только имена: пустой предел — это отсутствие предела.
+                self.assertRegex(str(values[f"{prefix}_max_size"]), r"^[0-9]+[kmg]$")
+                self.assertGreaterEqual(int(values[f"{prefix}_max_files"]), 1)
+
+    def test_the_ceiling_is_not_set_through_the_docker_daemon(self) -> None:
+        """The daemon route would need a Docker restart on a live hub.
+
+        Демон читает log-opts при создании контейнера и не перечитывает их на
+        SIGHUP, поэтому `/etc/docker/daemon.json` означал бы перезапуск Docker —
+        то есть простой Vault, базы и бэкенда. Предел живёт в compose, и роль
+        docker намеренно не трогает конфигурацию демона.
+        """
+        role = (REPO_ROOT / "roles" / "docker").rglob("*.yml")
+        for path in role:
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn("daemon.json", source)
+            self.assertNotIn("log-opts", source)
 
 
 if __name__ == "__main__":

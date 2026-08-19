@@ -1,9 +1,20 @@
 name: spiritvpn-observability
+
+# Предел на логи каждого контейнера. См. тот же блок в roles/compiled_runtime:
+# у json-file нет предела по умолчанию, а daemon.json потребовал бы перезапуска
+# Docker — то есть простоя всего, что крутится на хабе.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "{{ platform_observability_log_max_size }}"
+    max-file: "{{ platform_observability_log_max_files }}"
+
 services:
   prometheus:
     image: {{ platform_prometheus_image }}
     user: "{{ platform_prometheus_uid }}:{{ platform_prometheus_gid }}"
     restart: unless-stopped
+    logging: *logging
     stop_grace_period: 30s
     # Host networking so scrapes leave through the WireGuard hub directly and
     # arrive at the nodes with a management-network source address, which is
@@ -36,6 +47,7 @@ services:
     image: {{ platform_alertmanager_image }}
     user: "{{ platform_alertmanager_uid }}:{{ platform_alertmanager_gid }}"
     restart: unless-stopped
+    logging: *logging
     network_mode: host
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
@@ -54,6 +66,7 @@ services:
   node-exporter:
     image: {{ platform_node_exporter_image }}
     restart: unless-stopped
+    logging: *logging
     # Host networking and the host PID namespace are what make the readings
     # describe the hub rather than the container: without them the exporter
     # reports one namespace's interfaces and processes.
@@ -69,6 +82,7 @@ services:
     image: {{ platform_grafana_image }}
     user: "{{ platform_grafana_uid }}:{{ platform_grafana_gid }}"
     restart: unless-stopped
+    logging: *logging
     network_mode: host
     environment:
       GF_SERVER_HTTP_ADDR: "{{ platform_grafana_bind_address }}"

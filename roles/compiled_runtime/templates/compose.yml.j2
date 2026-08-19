@@ -1,10 +1,27 @@
 name: {{ compose_project }}
+
+# Предел на логи каждого контейнера.
+#
+# У драйвера json-file нет предела по умолчанию: файл растёт, пока на диске
+# есть место, и первым это замечает не оператор, а перестающий писать
+# postgres. Задаётся здесь, а не в /etc/docker/daemon.json, по одной причине:
+# демон читает log-opts при создании контейнера и не перечитывает их на SIGHUP,
+# так что daemon.json потребовал бы перезапуска Docker — а на хабе это простой
+# Vault, базы и бэкенда. Здесь предел приезжает пересозданием контейнера,
+# то есть обычной выкаткой.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "{{ compiled_runtime_log_max_size }}"
+    max-file: "{{ compiled_runtime_log_max_files }}"
+
 services:
   xray:
     image: {{ xray_image }}
     user: "0:0"
     restart: unless-stopped
     network_mode: host
+    logging: *logging
     volumes:
       - {{ vpn_stack_dir }}/xray/config.json:/etc/xray/config.json:ro
       - /var/log/xray:/var/log/xray
@@ -20,6 +37,7 @@ services:
     image: {{ nginx_mask_image }}
     restart: unless-stopped
     network_mode: host
+    logging: *logging
     volumes:
       - {{ vpn_stack_dir }}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - {{ vpn_stack_dir }}/nginx/site:/usr/share/nginx/html:ro
@@ -35,6 +53,7 @@ services:
     image: {{ node_exporter_image }}
     restart: unless-stopped
     network_mode: host
+    logging: *logging
     pid: host
     command: ["--path.rootfs=/host", "--web.listen-address={{ node_exporter_listen }}"]
     volumes:
@@ -45,6 +64,7 @@ services:
     user: "{{ node_agent_uid }}:{{ node_agent_gid }}"
     restart: unless-stopped
     network_mode: host
+    logging: *logging
     depends_on:
       xray:
         condition: service_healthy

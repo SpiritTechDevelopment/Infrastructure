@@ -1,5 +1,8 @@
 ---
 platform_observability_dir: /opt/spiritvpn/platform/observability
+# Потолок на логи одного контейнера: max-size × max-file.
+platform_observability_log_max_size: 10m
+platform_observability_log_max_files: "5"
 platform_observability_state_dir: /var/lib/spiritvpn/observability
 # Where roles/control_observability writes file_sd fragments on the host, and
 # where that directory appears inside the container. The skeleton config must

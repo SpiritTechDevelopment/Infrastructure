@@ -7,4 +7,7 @@ control_backend_uid: "10001"
 control_backend_gid: "10001"
 control_external_backup_command_argv: []
 control_compose_pull_policy: missing
+# Потолок на логи одного контейнера: max-size × max-file.
+control_log_max_size: 10m
+control_log_max_files: "5"
 control_tls_minimum_validity_seconds: 604800

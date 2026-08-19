@@ -1,9 +1,20 @@
 name: spiritvpn-platform-vault
+
+# Предел на логи контейнера. См. тот же блок в roles/compiled_runtime.
+# Аудит Vault сюда не попадает: он пишется в ./audit отдельным файлом, и его
+# ротация — вопрос самого audit device, а не Docker.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "{{ platform_vault_log_max_size }}"
+    max-file: "{{ platform_vault_log_max_files }}"
+
 services:
   vault:
     image: "{{ platform_vault_image }}"
     user: "100:1000"
     restart: unless-stopped
+    logging: *logging
     command: ["vault", "server", "-config=/vault/config/vault.hcl"]
     environment:
       SKIP_SETCAP: "true"

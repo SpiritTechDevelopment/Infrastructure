@@ -1,5 +1,8 @@
 ---
 platform_vault_dir: /opt/spiritvpn/platform/vault
+# Потолок на логи контейнера: max-size × max-file.
+platform_vault_log_max_size: 10m
+platform_vault_log_max_files: "5"
 # Public, reviewed supply-chain pin. This is deliberately not a secret and is
 # updated through the normal pull-request flow. The digest is the multi-platform
 # index published for hashicorp/vault:1.21.4.
