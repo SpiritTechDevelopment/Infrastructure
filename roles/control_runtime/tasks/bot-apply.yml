@@ -55,8 +55,12 @@
         END IF;
       END
       $do$;
-      ALTER ROLE {{ control_plan.bot.postgres.owner_user }} PASSWORD '{{ control_secret_values[control_plan.bot.secret_refs.postgres_owner_password_ref] | replace("'", "''") }}';
-      ALTER ROLE {{ control_plan.bot.postgres.runtime_user }} PASSWORD '{{ control_secret_values[control_plan.bot.secret_refs.postgres_runtime_password_ref] | replace("'", "''") }}';
+      -- Trimmed exactly like the DSNs in bot-prepare.yml. Trimming in one place
+      -- and not the other sets a password PostgreSQL stores with a trailing
+      -- newline while the bot connects without it — an authentication failure
+      -- with two values that look identical in every log.
+      ALTER ROLE {{ control_plan.bot.postgres.owner_user }} PASSWORD '{{ control_secret_values[control_plan.bot.secret_refs.postgres_owner_password_ref] | trim | replace("'", "''") }}';
+      ALTER ROLE {{ control_plan.bot.postgres.runtime_user }} PASSWORD '{{ control_secret_values[control_plan.bot.secret_refs.postgres_runtime_password_ref] | trim | replace("'", "''") }}';
       -- CREATE DATABASE runs outside a transaction and has no IF NOT EXISTS, so
       -- it is generated and executed only when it is actually missing.
       SELECT 'CREATE DATABASE {{ control_plan.bot.postgres.database }} OWNER {{ control_plan.bot.postgres.owner_user }}'

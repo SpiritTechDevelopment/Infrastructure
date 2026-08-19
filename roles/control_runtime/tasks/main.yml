@@ -324,7 +324,9 @@
 # justifies today.
 - name: Prepare the bot's protected inputs
   ansible.builtin.include_tasks: bot-prepare.yml
-  when: control_plan.bot
+  # `is not none`, not plain truthiness: a dict conditional is deprecated and
+  # stops being accepted in ansible-core 2.19.
+  when: control_plan.bot | default(none) is not none
 
 - name: Render environment-isolated control compose definition
   ansible.builtin.template:
@@ -615,4 +617,6 @@
 # definition, above, and that split is not cosmetic — see the note there.
 - name: Reconcile the bot beside the backend
   ansible.builtin.include_tasks: bot-apply.yml
-  when: control_plan.bot
+  # `is not none`, not plain truthiness: a dict conditional is deprecated and
+  # stops being accepted in ansible-core 2.19.
+  when: control_plan.bot | default(none) is not none

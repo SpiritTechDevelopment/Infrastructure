@@ -541,6 +541,45 @@ all:
         # Раскатка при этом остаётся последней: арендатор не роняет хозяина.
         self.assertEqual(names[-1], "Reconcile the bot beside the backend")
 
+    def test_every_scalar_bot_secret_is_trimmed_at_the_point_of_use(self) -> None:
+        """Обрезка обязана быть одинаковой везде, иначе пароль расходится с DSN.
+
+        Церемония записи читает значение до EOF, поэтому вставка, законченная
+        Enter, приносит завершающий перенос — это артефакт ввода, а не угроза.
+        Опасен перенос внутри значения: env-файл построчный.
+
+        Но главное здесь — согласованность. Обрезать DSN и не обрезать пароль
+        значит записать в PostgreSQL пароль с переносом, а подключаться без
+        него: отказ аутентификации при двух значениях, неразличимых в логах.
+        """
+        pem_refs = {
+            "grpc_client_certificate_ref",
+            "grpc_client_private_key_ref",
+            "grpc_server_ca_ref",
+        }
+        pattern = re.compile(
+            r"control_secret_values\[control_plan\.bot\.secret_refs\.(\w+)\]\s*(\|\s*trim)?"
+        )
+        untrimmed: list[str] = []
+        for name in ("bot-prepare.yml", "bot-apply.yml"):
+            source = (
+                REPO_ROOT / "roles" / "control_runtime" / "tasks" / name
+            ).read_text(encoding="utf-8")
+            for reference, trimmed in pattern.findall(source):
+                # PEM многострочен по своей природе и пишется файлом, не в env.
+                if reference in pem_refs or trimmed:
+                    continue
+                untrimmed.append(f"{name}: {reference}")
+        self.assertEqual(untrimmed, [])
+
+        prepare = (
+            REPO_ROOT / "roles" / "control_runtime" / "tasks" / "bot-prepare.yml"
+        ).read_text(encoding="utf-8")
+        # \S, а не [^ ]: последний пропускает перенос внутри значения, потому что
+        # в Python `$` совпадает и перед завершающим переводом строки.
+        self.assertIn(r"^postgresql\+asyncpg://\S+$", prepare)
+        self.assertNotIn(r"[^ ]+$", prepare)
+
     def test_bot_migrations_ship_with_the_bot_image(self) -> None:
         """Схема и код приезжают одной парой.
 

@@ -31,11 +31,19 @@
   loop: "{{ control_plan.bot.secret_refs | dict2items }}"
   no_log: true
 
-- name: Refuse multiline values in bot scalar secrets
+# Trimmed, and the trim is the point. A break *inside* a value is what has to be
+# refused: these are written one per line into an env file, so an embedded
+# newline silently corrupts the next variable. A *trailing* one is an artifact
+# of how the value was entered — the operator ceremony reads until EOF, so any
+# paste that ends with Enter carries it. Refusing that taught nothing and cost a
+# deployment; every scalar below is trimmed at the point of use for the same
+# reason, including the passwords bot-apply.yml sets on the PostgreSQL roles,
+# which must match the DSNs byte for byte.
+- name: Refuse line breaks inside bot scalar secrets
   ansible.builtin.assert:
     that:
-      - "'\n' not in control_secret_values[item]"
-      - "'\r' not in control_secret_values[item]"
+      - "'\n' not in (control_secret_values[item] | trim)"
+      - "'\r' not in (control_secret_values[item] | trim)"
     fail_msg: "A scalar bot secret contains a line break."
   loop:
     - "{{ control_plan.bot.secret_refs.telegram_bot_token_ref }}"
@@ -55,13 +63,13 @@
       # engine, so the driver is part of the URL and not an implementation
       # detail: a bare postgresql:// URL makes the process fail at startup.
       - >-
-        control_secret_values[control_plan.bot.secret_refs.migration_database_url_ref]
-        is match('^postgresql\+asyncpg://[^ ]+$')
+        (control_secret_values[control_plan.bot.secret_refs.migration_database_url_ref] | trim)
+        is match('^postgresql\+asyncpg://\S+$')
       - >-
-        control_secret_values[control_plan.bot.secret_refs.runtime_database_url_ref]
-        is match('^postgresql\+asyncpg://[^ ]+$')
+        (control_secret_values[control_plan.bot.secret_refs.runtime_database_url_ref] | trim)
+        is match('^postgresql\+asyncpg://\S+$')
       - >-
-        control_secret_values[control_plan.bot.secret_refs.telegram_bot_token_ref]
+        (control_secret_values[control_plan.bot.secret_refs.telegram_bot_token_ref] | trim)
         is match('^[0-9]{5,}:[A-Za-z0-9_-]{30,}$')
     fail_msg: "A bot database URL or the Telegram token has an invalid format."
   no_log: true
@@ -181,8 +189,8 @@
 - name: Render protected bot environment
   ansible.builtin.copy:
     content: |
-      BOT_TELEGRAM_BOT_TOKEN={{ control_secret_values[control_plan.bot.secret_refs.telegram_bot_token_ref] }}
-      BOT_DATABASE_URL={{ control_secret_values[control_plan.bot.secret_refs.runtime_database_url_ref] }}
+      BOT_TELEGRAM_BOT_TOKEN={{ control_secret_values[control_plan.bot.secret_refs.telegram_bot_token_ref] | trim }}
+      BOT_DATABASE_URL={{ control_secret_values[control_plan.bot.secret_refs.runtime_database_url_ref] | trim }}
       BOT_SPIRITVPND_GRPC_TARGET={{ control_plan.bot.network.backend_target }}
       BOT_SPIRITVPND_TLS_CLIENT_CERT_FILE=/secrets/client.crt
       BOT_SPIRITVPND_TLS_CLIENT_KEY_FILE=/secrets/client.key
@@ -190,7 +198,7 @@
       BOT_SUBSCRIPTION_BASE_URL={{ control_plan.bot.settings.subscription_base_url }}
       BOT_MINI_APP_URL={{ control_plan.bot.settings.mini_app_url }}
       BOT_MINI_APP_HTTP_PORT={{ control_plan.bot.network.http_port }}
-      BOT_SUBSCRIPTION_SIGNING_KEY={{ control_secret_values[control_plan.bot.secret_refs.subscription_signing_key_ref] }}
+      BOT_SUBSCRIPTION_SIGNING_KEY={{ control_secret_values[control_plan.bot.secret_refs.subscription_signing_key_ref] | trim }}
       BOT_FRIENDS_PLAN_FLEET_ID={{ control_plan.bot.settings.friends_plan_fleet_id }}
       {% if 'friends_plan_quota_bytes' in control_plan.bot.settings %}
       BOT_FRIENDS_PLAN_QUOTA_BYTES={{ control_plan.bot.settings.friends_plan_quota_bytes }}
@@ -198,7 +206,7 @@
       {% if 'friends_plan_duration_days' in control_plan.bot.settings %}
       BOT_FRIENDS_PLAN_DURATION_DAYS={{ control_plan.bot.settings.friends_plan_duration_days }}
       {% endif %}
-      BOT_FRIENDS_SHARED_CODE={{ control_secret_values[control_plan.bot.secret_refs.friends_shared_code_ref] }}
+      BOT_FRIENDS_SHARED_CODE={{ control_secret_values[control_plan.bot.secret_refs.friends_shared_code_ref] | trim }}
     dest: "{{ control_plan.bot.paths.root }}/bot.env"
     owner: root
     group: root
@@ -210,7 +218,7 @@
 - name: Render protected bot migration environment
   ansible.builtin.copy:
     content: |
-      BOT_DATABASE_URL={{ control_secret_values[control_plan.bot.secret_refs.migration_database_url_ref] }}
+      BOT_DATABASE_URL={{ control_secret_values[control_plan.bot.secret_refs.migration_database_url_ref] | trim }}
     dest: "{{ control_plan.bot.paths.root }}/migration.env"
     owner: root
     group: root
@@ -221,7 +229,7 @@
 - name: Render the protected tunnel environment
   ansible.builtin.copy:
     content: |
-      TUNNEL_TOKEN={{ control_secret_values[control_plan.bot.secret_refs.tunnel_token_ref] }}
+      TUNNEL_TOKEN={{ control_secret_values[control_plan.bot.secret_refs.tunnel_token_ref] | trim }}
     dest: "{{ control_plan.bot.paths.root }}/tunnel.env"
     owner: root
     group: root
