@@ -285,7 +285,11 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 logical_node=spec["logical_node"],
                 target_state=spec["target_state"],
                 public_address=spec["public_address"],
-                ssh_host_key=spec["ssh_host_key"],
+                # Отсутствие допустимо на этом слое: impact plan валидирует
+                # базовый коммит нынешними контрактами, а в нём этого поля ещё
+                # не было. Требование живёт в компиляторе known_hosts, который
+                # видит, до какого инстанса выкатка вообще дотягивается.
+                ssh_host_key=spec.get("ssh_host_key", ""),
                 bandwidth_profile=spec["bandwidth_profile"],
                 provider_name=spec["provider"]["name"],
                 provider_resource_id=spec["provider"]["resource_id"],

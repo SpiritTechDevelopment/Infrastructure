@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from fleetctl.compiler import compile_known_hosts, render_files
+from fleetctl.compiler import KnownHostsError, compile_known_hosts, render_files
 from fleetctl.compiler.known_hosts import HOST_KEY_TYPES, host_pattern
 from fleetctl.validation import validate_environment
 
@@ -74,6 +74,47 @@ class KnownHostsCompilerTests(unittest.TestCase):
         ):
             with self.subTest(rejected=rejected):
                 self.assertIsNone(expression.fullmatch(rejected))
+
+    # Поле объявлено необязательным в схеме, потому что impact plan валидирует
+    # базовый коммит нынешними контрактами: сделай его обязательным — и любая
+    # выкатка против базы, написанной до появления поля, упадёт на валидации.
+    # Требование живёт в компиляторе, где видно, до кого выкатка дотягивается.
+    def test_a_reachable_instance_without_a_key_refuses_to_compile(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="known-hosts-") as temporary:
+            desired = Path(temporary) / "desired"
+            shutil.copytree(VALID_DESIRED, desired)
+            path = desired / "environments/develop/instances/develop-exit-de-01.yml"
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+            del document["spec"]["ssh_host_key"]
+            path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            # Схему и семантику проходит — иначе базовый коммит было бы не прочитать.
+            state = validate_environment(REPO_ROOT, "develop", desired_root=desired)
+            with self.assertRaisesRegex(KnownHostsError, "develop-exit-de-01"):
+                compile_known_hosts(state)
+
+    def test_a_retired_instance_without_a_key_is_not_a_problem(self) -> None:
+        # Машину вывели ещё до того, как поле появилось. Выкатка её не адресует,
+        # и требовать ключ значило бы требовать его задним числом.
+        with tempfile.TemporaryDirectory(prefix="known-hosts-") as temporary:
+            desired = Path(temporary) / "desired"
+            shutil.copytree(VALID_DESIRED, desired)
+            instances = desired / "environments/develop/instances"
+            document = yaml.safe_load(
+                (instances / "develop-exit-de-01.yml").read_text(encoding="utf-8")
+            )
+            document["metadata"]["id"] = "develop-exit-de-02"
+            document["spec"]["target_state"] = "retired"
+            document["spec"]["public_address"] = "192.0.2.21"
+            document["spec"]["provider"]["resource_id"] = "fixture-exit-02"
+            del document["spec"]["ssh_host_key"]
+            (instances / "develop-exit-de-02.yml").write_text(
+                yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+            )
+            state = validate_environment(REPO_ROOT, "develop", desired_root=desired)
+
+            entries = self.entries(compile_known_hosts(state))
+            self.assertNotIn("192.0.2.21", entries)
+            self.assertIn("192.0.2.20", entries)
 
     def test_the_file_is_marked_generated(self) -> None:
         self.assertTrue(compile_known_hosts(self.state).startswith("# GENERATED — DO NOT EDIT"))

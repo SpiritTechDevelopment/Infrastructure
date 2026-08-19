@@ -17,14 +17,7 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "logical_node",
-        "target_state",
-        "public_address",
-        "ssh_host_key",
-        "bandwidth_profile",
-        "provider"
-      ],
+      "required": ["logical_node", "target_state", "public_address", "bandwidth_profile", "provider"],
       "properties": {
         "logical_node": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9-]+$"},
         "target_state": {"enum": ["provisioning", "candidate", "serving", "draining", "retired"]},
@@ -35,7 +28,7 @@
           ]
         },
         "ssh_host_key": {
-          "description": "Public SSH host key of this machine, without host patterns. The compiler renders known_hosts from it; the address a host answers on is declared here, not discovered on the wire. RSA keys are the longest form allowed, at roughly 550 characters for 3072 bits.",
+          "description": "Public SSH host key of this machine, without host patterns. The compiler renders known_hosts from it and refuses to build a fleet whose reachable instances have not declared one; absence is allowed here because a retired instance is reached by nothing, and because a baseline commit written before this field existed still has to validate when an impact plan is computed against it. RSA keys are the longest form allowed, at roughly 550 characters for 3072 bits.",
           "type": "string",
           "minLength": 1,
           "maxLength": 1024,

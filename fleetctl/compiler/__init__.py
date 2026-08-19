@@ -8,13 +8,14 @@ from .bootstrap import compile_bootstrap_inventory
 from .control import compile_control_plan
 from .dns import compile_dns_plan
 from .inventory import compile_ansible_inventory
-from .known_hosts import compile_known_hosts
+from .known_hosts import KnownHostsError, compile_known_hosts
 from .monitoring import MonitoringPlanError, compile_monitoring_targets
 from .node_plans import compile_node_plans
 from .render import render_files
 
 __all__ = [
     "BackendManifestError",
+    "KnownHostsError",
     "MonitoringPlanError",
     "backend_manifest_bytes",
     "backend_manifest_payload_digest",

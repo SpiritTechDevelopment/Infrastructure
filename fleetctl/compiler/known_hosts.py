@@ -42,6 +42,10 @@ HOST_KEY_TYPES = (
 )
 
 
+class KnownHostsError(Exception):
+    """A machine the fleet reaches has not said who it is."""
+
+
 def compile_known_hosts(state: DesiredState) -> str:
     nodes = {node.object_id: node for node in state.nodes}
     lines = [HEADER]
@@ -50,6 +54,16 @@ def compile_known_hosts(state: DesiredState) -> str:
         # key here would keep authorising a machine the fleet has let go.
         if instance.target_state == "retired":
             continue
+        # The requirement lives here and not in the schema for two reasons. Only
+        # here is it known whether the instance is reached at all. And an impact
+        # plan validates the baseline commit with today's contracts — a commit
+        # written before this field existed still has to load, or schema
+        # evolution would break planning against every earlier deployment.
+        if not instance.ssh_host_key:
+            raise KnownHostsError(
+                f"instance {instance.object_id} is reachable but declares no ssh_host_key; "
+                "declare it rather than trusting the host on first contact"
+            )
         node = nodes[instance.logical_node]
         patterns = [
             # Bootstrap reaches a clean VPS on its public address, port 22.
