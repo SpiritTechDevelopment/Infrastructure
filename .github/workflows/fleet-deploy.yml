@@ -68,6 +68,10 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, linux, spiritvpn-deploy]
+    outputs:
+      promote: ${{ steps.record.outputs.promote }}
+      baseline: ${{ steps.source.outputs.baseline }}
+      baseline_git_sha: ${{ steps.source.outputs.baseline_git_sha }}
     # `environment:` намеренно отсутствует — см. control-deploy.yml. На плане
     # free с приватными репозиториями environments недоступны, и задача,
     # объявившая среду, падает с нулём шагов, ничего не сообщая. Разделение
@@ -102,9 +106,15 @@ jobs:
             test "$REQUESTED_INITIAL" = false
             git fetch --no-tags origin "+$deployment_ref:$deployment_ref"
             printf 'baseline=present\n' >> "$GITHUB_OUTPUT"
+            # Читается здесь, до всякой выкатки, и переносится в задачу promote
+            # как ожидаемое прежнее значение. База, прочитанная после выкатки,
+            # доказывала бы только то, что ref не менялся между двумя чтениями.
+            printf 'baseline_git_sha=%s\n' "$(git rev-parse "$deployment_ref^{commit}")" \
+              >> "$GITHUB_OUTPUT"
           else
             test "$REQUESTED_INITIAL" = true
             printf 'baseline=absent\n' >> "$GITHUB_OUTPUT"
+            printf 'baseline_git_sha=\n' >> "$GITHUB_OUTPUT"
           fi
 
           git config --local --unset-all http.https://github.com/.extraheader || true
@@ -155,13 +165,115 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$PLATFORM_SSH_HOST"
+          # `tee` вместо простого вывода: последним на stdout исполнитель печатает
+          # запись о развёртывании, и она — единственный отчёт о том, чего выкатка
+          # на самом деле достигла. `pipefail` уже включён, так что упавший ssh
+          # по-прежнему валит шаг.
           scripts/platform-remote.sh \
             "$PLATFORM_SSH_HOST" fleet-deploy \
             "$REQUESTED_ENVIRONMENT" "$REQUESTED_SHA" "$REQUESTED_MODE" \
             "$REQUESTED_INITIAL" "$REQUESTED_RESUME" "$REQUESTED_DESTRUCTIVE" \
-            < "$RUNNER_TEMP/fleet-deploy.bundle"
+            < "$RUNNER_TEMP/fleet-deploy.bundle" \
+            | tee "$RUNNER_TEMP/fleet-deploy.transcript"
+
+      # Нулевой код возврата выкатки не означает, что граница бэкенда пройдена:
+      # apply без личности manifest-writer останавливается на WAITING_FOR_BACKEND
+      # и завершается успешно. Двигать ref после такого прогона значило бы
+      # объявить развёрнутым то, что бэкенд не принимал.
+      - name: Decide whether the deployment ref may advance
+        id: record
+        if: inputs.mode == 'apply'
+        shell: bash
+        env:
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+          BASELINE: ${{ steps.source.outputs.baseline }}
+          BASELINE_GIT_SHA: ${{ steps.source.outputs.baseline_git_sha }}
+        run: |
+          set -euo pipefail
+          if test "$BASELINE" = present; then
+            baseline_argument=(--expected-baseline-git-sha "$BASELINE_GIT_SHA")
+          else
+            baseline_argument=(--initial)
+          fi
+          python3 scripts/deployment-record.py \
+            --transcript "$RUNNER_TEMP/fleet-deploy.transcript" \
+            --environment "$REQUESTED_ENVIRONMENT" \
+            --source-git-sha "$REQUESTED_SHA" \
+            "${baseline_argument[@]}" >> "$GITHUB_OUTPUT"
+
+      - name: Remove the executor transcript
+        if: always()
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/fleet-deploy.transcript"
 
       - name: Remove temporary SSH material
         if: always()
         shell: bash
         run: rm -f -- "$RUNNER_TEMP/platform-ssh-key" "$RUNNER_TEMP/platform-known-hosts"
+
+  # Запись о развёрнутом — единственное, что делает планы изменений точными:
+  # impact plan считается от неё, и пока она не двигается, каждая следующая
+  # выкатка планируется от состояния недельной давности.
+  #
+  # Отдельная задача, а не шаг: право записи в репозиторий живёт здесь и больше
+  # нигде. У этой задачи нет ни SSH-ключа, ни бандла, ни доступа к хабу, она
+  # выполняется на runner'е GitHub и умеет ровно одно — переставить ref на SHA,
+  # который отдельно подтверждён записью о развёртывании. Задача deploy,
+  # наоборот, права записи не получает.
+  promote:
+    needs: deploy
+    if: needs.deploy.outputs.promote == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ inputs.source_git_sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install fleetctl
+        run: python -m pip install .
+
+      # Перестановка идёт через compare-and-swap с обеих сторон: локально это
+      # третий аргумент `git update-ref`, на стороне origin — `--force-with-lease`
+      # с явно названным прежним значением. Обычный push проверил бы только
+      # быструю перемотку, а откат на предка выглядит для него нормальным
+      # изменением и молча затёр бы чужую запись.
+      - name: Advance the deployment ref
+        shell: bash
+        env:
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+          BASELINE: ${{ needs.deploy.outputs.baseline }}
+          BASELINE_GIT_SHA: ${{ needs.deploy.outputs.baseline_git_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          deployment_ref="refs/deployments/$REQUESTED_ENVIRONMENT"
+          if test "$BASELINE" = present; then
+            [[ "$BASELINE_GIT_SHA" =~ ^[0-9a-f]{40}$ ]]
+            git fetch --no-tags origin "+$deployment_ref:$deployment_ref"
+            test "$(git rev-parse "$deployment_ref^{commit}")" = "$BASELINE_GIT_SHA"
+            python -m fleetctl.cli update-deployment-ref \
+              --environment "$REQUESTED_ENVIRONMENT" \
+              --source-git-sha "$REQUESTED_SHA" \
+              --expected-baseline-git-sha "$BASELINE_GIT_SHA"
+            git push --force-with-lease="$deployment_ref:$BASELINE_GIT_SHA" \
+              origin "$deployment_ref"
+          else
+            test "$BASELINE" = absent
+            test -z "$BASELINE_GIT_SHA"
+            ! git ls-remote --exit-code origin "$deployment_ref" >/dev/null 2>&1
+            python -m fleetctl.cli update-deployment-ref \
+              --environment "$REQUESTED_ENVIRONMENT" \
+              --source-git-sha "$REQUESTED_SHA" \
+              --initial
+            git push origin "$deployment_ref"
+          fi

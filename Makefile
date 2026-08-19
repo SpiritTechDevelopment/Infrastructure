@@ -89,6 +89,21 @@ fleet-bootstrap: fleet-ansible-check ## Bootstrap clean hosts; requires APPLY=1 
 fleet-deploy: ## Infrastructure coordinator; dry-run by default, APPLY=1 enables SSH
 	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) $(if $(FLEET_STATE_DIR),--state-dir "$(FLEET_STATE_DIR)",) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",) $(if $(CA_STATE),--ca-state "$(CA_STATE)",)
 
+fleet-promote: ## Record a deployment verified elsewhere; needs SOURCE_GIT_SHA and BASELINE_GIT_SHA (or INITIAL=1); APPLY=1 pushes
+	@# Ручной путь для того же, что делает задача promote в fleet-deploy.yml:
+	@# выкатка прошла, а ref остался позади — обычно потому, что её довели
+	@# руками. Прежнее значение называется явно и здесь: compare-and-swap без
+	@# ожидаемой базы вырождается в обычную перезапись.
+	@test -n "$(SOURCE_GIT_SHA)" || (echo 'SOURCE_GIT_SHA is required: the commit that was deployed' >&2; exit 2)
+	@test -n "$(BASELINE_GIT_SHA)" || test "$(INITIAL)" = 1 || (echo 'BASELINE_GIT_SHA is required: the deployment ref value the run planned against; use INITIAL=1 only for a first deployment' >&2; exit 2)
+	python3 -m fleetctl.cli update-deployment-ref --environment "$(or $(ENVIRONMENT),develop)" --source-git-sha "$(SOURCE_GIT_SHA)" $(if $(filter 1 yes true,$(INITIAL)),--initial,--expected-baseline-git-sha "$(BASELINE_GIT_SHA)")
+	@if test "$(APPLY)" = 1; then \
+	  set -x; \
+	  git push $(if $(filter 1 yes true,$(INITIAL)),,--force-with-lease="refs/deployments/$(or $(ENVIRONMENT),develop):$(BASELINE_GIT_SHA)") origin "refs/deployments/$(or $(ENVIRONMENT),develop)"; \
+	else \
+	  echo 'local deployment ref updated; nothing was pushed. Set APPLY=1 to publish it to origin.' >&2; \
+	fi
+
 fleet-deploy-log: ## Why the last workflow run failed; WORKFLOW=fleet-deploy BACK=1
 	@scripts/deploy-log.sh "$(WORKFLOW)" "$(or $(BACK),1)"
 
@@ -145,6 +160,6 @@ check: fleet-validate fleet-test ## Run local v1 static checks
 
 .PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-manifest \
 	fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check \
-	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-platform-check \
+	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-promote fleet-platform-check \
 	fleet-platform-bootstrap-check fleet-platform-bootstrap fleet-platform-refresh \
 	fleet-deploy-log syntax lint check

@@ -114,6 +114,13 @@ jobs:
   deploy-fleet:
     needs: [detect]
     if: needs.detect.outputs.fleet != '[]'
+    # Потолок прав вызванного workflow, а не выданное право: внутри
+    # fleet-deploy.yml запись остаётся у одной задачи promote, а сама выкатка
+    # по-прежнему идёт с contents: read. Без этой строки вызванный workflow
+    # получил бы read сверху и не смог бы передвинуть запись о развёрнутом —
+    # реактивный путь молча оставлял бы ref позади.
+    permissions:
+      contents: write
     strategy:
       max-parallel: 1
       matrix:

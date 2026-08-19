@@ -59,12 +59,20 @@ fleetctl deploy --environment develop --source HEAD --apply \
   --readiness-vars /protected/readiness.yml
 ```
 
-Even after successful infrastructure apply, the coordinator stops at
-`WAITING_FOR_BACKEND`. Backend manifest apply, DNS/data-plane promotion, and
-`refs/deployments/*` updates are not implemented by the coordinator and are
-never reported as complete. `update-deployment-ref` exists as a separate atomic
-compare-and-swap primitive for a future fully verified deployment flow; current
-deployment code does not call it.
+With a manifest-writer identity the coordinator hands the compiled manifest to
+the backend and finishes at `BACKEND_APPLIED`; without one it stops at
+`WAITING_FOR_BACKEND` and says so. DNS/data-plane promotion and
+`refs/deployments/*` updates remain outside the coordinator, and it never
+reports them as complete.
+
+`update-deployment-ref` is the atomic compare-and-swap that records a deployment
+the coordinator has already finished. The coordinator does not call it: moving
+the ref means writing to the repository, and the whole point of the split is
+that the process holding the fleet's SSH keys never holds that right. The caller
+is the `promote` job in `.github/workflows/fleet-deploy.yml`, which runs only
+after the deployment record it reads back reports `BACKEND_APPLIED` for exactly
+the environment, source SHA and baseline the run requested. `make fleet-promote`
+is the same step by hand.
 
 The coordinator now keeps environment-scoped revision allocations and records
 under `.fleetctl-state/` by default. A deployment receives one
@@ -125,4 +133,5 @@ inputs immediately before `--apply`; they are removed on exit. See
 
 The GitHub workflow accepts only a full commit reachable from `main`, transfers
 an exact Git bundle, and invokes the existing coordinator under an environment
-lock. It still stops at `WAITING_FOR_BACKEND` and never moves a deployment ref.
+lock. The deployment ref moves afterwards, in a separate job with no access to
+the bundle, the SSH identity, or the hub — see `update-deployment-ref` above.

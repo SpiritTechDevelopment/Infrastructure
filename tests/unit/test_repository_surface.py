@@ -69,6 +69,11 @@ class RepositorySurfaceTests(unittest.TestCase):
                 # workstation, and because a green PLAY RECAP on a red run means
                 # the coordinator failed between steps — a place nobody looks.
                 "deploy-log.sh",
+                # Reads the executor transcript and answers one question: may the
+                # deployment ref advance. Separate from the workflow because the
+                # answer decides a write to the repository and has to be testable
+                # without a deployment.
+                "deployment-record.py",
             },
         )
 

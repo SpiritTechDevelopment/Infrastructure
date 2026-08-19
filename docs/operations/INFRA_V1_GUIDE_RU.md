@@ -165,8 +165,14 @@ build/<environment>/
 `refs/deployments/<environment>`. Plan показывает затронутые инстансы и опасные
 удаления. Разрушительное изменение требует отдельного `allow_destructive`.
 
-Сейчас deployment refs ещё не продвигаются, потому что backend apply не
-реализован. Поэтому первая раскатка использует `initial=true`.
+Deployment ref продвигается автоматически: задача `promote` в `fleet-deploy.yml`
+переставляет его после выкатки, но только если запись о развёртывании сообщает
+`BACKEND_APPLIED` для той же среды, того же SHA и той же базы, с которой прогон
+начинался. Dry-run, apply, не дошедший до бэкенда, и любое расхождение записи с
+запросом оставляют ref на месте. Ручной эквивалент — `make fleet-promote`.
+
+`initial=true` нужен только тогда, когда ref ещё не существует, то есть на самой
+первой раскатке среды.
 
 ### Coordinator state и resume
 
@@ -657,12 +663,22 @@ Coordinator передаёт Ansible `--limit`: bootstrap получает то�
 При пустом impact Ansible не вызывается. Повторный `resume` не запускает уже
 завершённый этап, а одинаковый Compose/config state не пересоздаёт контейнеры.
 
-### Шаг 8. Зафиксировать текущую границу
+### Шаг 8. Зафиксировать развёрнутое
 
-После успешного Ansible/readiness запись остановится на
-`WAITING_FOR_BACKEND`. Сейчас оператор **не должен** вручную изображать
-завершение перемещением deployment ref. Сначала должны появиться backend adapter,
-ответ `APPLIED/IDEMPOTENT` и согласованные promotion gates.
+После успешного Ansible/readiness координатор передаёт манифест бэкенду и запись
+доходит до `BACKEND_APPLIED`. Deployment ref после этого переставляет задача
+`promote` — сама, из того же прогона. Оператору делать ничего не нужно.
+
+Ручное перемещение остаётся только для прогонов, доведённых руками:
+
+```bash
+make fleet-promote ENVIRONMENT=develop APPLY=1 \
+  SOURCE_GIT_SHA=<40 hex> BASELINE_GIT_SHA=$(git ls-remote origin refs/deployments/develop | cut -f1)
+```
+
+Изображать завершение по-прежнему нельзя: `--expected-baseline-git-sha` называет
+прежнее значение явно, и без него compare-and-swap вырождается в перезапись.
+Если запись о развёртывании не дошла до `BACKEND_APPLIED`, ref двигать нечем.
 
 ## 13. Как будет выглядеть обычная эксплуатация
 
@@ -681,8 +697,10 @@ Coordinator передаёт Ansible `--limit`: bootstrap получает то�
 11. отдельное безопасное DNS/data-plane promotion, если оно требуется;
 12. guarded update deployment ref.
 
-Пункты 9–12 пока не реализованы. Автоматический deploy по одному факту merge
-также не включён.
+Из этого списка не реализован только пункт 11: отдельного DNS/data-plane
+promotion нет. Пункт 6 недостижим — approval через GitHub Environment на плане
+free отсутствует, поэтому prod отсекается в `detect`, а develop выкатывается по
+факту появления коммита в `main`.
 
 ## 14. Как система ведёт себя при отказах
 

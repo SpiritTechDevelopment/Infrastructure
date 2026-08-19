@@ -339,8 +339,35 @@ all:
             self.assertIn(required, workflow)
         self.assertNotIn("vars.PLATFORM_SSH_HOST", workflow)
         self.assertNotIn("inventories/bootstrap/known_hosts", workflow)
-        for forbidden in ("VAULT_TOKEN", "id-token: write", "ssh-keyscan", "update-deployment-ref"):
+        for forbidden in ("VAULT_TOKEN", "id-token: write", "ssh-keyscan"):
             self.assertNotIn(forbidden, workflow)
+
+    def test_deployment_ref_promotion_is_gated_and_separately_scoped(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "fleet-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+        deploy, separator, promote = workflow.partition("\n  promote:\n")
+        self.assertTrue(separator, "fleet-deploy.yml has no promote job")
+        # Право записи в репозиторий появляется ровно один раз, и не в той
+        # задаче, которая держит SSH-ключ и разговаривает с хабом.
+        self.assertEqual(workflow.count("contents: write"), 1)
+        self.assertNotIn("contents: write", deploy)
+        for forbidden in (
+            "PLATFORM_SSH_PRIVATE_KEY",
+            "platform-remote.sh",
+            "self-hosted",
+        ):
+            self.assertNotIn(forbidden, promote)
+        # Ref двигается только после отдельного подтверждения записью о
+        # развёртывании и только через compare-and-swap с названной базой.
+        for required in (
+            "scripts/deployment-record.py",
+            "if: inputs.mode == 'apply'",
+            "needs.deploy.outputs.promote == 'true'",
+            "--expected-baseline-git-sha",
+            '--force-with-lease="$deployment_ref:$BASELINE_GIT_SHA"',
+        ):
+            self.assertIn(required, workflow)
 
     def test_platform_deploy_uses_exact_sha_and_local_protected_config(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "platform-deploy.yml").read_text(
