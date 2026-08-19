@@ -150,7 +150,10 @@
         'platform_wireguard_public_endpoint': platform_wireguard_public_endpoint,
         'platform_fail2ban_ignore_cidrs': platform_fail2ban_ignore_cidrs | default([]),
         'platform_vault_node_id': platform_vault_node_id,
-        'platform_vault_tls_server_name': platform_vault_tls_server_name
+        'platform_vault_tls_server_name': platform_vault_tls_server_name,
+        'platform_alertmanager_telegram_bot_token': platform_alertmanager_telegram_bot_token,
+        'platform_alertmanager_telegram_chat_id': platform_alertmanager_telegram_chat_id,
+        'platform_alertmanager_telegram_thread_id': platform_alertmanager_telegram_thread_id
       } | to_nice_yaml(indent=2, sort_keys=true) }}
     dest: "{{ platform_runtime_vars_file }}"
     owner: root

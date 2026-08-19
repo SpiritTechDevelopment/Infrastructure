@@ -1,9 +1,8 @@
 {{ ansible_managed | comment }}
-# Rendered with the bot token inline and kept at 0400. A bot_token_file would
-# isolate the secret better, but it is a newer field than the pinned release is
-# guaranteed to accept, and a receiver that fails to load is alerting that
-# silently does not exist. The file is as protected as a separate secret would
-# have been.
+# Rendered with the bot token inline and kept at 0400. The pinned release does
+# accept bot_token_file, but the token arrives here as a variable: writing it
+# out separately would only create a second copy of the same secret on the same
+# host, under the same ownership.
 global:
   resolve_timeout: 5m
 
@@ -19,8 +18,11 @@ route:
 receivers:
   - name: telegram
     telegram_configs:
-      - bot_token: {{ _platform_alertmanager_telegram.bot_token | to_json }}
-        chat_id: {{ _platform_alertmanager_telegram.chat_id | int }}
+      - bot_token: {{ platform_alertmanager_telegram_bot_token | to_json }}
+        chat_id: {{ platform_alertmanager_telegram_chat_id | int }}
+{% if platform_alertmanager_telegram_thread_id | string | length > 0 %}
+        message_thread_id: {{ platform_alertmanager_telegram_thread_id | int }}
+{% endif %}
         parse_mode: HTML
         send_resolved: true
         message: |-

@@ -130,40 +130,17 @@
     mode: "0644"
   register: _platform_prometheus_rules
 
-- name: Require the protected Telegram notification input
-  ansible.builtin.stat:
-    path: "{{ platform_alertmanager_telegram_file }}"
-  register: _platform_alertmanager_telegram_state
-
 - name: Refuse to deploy alerting that would notify nobody
   ansible.builtin.assert:
     that:
-      - _platform_alertmanager_telegram_state.stat.exists
+      - platform_alertmanager_telegram_bot_token | length > 0
+      - platform_alertmanager_telegram_chat_id | string | length > 0
     fail_msg: >-
-      {{ platform_alertmanager_telegram_file }} is missing. Alerting without a
-      receiver looks deployed and wakes nobody; place the protected operator
-      input on the management host, with bot_token and chat_id, and deploy again.
-
-- name: Read the protected Telegram notification input
-  ansible.builtin.slurp:
-    src: "{{ platform_alertmanager_telegram_file }}"
-  register: _platform_alertmanager_telegram_raw
-  no_log: true
-
-- name: Load the Telegram notification input
-  ansible.builtin.set_fact:
-    _platform_alertmanager_telegram: >-
-      {{ _platform_alertmanager_telegram_raw.content | b64decode | from_yaml }}
-  no_log: true
-
-- name: Require both halves of the Telegram receiver
-  ansible.builtin.assert:
-    that:
-      - _platform_alertmanager_telegram.bot_token | default('') | length > 0
-      - _platform_alertmanager_telegram.chat_id | default('') | string | length > 0
-    fail_msg: >-
-      {{ platform_alertmanager_telegram_file }} must declare both bot_token and
-      chat_id.
+      The platform bundle declares no Telegram receiver. Alerting without one
+      looks deployed and wakes nobody; add
+      platform_alertmanager_telegram_bot_token and
+      platform_alertmanager_telegram_chat_id to the SOPS bundle and reconcile
+      the management foundation from it.
   no_log: true
 
 - name: Render the Alertmanager configuration

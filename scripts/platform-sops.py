@@ -22,6 +22,9 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_KEYS = {"apiVersion", "kind", "inventory", "known_hosts", "vars"}
 EXPECTED_VARIABLE_KEYS = {
+    "platform_alertmanager_telegram_bot_token",
+    "platform_alertmanager_telegram_chat_id",
+    "platform_alertmanager_telegram_thread_id",
     "platform_fail2ban_ignore_cidrs",
     "platform_github_ssh_keys",
     "platform_operator_ssh_public_keys",
@@ -165,6 +168,24 @@ def validate_variables(variables: dict[str, Any]) -> None:
         variables["platform_vault_tls_server_name"],
     ):
         raise PlatformBundleError("platform_vault_tls_server_name is invalid")
+    # Получатель сигнализации. Проверяется здесь, а не на хабе: Alertmanager
+    # принимает почти любую строку как токен и молчит, а обнаруживается это
+    # ровно тогда, когда кто-то ждёт уведомления о поломке.
+    if not isinstance(variables["platform_alertmanager_telegram_bot_token"], str) or not re.fullmatch(
+        r"[0-9]{5,}:[A-Za-z0-9_-]{30,}",
+        variables["platform_alertmanager_telegram_bot_token"],
+    ):
+        raise PlatformBundleError("platform_alertmanager_telegram_bot_token is invalid")
+    if not isinstance(variables["platform_alertmanager_telegram_chat_id"], str) or not re.fullmatch(
+        r"-?[0-9]{1,32}", variables["platform_alertmanager_telegram_chat_id"]
+    ):
+        raise PlatformBundleError("platform_alertmanager_telegram_chat_id is invalid")
+    # Тема супергруппы. Пустая строка — «без темы»: чат может и не быть форумом,
+    # и тогда Telegram отвергнет сообщение с message_thread_id.
+    if not isinstance(variables["platform_alertmanager_telegram_thread_id"], str) or not re.fullmatch(
+        r"|[0-9]{1,32}", variables["platform_alertmanager_telegram_thread_id"]
+    ):
+        raise PlatformBundleError("platform_alertmanager_telegram_thread_id is invalid")
 
 
 def decrypt_bundle(path: Path) -> tuple[dict[str, Any], str, dict[str, Any]]:

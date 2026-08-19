@@ -30,7 +30,7 @@ from fleetctl.compiler import (
 from fleetctl.compiler.addressing import control_management_address
 from fleetctl.model import DesiredState
 from fleetctl.pki import PkiError
-from fleetctl.pki.issuance import sign_agent_certificate
+from fleetctl.pki.issuance import issue_control_certificate, sign_agent_certificate
 from fleetctl.planning import ImpactPlan, build_impact_plan, build_initial_baseline
 from fleetctl.provisioning import ManualProvisioningAdapter
 from fleetctl.validation import validate_environment
@@ -104,6 +104,7 @@ class DeploymentCoordinator:
                     revision_directory / f"{options.environment}.json"
                 ),
                 bootstrapped_directory=bootstrapped_directory,
+                backend_identity_directory=state_directory / "backend-client",
             )
 
     def _run_locked(
@@ -116,6 +117,7 @@ class DeploymentCoordinator:
         record_path: Path,
         revision_state_path: Path,
         bootstrapped_directory: Path,
+        backend_identity_directory: Path,
     ) -> dict[str, Any]:
         existing = self._load_record(record_path)
         if existing is not None and not options.resume:
@@ -325,6 +327,7 @@ class DeploymentCoordinator:
                 current=current,
                 options=options,
                 request=manifest_request,
+                identity_directory=backend_identity_directory,
             )
             record["updated_at"] = _timestamp()
             self._write_record(record_path, record)
@@ -426,18 +429,31 @@ class DeploymentCoordinator:
         current: DesiredState,
         options: DeploymentOptions,
         request: dict[str, Any],
+        identity_directory: Path,
     ) -> None:
         """Hand the compiled snapshot to the backend, or stop at the boundary."""
 
-        material = (
+        supplied = (
             options.backend_client_certificate,
             options.backend_client_private_key,
             options.backend_certificate_authority,
         )
+        # An explicitly supplied identity wins: an operator pointing at specific
+        # files is making a deliberate choice, and quietly issuing a different
+        # certificate underneath them would be the wrong kind of helpful.
+        material: tuple[Path, Path, Path] | None
+        if all(path is not None for path in supplied):
+            material = supplied  # type: ignore[assignment]
+        elif options.apply:
+            material = self._ensure_backend_identity(
+                current=current, options=options, directory=identity_directory
+            )
+        else:
+            material = None
         # Sending is a mutation and needs an identity. Without either, the
         # workflow ends exactly where it always did: compiled, durably
         # allocated, and explicit that nothing was sent.
-        if not options.apply or any(path is None for path in material):
+        if not options.apply or material is None:
             record["status"] = "WAITING_FOR_BACKEND"
             record["diagnostic"] = (
                 "Infrastructure-only workflow reached the backend/agent contract boundary. "
@@ -466,9 +482,9 @@ class DeploymentCoordinator:
             # for the declared name, which has no DNS.
             target=f"{control_management_address(current.environment)}:{port}",
             tls_server_name=host,
-            client_certificate=options.backend_client_certificate,
-            client_private_key=options.backend_client_private_key,
-            certificate_authority=options.backend_certificate_authority,
+            client_certificate=material[0],
+            client_private_key=material[1],
+            certificate_authority=material[2],
         )
         try:
             result = apply_fleet_manifest(
@@ -529,6 +545,62 @@ class DeploymentCoordinator:
             + "\n",
             encoding="utf-8",
         )
+
+    # Порог обновления. Сертификат manifest-writer живёт на исполнителе и
+    # обновляется выкаткой; недели хватает, чтобы протухание попало в обычный
+    # прогон, а не в аварийный — сроков сертификатов у нас не мониторит никто.
+    BACKEND_IDENTITY_RENEW_BEFORE_SECONDS = 7 * 24 * 3600
+
+    def _ensure_backend_identity(
+        self,
+        *,
+        current: DesiredState,
+        options: DeploymentOptions,
+        directory: Path,
+    ) -> tuple[Path, Path, Path] | None:
+        """Issue or renew the manifest-writer identity the coordinator itself uses.
+
+        The CA root is an operator input because it is a root. This is a leaf,
+        and the coordinator already holds the CA while it signs agent
+        certificates — asking an operator to mint it by hand only adds a step
+        that is forgotten once and then expires unnoticed.
+        """
+        if options.ca_state is None:
+            return None
+        environment = current.environment.object_id
+        output = directory / environment
+        certificate = output / "manifest-writer.crt"
+        private_key = output / "manifest-writer.key"
+        authority = output / "ca.crt"
+
+        usable = certificate.is_file() and private_key.is_file() and authority.is_file()
+        if usable and self._certificate_outlives(
+            certificate, self.BACKEND_IDENTITY_RENEW_BEFORE_SECONDS
+        ):
+            return certificate, private_key, authority
+
+        try:
+            issue_control_certificate(
+                current,
+                "manifest-writer",
+                ca_state=options.ca_state,
+                output=output,
+            )
+        except PkiError as exc:
+            raise DeploymentError(f"cannot issue the manifest-writer identity: {exc}") from exc
+        return certificate, private_key, authority
+
+    @staticmethod
+    def _certificate_outlives(certificate: Path, seconds: int) -> bool:
+        # openssl, not a parsed date: the PKI here shells out everywhere else,
+        # and -checkend answers exactly the question being asked.
+        result = subprocess.run(
+            ["openssl", "x509", "-in", str(certificate), "-noout", "-checkend", str(seconds)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        return result.returncode == 0
 
     @staticmethod
     def _prepare_state_directories(state_directory: Path) -> tuple[Path, Path, Path]:

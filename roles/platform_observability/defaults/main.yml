@@ -99,14 +99,18 @@ platform_alertmanager_dir: /opt/spiritvpn/platform/observability/alertmanager
 platform_alertmanager_state_dir: /var/lib/spiritvpn/alertmanager
 platform_prometheus_rules_dir: /opt/spiritvpn/platform/observability/rules
 platform_prometheus_rules_container_dir: /etc/prometheus/rules
-# Защищённый операторский вход, как known_hosts и vault-approle: кладётся на
-# хаб руками и в репозитории не хранится. Не через SOPS-бандл сознательно —
-# переменные бандла доезжают до хаба белым списком в platform_executor, то есть
-# новый ключ стал бы виден лишь прогону, следующему за тем, который его завёл.
+# Получатель приезжает из SOPS-бандла платформы вместе с остальными
+# операторскими значениями: секрет, положенный руками на хаб, — это ровно то
+# недекларированное состояние, из-за которого потом никто не знает, что там
+# лежит и когда менялось.
 #
-# Ожидаемое содержимое:
-#   bot_token: "123456:AA..."
-#   chat_id: "-1001234567890"
-platform_alertmanager_telegram_file: /etc/spiritvpn/platform/alertmanager-telegram.yml
+# Пустые по умолчанию, чтобы отсутствие было видно ассертом, а не пустым
+# получателем в работающем Alertmanager.
+platform_alertmanager_telegram_bot_token: ""
+platform_alertmanager_telegram_chat_id: ""
+# Тема супергруппы, как у уведомлений о PR в SpiritVPN и NodeAgent. Пустая
+# строка означает «без темы»; если чат не форум, message_thread_id Telegram
+# отвергнет. Алертам стоит своя тема, а не общая лента с отчётами о сборках.
+platform_alertmanager_telegram_thread_id: ""
 # Как часто повторять напоминание о том, что уже горит.
 platform_alertmanager_repeat_interval: 4h

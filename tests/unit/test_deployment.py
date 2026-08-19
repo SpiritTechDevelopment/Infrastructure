@@ -31,6 +31,20 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
 
         return mock.patch.object(coordinator, "_sign_agent_certificates", side_effect=sign)
 
+    def fake_backend(self):
+        """Stand in for the backend that now hears from every apply.
+
+        The coordinator issues its own manifest-writer identity, so an apply no
+        longer stops at the contract boundary on its own. Tests about Ansible
+        targeting and resume should not need a gRPC stack or a live backend to
+        say what they are about.
+        """
+
+        return mock.patch(
+            "fleetctl.deployment.coordinator.apply_fleet_manifest",
+            return_value="MANIFEST_APPLY_RESULT_APPLIED",
+        )
+
     def prepare_repository(self, parent: Path) -> TemporaryFleetRepository:
         root = parent / "repository"
         root.mkdir()
@@ -221,7 +235,9 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 path = repository.root / name
                 path.write_text("{}\n", encoding="utf-8")
                 variables[name] = path
-            with mock.patch.object(coordinator, "_run_ansible"), self.fake_signer(coordinator):
+            with mock.patch.object(coordinator, "_run_ansible"), self.fake_signer(
+                coordinator
+            ), self.fake_backend():
                 resumed = coordinator.run(
                     DeploymentOptions(
                         environment="develop",
@@ -236,7 +252,9 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 )
 
         self.assertFalse(resumed["dry_run"])
-        self.assertEqual(resumed["status"], "WAITING_FOR_BACKEND")
+        # An apply now issues its own manifest-writer identity, so it no longer
+        # stops at the contract boundary for want of one.
+        self.assertEqual(resumed["status"], "BACKEND_APPLIED")
 
     def test_apply_requires_all_operator_inputs_before_ansible(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -260,7 +278,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 variables[name] = path
             with mock.patch.object(coordinator, "_run_ansible") as ansible, self.fake_signer(
                 coordinator
-            ):
+            ), self.fake_backend():
                 coordinator.run(
                     DeploymentOptions(
                         environment="develop",
@@ -467,7 +485,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
 
             with mock.patch.object(
                 coordinator, "_run_ansible", side_effect=record
-            ), self.fake_signer(coordinator):
+            ), self.fake_signer(coordinator), self.fake_backend():
                 coordinator.run(
                     DeploymentOptions(
                         environment="develop",
@@ -567,7 +585,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
 
             with mock.patch.object(
                 coordinator, "_run_ansible", side_effect=record_call
-            ), self.fake_signer(coordinator) as resumed_signer:
+            ), self.fake_signer(coordinator) as resumed_signer, self.fake_backend():
                 coordinator.run(
                     DeploymentOptions(
                         environment="develop",
