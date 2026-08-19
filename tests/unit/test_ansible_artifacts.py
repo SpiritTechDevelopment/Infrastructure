@@ -156,6 +156,12 @@ class ContainerLogCeilingTests(unittest.TestCase):
                 # Jinja-выражения заменяются заглушкой: проверяется структура
                 # отрендеренного compose, а не значения подстановок.
                 rendered = re.sub(r"{{[^\n{}]+}}", "fixture", source)
+                # Условные блоки снимаются целиком, а тело остаётся: сервис,
+                # объявленный под `{% if %}`, доезжает до хоста ровно так же,
+                # и предел на логи ему нужен ровно так же. Пропустить его
+                # значило бы вернуть ту самую дыру, ради которой сервисы здесь
+                # перечисляются из шаблона, а не списком в тесте.
+                rendered = re.sub(r"(?m)^\s*{%[^\n]*%}\s*$\n?", "", rendered)
                 document = yaml.safe_load(rendered)
                 services = document["services"]
                 self.assertTrue(services)

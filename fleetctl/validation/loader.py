@@ -11,6 +11,7 @@ import yaml
 from jsonschema import Draft202012Validator, FormatChecker
 
 from fleetctl.model import (
+    BotRuntime,
     BridgeRelation,
     CommonConfig,
     ControlPlane,
@@ -230,6 +231,7 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                     customer_access_readers=tuple(
                         control_spec["authorization"]["customer_access_readers"]
                     ),
+                    bot=_to_bot(control_spec.get("bot")),
                 )
             return Environment(
                 object_id=object_id,
@@ -296,6 +298,28 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 source=path,
             )
     raise AssertionError(f"unreachable kind: {document['kind']}")
+
+
+def _to_bot(bot_spec: dict[str, Any] | None) -> BotRuntime | None:
+    if bot_spec is None:
+        return None
+    settings = bot_spec["settings"]
+    return BotRuntime(
+        source_git_sha=bot_spec["release"]["source_git_sha"],
+        image=ImmutableImage(**bot_spec["release"]["image"]),
+        postgres_database=bot_spec["postgres"]["database"],
+        postgres_owner_user=bot_spec["postgres"]["owner_user"],
+        postgres_runtime_user=bot_spec["postgres"]["runtime_user"],
+        client_identity=settings["client_identity"],
+        friends_plan_fleet=settings["friends_plan_fleet"],
+        # Absent means "keep the image's own default": the bot already declares
+        # one, and repeating it here would create a second place to change it.
+        friends_plan_quota_bytes=settings.get("friends_plan_quota_bytes"),
+        friends_plan_duration_days=settings.get("friends_plan_duration_days"),
+        tunnel_image=ImmutableImage(**bot_spec["ingress"]["image"]),
+        public_hostname=bot_spec["ingress"]["hostname"],
+        secret_refs=dict(bot_spec["secrets"]),
+    )
 
 
 def _to_common_model(documents: dict[str, tuple[dict[str, Any], Path]]) -> CommonConfig:

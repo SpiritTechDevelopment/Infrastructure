@@ -473,6 +473,60 @@ all:
         self.assertIn("{{ control_backend_uid }}", tasks)
         self.assertIn("{{ control_backend_gid }}", tasks)
 
+    def test_the_bot_reaches_the_public_internet_without_an_inbound_port(self) -> None:
+        """Мини-апп публикуется исходящим туннелем, и это весь его вход.
+
+        Опубликованный порт рядом с туннелем был бы вторым путём внутрь — мимо
+        Cloudflare, без TLS и без единой проверки вызывающего. Проверяется по
+        самому шаблону: `ports:` у сервисов бота не появляется, а туннель
+        поднимается только после того, как мини-апп отвечает.
+        """
+        compose = yaml.safe_load(
+            re.sub(
+                r"(?m)^\s*{%[^\n]*%}\s*$\n?",
+                "",
+                re.sub(
+                    r"{{[^\n{}]+}}",
+                    "fixture",
+                    (
+                        REPO_ROOT / "roles" / "control_runtime" / "templates" / "compose.yml.j2"
+                    ).read_text(encoding="utf-8"),
+                ),
+            )
+        )
+        services = compose["services"]
+        for name in ("bot", "bot-api", "bot-tunnel"):
+            with self.subTest(service=name):
+                self.assertIn(name, services)
+                self.assertNotIn("ports", services[name])
+        self.assertEqual(
+            services["bot-tunnel"]["depends_on"]["bot-api"]["condition"],
+            "service_healthy",
+        )
+        # Бэкенд адресуется по имени из его сертификата: своей DNS-записи в
+        # compose у хоста нет, а `backend:8443` предъявил бы имя, которого
+        # сертификат не несёт.
+        self.assertIn("extra_hosts", services["bot"])
+
+    def test_bot_migrations_ship_with_the_bot_image(self) -> None:
+        """Схема и код приезжают одной парой.
+
+        Отдельного образа миграций у бота нет — `alembic upgrade head`
+        запускается из того же образа. Отдельный тег здесь означал бы схему из
+        одной сборки под кодом из другой.
+        """
+        compose = (
+            REPO_ROOT / "roles" / "control_runtime" / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        apply_tasks = (
+            REPO_ROOT / "roles" / "control_runtime" / "tasks" / "bot-apply.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(compose.count("image: {{ control_plan.bot.image }}"), 3)
+        self.assertIn("alembic", compose)
+        # Миграции гоняются только на смене релиза, и признак релиза у бота
+        # свой: выкатка бэкенда не должна их повторять.
+        self.assertIn("_control_bot_release_changed", apply_tasks)
+
     def test_metrics_surfaces_never_leave_the_management_overlay(self) -> None:
         control_compose = (
             REPO_ROOT / "roles" / "control_runtime" / "templates" / "compose.yml.j2"
@@ -801,10 +855,14 @@ all:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         references = result.stdout.splitlines()
-        self.assertEqual(len(references), 11)
+        # 11 бэкенда и 11 бота. Бот резолвится тем же scope: он разворачивается
+        # тем же control-deploy, и его секреты обязаны доехать тем же проходом —
+        # иначе роль упадёт на нерезолвленной ссылке уже на хосте.
+        self.assertEqual(len(references), 22)
         self.assertTrue(
             all(reference.startswith("secret://kv/develop/control/") for reference in references)
         )
+        self.assertTrue(any("/bot#telegram_bot_token" in item for item in references))
         self.assertFalse(any("executor/ansible" in reference for reference in references))
 
     def test_private_writer_refuses_symlink_and_sets_mode(self) -> None:

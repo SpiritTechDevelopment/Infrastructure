@@ -30,6 +30,31 @@ class ImmutableImage:
 
 
 @dataclass(frozen=True, slots=True)
+class BotRuntime:
+    """The Telegram bot deployed beside the backend on the management host.
+
+    It is a client of the backend, not a part of it: its own release, its own
+    database and its own identity, sharing only the PostgreSQL instance and the
+    host. That is why it hangs off ControlPlane rather than standing alone — one
+    control-deploy reconciles both, and a bot release lands in the same subtree
+    the deployment trigger already watches.
+    """
+
+    source_git_sha: str
+    image: ImmutableImage
+    postgres_database: str
+    postgres_owner_user: str
+    postgres_runtime_user: str
+    client_identity: str
+    friends_plan_fleet: str
+    friends_plan_quota_bytes: int | None
+    friends_plan_duration_days: int | None
+    tunnel_image: ImmutableImage
+    public_hostname: str
+    secret_refs: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
 class ControlPlane:
     backend_source_git_sha: str
     backend_image: ImmutableImage
@@ -44,6 +69,10 @@ class ControlPlane:
     secret_refs: dict[str, str]
     customer_access_writers: tuple[str, ...]
     customer_access_readers: tuple[str, ...]
+    # Optional, and it has to stay that way. `plan` compares a Git source with
+    # the last deployed baseline, and that baseline predates this field: making
+    # it mandatory would make every plan against it fail to load.
+    bot: BotRuntime | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,183 @@
+---
+# Included only once the backend is serving. The bot is the backend's client,
+# and a deployment that stalls in here must leave a working control plane
+# behind it.
+
+- name: Read the last successful bot release marker
+  ansible.builtin.slurp:
+    src: "{{ control_plan.bot.paths.root }}/release-id"
+  register: _control_bot_release_marker
+  failed_when: false
+  changed_when: false
+
+- name: Calculate the exact bot release identity
+  ansible.builtin.set_fact:
+    _control_bot_release_id: >-
+      {{ control_plan.bot.source_git_sha ~ ' ' ~ control_plan.bot.image }}
+    # Separate from the backend's marker on purpose: the two ship on their own
+    # schedules, and a backend release must not re-run the bot's migrations.
+    _control_bot_release_changed: >-
+      {{ _control_bot_release_marker.content is not defined
+         or (_control_bot_release_marker.content | b64decode | trim)
+            != (control_plan.bot.source_git_sha ~ ' ' ~ control_plan.bot.image) }}
+
+# The connection is made as the instance superuser — POSTGRES_USER, which the
+# image creates with that right — because creating a role and a database is
+# beyond what either tenant's own owner can do. The target database cannot be
+# the one being created, so it connects through the backend's.
+- name: Provision the bot role and database inside the shared instance
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - exec
+      - -T
+      - --user
+      - postgres
+      - postgres
+      - psql
+      - --set
+      - ON_ERROR_STOP=1
+      - --username
+      - "{{ control_plan.postgres.owner_user }}"
+      - --dbname
+      - "{{ control_plan.postgres.database }}"
+    stdin: |
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ control_plan.bot.postgres.owner_user }}') THEN
+          CREATE ROLE {{ control_plan.bot.postgres.owner_user }} LOGIN;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{{ control_plan.bot.postgres.runtime_user }}') THEN
+          CREATE ROLE {{ control_plan.bot.postgres.runtime_user }} LOGIN;
+        END IF;
+      END
+      $do$;
+      ALTER ROLE {{ control_plan.bot.postgres.owner_user }} PASSWORD '{{ control_secret_values[control_plan.bot.secret_refs.postgres_owner_password_ref] | replace("'", "''") }}';
+      ALTER ROLE {{ control_plan.bot.postgres.runtime_user }} PASSWORD '{{ control_secret_values[control_plan.bot.secret_refs.postgres_runtime_password_ref] | replace("'", "''") }}';
+      -- CREATE DATABASE runs outside a transaction and has no IF NOT EXISTS, so
+      -- it is generated and executed only when it is actually missing.
+      SELECT 'CREATE DATABASE {{ control_plan.bot.postgres.database }} OWNER {{ control_plan.bot.postgres.owner_user }}'
+      WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '{{ control_plan.bot.postgres.database }}')\gexec
+      REVOKE ALL ON DATABASE {{ control_plan.bot.postgres.database }} FROM PUBLIC;
+      GRANT CONNECT ON DATABASE {{ control_plan.bot.postgres.database }} TO {{ control_plan.bot.postgres.owner_user }};
+      GRANT CONNECT ON DATABASE {{ control_plan.bot.postgres.database }} TO {{ control_plan.bot.postgres.runtime_user }};
+  when: not ansible_check_mode
+  changed_when: true
+  no_log: true
+
+- name: Apply bot migrations from the matching bot release
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - run
+      - --rm
+      - --no-deps
+      - bot-migrate
+  when:
+    - not ansible_check_mode
+    - _control_bot_release_changed | bool
+  changed_when: true
+
+# After the migrations, like the backend's: the tables the runtime role is
+# granted on have to exist before the grant can name them.
+- name: Reconcile the restricted bot runtime role after migrations
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - exec
+      - -T
+      - --user
+      - postgres
+      - postgres
+      - psql
+      - --set
+      - ON_ERROR_STOP=1
+      - --username
+      - "{{ control_plan.bot.postgres.owner_user }}"
+      - --dbname
+      - "{{ control_plan.bot.postgres.database }}"
+    stdin: |
+      GRANT USAGE ON SCHEMA public TO {{ control_plan.bot.postgres.runtime_user }};
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {{ control_plan.bot.postgres.runtime_user }};
+      GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO {{ control_plan.bot.postgres.runtime_user }};
+      ALTER DEFAULT PRIVILEGES FOR ROLE {{ control_plan.bot.postgres.owner_user }} IN SCHEMA public
+        GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {{ control_plan.bot.postgres.runtime_user }};
+      ALTER DEFAULT PRIVILEGES FOR ROLE {{ control_plan.bot.postgres.owner_user }} IN SCHEMA public
+        GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO {{ control_plan.bot.postgres.runtime_user }};
+  when:
+    - not ansible_check_mode
+    - _control_bot_release_changed | bool or _control_bot_secret_files.changed
+  changed_when: true
+  no_log: true
+
+- name: Reconcile the bot and its mini app
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - up
+      - -d
+      - --no-deps
+      - --wait
+      - --wait-timeout
+      - "60"
+      - --pull
+      - "{{ control_compose_pull_policy }}"
+      - bot
+      - bot-api
+  register: _control_bot_apply
+  changed_when: >-
+    _control_compose.changed
+    or _control_bot_environment.changed
+    or _control_bot_secret_files.changed
+    or 'Created' in (_control_bot_apply.stdout ~ _control_bot_apply.stderr)
+    or 'Started' in (_control_bot_apply.stdout ~ _control_bot_apply.stderr)
+    or 'Recreated' in (_control_bot_apply.stdout ~ _control_bot_apply.stderr)
+    or 'Pulled' in (_control_bot_apply.stdout ~ _control_bot_apply.stderr)
+  when: not ansible_check_mode
+
+# Last, and only after the mini app answers: the tunnel is what makes this
+# public, and publishing an origin that is not yet serving turns a slow start
+# into a visible outage on the customer's side.
+- name: Reconcile the public tunnel
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ control_plan.paths.root }}/compose.yml"
+      - up
+      - -d
+      - --no-deps
+      - --pull
+      - "{{ control_compose_pull_policy }}"
+      - bot-tunnel
+  register: _control_bot_tunnel_apply
+  changed_when: >-
+    _control_compose.changed
+    or _control_bot_tunnel_environment.changed
+    or 'Created' in (_control_bot_tunnel_apply.stdout ~ _control_bot_tunnel_apply.stderr)
+    or 'Started' in (_control_bot_tunnel_apply.stdout ~ _control_bot_tunnel_apply.stderr)
+    or 'Recreated' in (_control_bot_tunnel_apply.stdout ~ _control_bot_tunnel_apply.stderr)
+    or 'Pulled' in (_control_bot_tunnel_apply.stdout ~ _control_bot_tunnel_apply.stderr)
+  when: not ansible_check_mode
+
+- name: Persist the successful exact bot release identity
+  ansible.builtin.copy:
+    content: "{{ _control_bot_release_id }}\n"
+    dest: "{{ control_plan.bot.paths.root }}/release-id"
+    owner: root
+    group: root
+    mode: "0600"
+  when: not ansible_check_mode

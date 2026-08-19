@@ -15,7 +15,7 @@ name: release-bump
 # digest'а оператором раскатывается тем же путём, что и автоматическая.
 on:
   repository_dispatch:
-    types: [control-release, agent-release]
+    types: [control-release, agent-release, bot-release]
 
 # Пишет в репозиторий отдельный токен, а не GITHUB_TOKEN: слияние, выполненное
 # от GITHUB_TOKEN, не порождает событий, и выкатка после него не запустилась бы.
@@ -41,6 +41,8 @@ jobs:
       MIGRATION_DIGEST: ${{ github.event.client_payload.migration.digest }}
       AGENT_REPOSITORY: ${{ github.event.client_payload.image.repository }}
       AGENT_DIGEST: ${{ github.event.client_payload.image.digest }}
+      BOT_REPOSITORY: ${{ github.event.client_payload.image.repository }}
+      BOT_DIGEST: ${{ github.event.client_payload.image.digest }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
@@ -71,6 +73,9 @@ jobs:
             agent-release)
               check_image "$AGENT_REPOSITORY" "$AGENT_DIGEST"
               ;;
+            bot-release)
+              check_image "$BOT_REPOSITORY" "$BOT_DIGEST"
+              ;;
             *)
               echo "неизвестный компонент: $COMPONENT" >&2
               exit 1
@@ -85,6 +90,17 @@ jobs:
         run: |
           set -euo pipefail
           yq -e '.spec.control.backend_release' \
+            "desired/environments/${ENVIRONMENT}/environment.yml" >/dev/null
+
+      # По той же причине, что и control: bot без postgres, secrets, settings и
+      # ingress — коммит, заведомо не проходящий валидацию схемы. Отсутствие
+      # секции здесь означает «эта среда бота не разворачивает», и молча
+      # заводить его сборкой из другого репозитория неправильно.
+      - name: Require an existing bot release
+        if: github.event.action == 'bot-release'
+        run: |
+          set -euo pipefail
+          yq -e '.spec.control.bot.release' \
             "desired/environments/${ENVIRONMENT}/environment.yml" >/dev/null
 
       # Оверлей компонента, в отличие от control, самодостаточен: repository и
@@ -108,6 +124,13 @@ jobs:
               yq -i '
                 .spec.common_overrides.components.node_agent.repository = strenv(AGENT_REPOSITORY) |
                 .spec.common_overrides.components.node_agent.digest = strenv(AGENT_DIGEST)
+              ' "$file"
+              ;;
+            bot-release)
+              yq -i '
+                .spec.control.bot.release.source_git_sha = strenv(SOURCE_GIT_SHA) |
+                .spec.control.bot.release.image.repository = strenv(BOT_REPOSITORY) |
+                .spec.control.bot.release.image.digest = strenv(BOT_DIGEST)
               ' "$file"
               ;;
           esac

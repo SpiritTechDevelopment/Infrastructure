@@ -1,4 +1,5 @@
 from .objects import (
+    BotRuntime,
     BridgeRelation,
     BandwidthProfile,
     CommonConfig,
@@ -21,6 +22,7 @@ from .overrides import CommonOverrideError, apply_common_overrides, common_from_
 from .serialization import common_source_values, common_values
 
 __all__ = [
+    "BotRuntime",
     "BridgeRelation",
     "BandwidthProfile",
     "CommonConfig",

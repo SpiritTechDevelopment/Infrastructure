@@ -65,6 +65,60 @@ spec:
       # с client_uuid, то есть сами учётные данные.
       customer_access_writers: ['spiffe://spiritvpn/develop/service/customer-service']
       customer_access_readers: ['spiffe://spiritvpn/develop/service/customer-service']
+    # Телеграм-бот живёт на том же хосте, что и бэкенд, и делит с ним один
+    # инстанс PostgreSQL — но не базу и не личность. Для бэкенда он такой же
+    # внешний клиент, как любой другой: ходит по mTLS личностью
+    # customer-service, той самой, что перечислена в authorization выше.
+    #
+    # Лежит внутри spec.control не по родству, а по механике выкатки:
+    # desired-state-deploy сравнивает поддерево spec.control, поэтому релиз
+    # бота доезжает до хоста тем же control-deploy, что и релиз бэкенда.
+    bot:
+      # Первый релиз проставлен руками по той же причине, что и control выше:
+      # release-bump гейтится на уже существующем релизе и первый записать
+      # отказывается. Значения взяты из сборки run 32297418640 репозитория
+      # бота — первой, чей образ несёт migrations/ и alembic.ini, без которых
+      # bot-migrate падает на `alembic upgrade head`. Дальше это поле правит
+      # автоматика.
+      release:
+        source_git_sha: f29f4a517148365112aa7dff3d929a3b8bb1a6fa
+        image:
+          repository: ghcr.io/spirittechdevelopment/spiritvpn-bot
+          digest: sha256:79aba1949d731919141f9d2f94bf7f8c068d87017bf84c74e4653cd0556725dc
+      postgres:
+        database: spiritvpn_bot
+        owner_user: spiritvpn_bot_owner
+        runtime_user: spiritvpn_bot_runtime
+      secrets:
+        telegram_bot_token_ref: secret://kv/develop/control/bot#telegram_bot_token
+        postgres_owner_password_ref: secret://kv/develop/control/bot-postgres#owner_password
+        postgres_runtime_password_ref: secret://kv/develop/control/bot-postgres#runtime_password
+        migration_database_url_ref: secret://kv/develop/control/bot-postgres#migration_database_url
+        runtime_database_url_ref: secret://kv/develop/control/bot-postgres#runtime_database_url
+        subscription_signing_key_ref: secret://kv/develop/control/bot#subscription_signing_key
+        friends_shared_code_ref: secret://kv/develop/control/bot#friends_shared_code
+        # Выпускается `fleetctl pki-issue --profile customer-service`.
+        grpc_client_certificate_ref: secret://kv/develop/control/bot-tls#client_certificate
+        grpc_client_private_key_ref: secret://kv/develop/control/bot-tls#client_private_key
+        # При одном корне на среду держит те же байты, что и clients_ca.
+        grpc_server_ca_ref: secret://kv/develop/control/bot-tls#server_ca
+        tunnel_token_ref: secret://kv/develop/control/bot-ingress#tunnel_token
+      settings:
+        client_identity: spiffe://spiritvpn/develop/service/customer-service
+        # Имя флота, а не его номер: номер живёт в desired/fleet-ids.yml, и
+        # вторая его копия здесь разошлась бы с реестром молча.
+        friends_plan_fleet: develop-fleet-eu
+      ingress:
+        # Наружу не открывается ни один порт: cloudflared ходит из хоста
+        # вовне, а публичное имя и TLS остаются на стороне Cloudflare.
+        # cloudflared 2026.8.2, закреплён digest'ом манифест-листа.
+        image:
+          repository: docker.io/cloudflare/cloudflared
+          digest: sha256:0aa26e284f05e6c77ae375b8c9c11d9eb6a448fb7bcd8d40f31cb6176189eb38
+        # Без имени среды: prod, когда дойдёт до него, возьмёт своё имя, а не
+        # соседнее к этому. Менять после запуска дорого — на это имя завязан
+        # Mini App в Telegram и уже выданные ссылки на подписку.
+        hostname: bot.vmshare.ru
   common_overrides:
     components:
       node_agent:

@@ -39,10 +39,24 @@ VAULT_FIELDS = {
     },
 }
 
+# The bot keeps its own secrets under spec.control.bot, so its artifacts are
+# looked up there rather than beside the backend's. Same rule as above: the
+# operator is told a path read back from desired state, not one retyped.
+BOT_VAULT_FIELDS = {
+    "customer-service": {
+        "certificate": "grpc_client_certificate_ref",
+        "private_key": "grpc_client_private_key_ref",
+    },
+}
+
 # One root per environment means both trust anchors hold the same bytes today.
 # The fields stay separate so the roots can be split later without a schema
 # change, and both are filled from every issuance.
 CA_FIELDS = ("grpc_tls_client_ca_ref", "agent_tls_ca_ref")
+
+# The bot verifies the backend's server certificate, so it needs the same root
+# under its own reference.
+BOT_CA_FIELDS = ("grpc_server_ca_ref",)
 
 
 def issue_control_certificate(
@@ -192,16 +206,28 @@ def _require_authorised(state: DesiredState, profile: str, identity: str | None)
 
 def _vault_targets(state: DesiredState, profile: str) -> dict[str, Any]:
     control = state.environment.control
-    if control is None or profile not in VAULT_FIELDS:
+    if control is None:
+        return {}
+    if profile in BOT_VAULT_FIELDS:
+        if control.bot is None:
+            return {}
+        fields = BOT_VAULT_FIELDS[profile]
+        references = control.bot.secret_refs
+        ca_fields: tuple[str, ...] = BOT_CA_FIELDS
+    elif profile in VAULT_FIELDS:
+        fields = VAULT_FIELDS[profile]
+        references = control.secret_refs
+        ca_fields = CA_FIELDS
+    else:
         return {}
     targets: dict[str, Any] = {
-        artifact: control.secret_refs[field]
-        for artifact, field in VAULT_FIELDS[profile].items()
-        if field in control.secret_refs
+        artifact: references[field]
+        for artifact, field in fields.items()
+        if field in references
     }
     # The same PEM goes into both anchors; listing them makes the duplication
     # explicit rather than something an operator has to remember.
-    anchors = [control.secret_refs[field] for field in CA_FIELDS if field in control.secret_refs]
+    anchors = [references[field] for field in ca_fields if field in references]
     if anchors:
         targets["ca_certificate"] = anchors
     return targets

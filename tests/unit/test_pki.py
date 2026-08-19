@@ -16,6 +16,8 @@ from fleetctl.pki import (
     agent_dns_name,
     generate_key_and_csr,
 )
+from fleetctl.pki.issuance import _vault_targets
+from fleetctl.validation import validate_environment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -162,6 +164,26 @@ class LocalPkiTests(unittest.TestCase):
         self.assertNotIn("URI:", text)
         self.assertIn("TLS Web Server Authentication", text)
         self.assertNotIn("TLS Web Client Authentication", text)
+
+    def test_issuance_names_where_the_bot_certificate_belongs(self) -> None:
+        """Оператор получает путь из desired state, а не из головы.
+
+        Секреты бота живут в своём поддереве, поэтому профиль customer-service
+        читается оттуда. Пустой ответ здесь означал бы церемонию, после которой
+        оператор сам догадывается, в какое поле Vault класть файл, — и путь
+        разошёлся бы с тем, что потребует роль.
+        """
+        state = validate_environment(REPO_ROOT, "develop")
+        targets = _vault_targets(state, "customer-service")
+        bot = state.environment.control.bot
+        self.assertEqual(targets["certificate"], bot.secret_refs["grpc_client_certificate_ref"])
+        self.assertEqual(targets["private_key"], bot.secret_refs["grpc_client_private_key_ref"])
+        self.assertEqual(targets["ca_certificate"], [bot.secret_refs["grpc_server_ca_ref"]])
+        # Ссылки бэкенда сюда попасть не должны: это разные личности.
+        self.assertNotIn(
+            state.environment.control.secret_refs["grpc_tls_certificate_ref"],
+            targets.values(),
+        )
 
     def test_client_profiles_carry_their_service_identity_only(self) -> None:
         expected = {

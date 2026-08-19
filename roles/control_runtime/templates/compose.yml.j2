@@ -93,6 +93,75 @@ services:
       start_period: 15s
     networks: [control]
 
+{% if control_plan.bot %}
+  bot-migrate:
+    image: {{ control_plan.bot.image }}
+    profiles: [migration]
+    logging: *logging
+    entrypoint: ["alembic", "upgrade", "head"]
+    env_file: [{{ control_plan.bot.paths.root }}/migration.env]
+    networks: [control]
+
+  bot:
+    image: {{ control_plan.bot.image }}
+    command: [bot]
+    user: "{{ control_bot_uid }}:{{ control_bot_gid }}"
+    restart: unless-stopped
+    logging: *logging
+    stop_grace_period: 30s
+    env_file: [{{ control_plan.bot.paths.root }}/bot.env]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # The backend's certificate carries this name and nothing else, so the bot
+    # has to dial it by name. Compose has no DNS entry for the host, and the
+    # backend publishes on the management address rather than on the bridge.
+    extra_hosts:
+      - "{{ control_plan.network.backend_tls_server_name }}:{{ control_plan.network.management_address }}"
+    volumes:
+      - {{ control_plan.bot.paths.secrets }}:/secrets:ro
+    networks: [control]
+
+  bot-api:
+    image: {{ control_plan.bot.image }}
+    command: [api]
+    user: "{{ control_bot_uid }}:{{ control_bot_gid }}"
+    restart: unless-stopped
+    logging: *logging
+    stop_grace_period: 30s
+    env_file: [{{ control_plan.bot.paths.root }}/bot.env]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    extra_hosts:
+      - "{{ control_plan.network.backend_tls_server_name }}:{{ control_plan.network.management_address }}"
+    volumes:
+      - {{ control_plan.bot.paths.secrets }}:/secrets:ro
+    # No `ports:`. The mini app reaches the public internet through the tunnel
+    # below, which dials out; publishing a port here would open a second,
+    # unauthenticated way in past it.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:{{ control_plan.bot.network.http_port }}/health', timeout=5).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks: [control]
+
+  bot-tunnel:
+    image: {{ control_plan.bot.ingress.tunnel_image }}
+    restart: unless-stopped
+    logging: *logging
+    # Egress only, and that is the point of choosing a tunnel: the management
+    # host keeps no inbound public port for the mini app at all.
+    command: ["tunnel", "--no-autoupdate", "run"]
+    env_file: [{{ control_plan.bot.paths.root }}/tunnel.env]
+    depends_on:
+      bot-api:
+        condition: service_healthy
+    networks: [control]
+{% endif %}
+
 networks:
   control:
     internal: false

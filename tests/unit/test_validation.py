@@ -157,6 +157,58 @@ class DesiredStateValidationTests(unittest.TestCase):
         )
         self.assertIn("COMMON_OVERRIDE", codes)
 
+    def test_bot_may_not_take_over_the_backend_database(self) -> None:
+        """Один инстанс, два арендатора.
+
+        Совпавшее имя базы не ломает ни схему, ни выкатку: она проходит, а
+        миграции бота приезжают в схему бэкенда. Отказ обязан случиться на
+        валидации, потому что дальше это уже потерянные данные.
+        """
+
+        def mutate(document: dict[str, object]) -> None:
+            control = document["spec"]["control"]
+            control["bot"]["postgres"]["database"] = control["postgres"]["database"]
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("BOT_DB_SHARED", codes)
+
+    def test_bot_may_not_reuse_the_backend_postgres_roles(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            control = document["spec"]["control"]
+            control["bot"]["postgres"]["owner_user"] = control["postgres"]["owner_user"]
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("BOT_DB_ROLE_SHARED", codes)
+
+    def test_bot_identity_must_be_authorised_by_the_backend(self) -> None:
+        """Личность, которой бэкенд не доверяет, даёт бота, который стартует.
+
+        Он поднимется, дозвонится и получит отказ на каждом вызове — то есть
+        сломается в трафике, а не в выкатке.
+        """
+
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["control"]["bot"]["settings"]["client_identity"] = (
+                "spiffe://spiritvpn/develop/service/stranger"
+            )
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("BOT_IDENTITY_UNAUTHORISED", codes)
+
+    def test_bot_free_plan_must_name_a_registered_fleet(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["control"]["bot"]["settings"]["friends_plan_fleet"] = "no-such-fleet"
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("BOT_FLEET_UNKNOWN", codes)
+
+    def test_bot_release_must_be_pinned_by_digest(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["control"]["bot"]["release"]["image"]["digest"] = "latest"
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("SCHEMA", codes)
+
     def test_traffic_nodes_require_immutable_component_digests(self) -> None:
         def mutate(document: dict[str, object]) -> None:
             document["components"]["xray"]["digest"] = None

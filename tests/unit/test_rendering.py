@@ -51,6 +51,47 @@ class RenderingTests(unittest.TestCase):
             all(reference.startswith("secret://") for reference in plan["secret_refs"].values())
         )
 
+    def test_control_plan_projects_the_bot_beside_the_backend(self) -> None:
+        plan = json.loads(render_files(self.state)["control-plan.json"])
+        bot = plan["bot"]
+        self.assertEqual(bot["source_git_sha"], "b" * 40)
+        self.assertIn("@sha256:", bot["image"])
+        self.assertIn("@sha256:", bot["ingress"]["tunnel_image"])
+        # Своя база и свои роли внутри общего инстанса.
+        self.assertNotEqual(bot["postgres"]["database"], plan["postgres"]["database"])
+        self.assertNotEqual(bot["postgres"]["owner_user"], plan["postgres"]["owner_user"])
+        # Номер флота берётся из реестра, а не из второй копии в настройках.
+        self.assertEqual(bot["settings"]["friends_plan_fleet_id"], 1)
+        # Оба публичных URL выводятся из одного объявленного имени.
+        self.assertEqual(bot["settings"]["subscription_base_url"], "https://bot.develop.example.invalid")
+        self.assertEqual(
+            bot["settings"]["mini_app_url"], bot["settings"]["subscription_base_url"]
+        )
+        # Бэкенд адресуется тем именем, которое несёт его серверный
+        # сертификат, — иначе TLS не сойдётся.
+        self.assertEqual(bot["network"]["backend_target"], plan["network"]["backend_endpoint"])
+
+    def test_control_plan_leaves_the_bot_null_when_none_is_declared(self) -> None:
+        """Отсутствие бота — это null, а не пустая заглушка.
+
+        Роль включает свои задачи по `control_plan.bot`; заглушка вместо null
+        включила бы их в среде, которая бота не разворачивает, и выкатка
+        бэкенда споткнулась бы о ненастроенного соседа.
+        """
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(VALID_DESIRED, desired_root)
+            target = desired_root / "environments" / "develop" / "environment.yml"
+            document = yaml.safe_load(target.read_text(encoding="utf-8"))
+            del document["spec"]["control"]["bot"]
+            target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+        plan = json.loads(render_files(state)["control-plan.json"])
+        self.assertIsNone(plan["bot"])
+        # Бэкенд при этом проецируется полностью: бот необязателен, а не
+        # обязателен-но-пустой.
+        self.assertIn("@sha256:", plan["backend"]["image"])
+
     def test_dns_plan_publishes_only_serving_entries(self) -> None:
         plan = json.loads(render_files(self.state)["dns-plan.json"])
         self.assertEqual(plan["zone"], "develop.example.invalid")

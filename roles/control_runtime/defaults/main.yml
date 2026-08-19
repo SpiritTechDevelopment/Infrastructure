@@ -5,6 +5,11 @@ control_postgres_uid: "999"
 control_postgres_gid: "999"
 control_backend_uid: "10001"
 control_backend_gid: "10001"
+# The bot image creates its own account at 10001 with a matching group, unlike
+# the backend image. Named here for the same reason as the backend's: the
+# secrets directory is 0750 and must be traversable by exactly this gid.
+control_bot_uid: "10001"
+control_bot_gid: "10001"
 control_external_backup_command_argv: []
 control_compose_pull_policy: missing
 # Потолок на логи одного контейнера: max-size × max-file.

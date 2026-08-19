@@ -21,6 +21,7 @@ def validate_semantics(state: DesiredState) -> list[ValidationIssue]:
     environment = state.environment
     env = environment.object_id
     _validate_environment(environment, issues)
+    _validate_bot(state, issues)
     _validate_common(state, issues)
     _validate_identifiers(state, issues)
     _validate_fleet_ids(state, issues)
@@ -197,6 +198,87 @@ def _validate_environment(environment: Environment, issues: list[ValidationIssue
                     "control client identities must be trimmed and must not contain commas",
                 )
             )
+
+
+def _validate_bot(state: DesiredState, issues: list[ValidationIssue]) -> None:
+    """The bot is a tenant of the control host, and this is the rent.
+
+    It shares one PostgreSQL instance with the backend and reaches it as an
+    ordinary mTLS client. Both of those are places where a plausible-looking
+    desired state produces silent damage rather than a failure: a repeated
+    database name lets bot migrations run against backend tables, and an
+    identity the backend does not authorise leaves a bot that starts, connects
+    and is refused on every call.
+    """
+    environment = state.environment
+    control = environment.control
+    if control is None or control.bot is None:
+        return
+    env = environment.object_id
+    bot = control.bot
+    source = environment.source
+
+    if bot.postgres_database == control.postgres_database:
+        issues.append(
+            ValidationIssue.at(
+                source,
+                "BOT_DB_SHARED",
+                "bot database must not be the backend database",
+            )
+        )
+    roles = (bot.postgres_owner_user, bot.postgres_runtime_user)
+    if bot.postgres_owner_user == bot.postgres_runtime_user:
+        issues.append(
+            ValidationIssue.at(
+                source,
+                "BOT_DB_ROLES",
+                "bot PostgreSQL owner and runtime users must be distinct",
+            )
+        )
+    if set(roles) & {control.postgres_owner_user, control.postgres_runtime_user}:
+        issues.append(
+            ValidationIssue.at(
+                source,
+                "BOT_DB_ROLE_SHARED",
+                "bot PostgreSQL roles must not reuse the backend roles",
+            )
+        )
+    for reference in bot.secret_refs.values():
+        if not reference.startswith(f"secret://kv/{env}/control/"):
+            issues.append(
+                ValidationIssue.at(
+                    source,
+                    "BOT_SECRET_ENV",
+                    f"bot secret reference must belong to environment {env}",
+                )
+            )
+    if bot.friends_plan_fleet not in state.fleet_ids:
+        issues.append(
+            ValidationIssue.at(
+                source,
+                "BOT_FLEET_UNKNOWN",
+                f"bot friends_plan_fleet {bot.friends_plan_fleet!r} has no vpn_fleet_id",
+            )
+        )
+    # Writer and reader both: the bot issues access and then reads back the
+    # VLESS URI it hands the customer. Authorised for one only is a bot that
+    # half-works, which is worse than one that does not start.
+    if bot.client_identity not in control.customer_access_writers:
+        issues.append(
+            ValidationIssue.at(
+                source,
+                "BOT_IDENTITY_UNAUTHORISED",
+                "bot client identity is not a customer_access_writer",
+            )
+        )
+    if bot.client_identity not in control.customer_access_readers:
+        issues.append(
+            ValidationIssue.at(
+                source,
+                "BOT_IDENTITY_UNAUTHORISED",
+                "bot client identity is not a customer_access_reader",
+            )
+        )
 
 
 def _validate_identifiers(state: DesiredState, issues: list[ValidationIssue]) -> None:

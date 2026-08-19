@@ -1,0 +1,231 @@
+---
+# Everything the bot needs on disk before anything is started. Included rather
+# than guarded task-by-task: `loop` is templated before `when` is evaluated, so
+# a `when: control_plan.bot` on a task looping over `control_plan.bot.secret_refs`
+# would still fail on an environment that declares no bot.
+
+- name: Validate the generated bot boundary
+  ansible.builtin.assert:
+    that:
+      - control_plan.bot.source_git_sha is match('^[0-9a-f]{40}$')
+      - control_plan.bot.image is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - >-
+        control_plan.bot.ingress.tunnel_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      # One instance, two tenants. A repeated name here would point the bot's
+      # migrations at the backend's schema.
+      - control_plan.bot.postgres.database != control_plan.postgres.database
+      - control_plan.bot.postgres.owner_user != control_plan.bot.postgres.runtime_user
+      - control_plan.bot.postgres.owner_user != control_plan.postgres.owner_user
+      - control_plan.bot.postgres.runtime_user != control_plan.postgres.runtime_user
+      - control_plan.bot.settings.friends_plan_fleet_id | int > 0
+      - control_plan.bot.ingress.public_origin.startswith('https://')
+    fail_msg: "The generated bot plan is incomplete, unpinned, or collides with the backend."
+
+- name: Require every bot secret reference to be resolved
+  ansible.builtin.assert:
+    that:
+      - item.value in control_secret_values
+      - control_secret_values[item.value] | string | length > 0
+    fail_msg: "A required bot secret was not resolved: {{ item.value }}"
+  loop: "{{ control_plan.bot.secret_refs | dict2items }}"
+  no_log: true
+
+- name: Refuse multiline values in bot scalar secrets
+  ansible.builtin.assert:
+    that:
+      - "'\n' not in control_secret_values[item]"
+      - "'\r' not in control_secret_values[item]"
+    fail_msg: "A scalar bot secret contains a line break."
+  loop:
+    - "{{ control_plan.bot.secret_refs.telegram_bot_token_ref }}"
+    - "{{ control_plan.bot.secret_refs.postgres_owner_password_ref }}"
+    - "{{ control_plan.bot.secret_refs.postgres_runtime_password_ref }}"
+    - "{{ control_plan.bot.secret_refs.migration_database_url_ref }}"
+    - "{{ control_plan.bot.secret_refs.runtime_database_url_ref }}"
+    - "{{ control_plan.bot.secret_refs.subscription_signing_key_ref }}"
+    - "{{ control_plan.bot.secret_refs.friends_shared_code_ref }}"
+    - "{{ control_plan.bot.secret_refs.tunnel_token_ref }}"
+  no_log: true
+
+- name: Validate bot database URLs and the Telegram token shape
+  ansible.builtin.assert:
+    that:
+      # The bot drives both alembic and its runtime through SQLAlchemy's async
+      # engine, so the driver is part of the URL and not an implementation
+      # detail: a bare postgresql:// URL makes the process fail at startup.
+      - >-
+        control_secret_values[control_plan.bot.secret_refs.migration_database_url_ref]
+        is match('^postgresql\+asyncpg://[^ ]+$')
+      - >-
+        control_secret_values[control_plan.bot.secret_refs.runtime_database_url_ref]
+        is match('^postgresql\+asyncpg://[^ ]+$')
+      - >-
+        control_secret_values[control_plan.bot.secret_refs.telegram_bot_token_ref]
+        is match('^[0-9]{5,}:[A-Za-z0-9_-]{30,}$')
+    fail_msg: "A bot database URL or the Telegram token has an invalid format."
+  no_log: true
+
+- name: Create protected bot runtime directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ control_plan.bot.paths.root }}"
+      owner: root
+      group: root
+      mode: "0700"
+    - path: "{{ control_plan.bot.paths.secrets }}"
+      owner: root
+      group: "{{ control_bot_gid }}"
+      mode: "0750"
+
+- name: Install protected bot secret files
+  ansible.builtin.copy:
+    content: "{{ control_secret_values[item.reference] }}"
+    dest: "{{ control_plan.bot.paths.secrets }}/{{ item.destination }}"
+    owner: "{{ control_bot_uid }}"
+    group: "{{ control_bot_gid }}"
+    mode: "0400"
+  loop:
+    - destination: client.crt
+      reference: "{{ control_plan.bot.secret_refs.grpc_client_certificate_ref }}"
+    - destination: client.key
+      reference: "{{ control_plan.bot.secret_refs.grpc_client_private_key_ref }}"
+    - destination: server-ca.crt
+      reference: "{{ control_plan.bot.secret_refs.grpc_server_ca_ref }}"
+  register: _control_bot_secret_files
+  no_log: true
+  diff: false
+
+- name: Validate bot certificate lifetimes
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ control_plan.bot.paths.secrets }}/{{ item }}"
+      - -noout
+      - -checkend
+      - "{{ control_tls_minimum_validity_seconds | string }}"
+  loop:
+    - client.crt
+    - server-ca.crt
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Read the bot client certificate identity
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ control_plan.bot.paths.secrets }}/client.crt"
+      - -noout
+      - -text
+  register: _control_bot_client_certificate
+  changed_when: false
+  when: not ansible_check_mode
+
+# The backend authorises by SPIFFE URI. A certificate carrying a different one
+# yields a bot that connects and is refused on every call — a failure that only
+# shows up in traffic, not in the deployment.
+- name: Require the declared bot identity in its client certificate
+  ansible.builtin.assert:
+    that:
+      - >-
+        ('URI:' ~ control_plan.bot.settings.client_identity)
+        in _control_bot_client_certificate.stdout
+    fail_msg: "The bot client certificate does not carry its declared identity."
+  when: not ansible_check_mode
+
+- name: Read the public key from the bot client certificate
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ control_plan.bot.paths.secrets }}/client.crt"
+      - -pubkey
+      - -noout
+  register: _control_bot_certificate_public_key
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Derive the public key from the protected bot private key
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - pkey
+      - -in
+      - "{{ control_plan.bot.paths.secrets }}/client.key"
+      - -pubout
+  register: _control_bot_private_key_public_key
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Require the bot certificate and private key to match
+  ansible.builtin.assert:
+    that:
+      - >-
+        (_control_bot_certificate_public_key.stdout | trim)
+        == (_control_bot_private_key_public_key.stdout | trim)
+    fail_msg: "The bot client certificate and private key are not a pair."
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Render protected bot environment
+  ansible.builtin.copy:
+    content: |
+      BOT_TELEGRAM_BOT_TOKEN={{ control_secret_values[control_plan.bot.secret_refs.telegram_bot_token_ref] }}
+      BOT_DATABASE_URL={{ control_secret_values[control_plan.bot.secret_refs.runtime_database_url_ref] }}
+      BOT_SPIRITVPND_GRPC_TARGET={{ control_plan.bot.network.backend_target }}
+      BOT_SPIRITVPND_TLS_CLIENT_CERT_FILE=/secrets/client.crt
+      BOT_SPIRITVPND_TLS_CLIENT_KEY_FILE=/secrets/client.key
+      BOT_SPIRITVPND_TLS_CA_FILE=/secrets/server-ca.crt
+      BOT_SUBSCRIPTION_BASE_URL={{ control_plan.bot.settings.subscription_base_url }}
+      BOT_MINI_APP_URL={{ control_plan.bot.settings.mini_app_url }}
+      BOT_MINI_APP_HTTP_PORT={{ control_plan.bot.network.http_port }}
+      BOT_SUBSCRIPTION_SIGNING_KEY={{ control_secret_values[control_plan.bot.secret_refs.subscription_signing_key_ref] }}
+      BOT_FRIENDS_PLAN_FLEET_ID={{ control_plan.bot.settings.friends_plan_fleet_id }}
+      {% if 'friends_plan_quota_bytes' in control_plan.bot.settings %}
+      BOT_FRIENDS_PLAN_QUOTA_BYTES={{ control_plan.bot.settings.friends_plan_quota_bytes }}
+      {% endif %}
+      {% if 'friends_plan_duration_days' in control_plan.bot.settings %}
+      BOT_FRIENDS_PLAN_DURATION_DAYS={{ control_plan.bot.settings.friends_plan_duration_days }}
+      {% endif %}
+      BOT_FRIENDS_SHARED_CODE={{ control_secret_values[control_plan.bot.secret_refs.friends_shared_code_ref] }}
+    dest: "{{ control_plan.bot.paths.root }}/bot.env"
+    owner: root
+    group: root
+    mode: "0600"
+  register: _control_bot_environment
+  no_log: true
+  diff: false
+
+- name: Render protected bot migration environment
+  ansible.builtin.copy:
+    content: |
+      BOT_DATABASE_URL={{ control_secret_values[control_plan.bot.secret_refs.migration_database_url_ref] }}
+    dest: "{{ control_plan.bot.paths.root }}/migration.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Render the protected tunnel environment
+  ansible.builtin.copy:
+    content: |
+      TUNNEL_TOKEN={{ control_secret_values[control_plan.bot.secret_refs.tunnel_token_ref] }}
+    dest: "{{ control_plan.bot.paths.root }}/tunnel.env"
+    owner: root
+    group: root
+    mode: "0600"
+  register: _control_bot_tunnel_environment
+  no_log: true
+  diff: false

@@ -45,3 +45,33 @@ spec:
     authorization:
       customer_access_writers: [spiffe://spiritvpn/develop/service/product]
       customer_access_readers: [spiffe://spiritvpn/develop/service/product]
+    bot:
+      release:
+        source_git_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        image:
+          repository: example.invalid/spiritvpn-bot
+          digest: sha256:1000000000000000000000000000000000000000000000000000000000000005
+      postgres:
+        database: spiritvpn_bot
+        owner_user: spiritvpn_bot_owner
+        runtime_user: spiritvpn_bot_runtime
+      secrets:
+        telegram_bot_token_ref: secret://kv/develop/control/bot#telegram_bot_token
+        postgres_owner_password_ref: secret://kv/develop/control/bot-postgres#owner_password
+        postgres_runtime_password_ref: secret://kv/develop/control/bot-postgres#runtime_password
+        migration_database_url_ref: secret://kv/develop/control/bot-postgres#migration_database_url
+        runtime_database_url_ref: secret://kv/develop/control/bot-postgres#runtime_database_url
+        subscription_signing_key_ref: secret://kv/develop/control/bot#subscription_signing_key
+        friends_shared_code_ref: secret://kv/develop/control/bot#friends_shared_code
+        grpc_client_certificate_ref: secret://kv/develop/control/bot-tls#client_certificate
+        grpc_client_private_key_ref: secret://kv/develop/control/bot-tls#client_private_key
+        grpc_server_ca_ref: secret://kv/develop/control/bot-tls#server_ca
+        tunnel_token_ref: secret://kv/develop/control/bot-ingress#tunnel_token
+      settings:
+        client_identity: spiffe://spiritvpn/develop/service/product
+        friends_plan_fleet: develop-fleet-eu
+      ingress:
+        image:
+          repository: example.invalid/cloudflared
+          digest: sha256:1000000000000000000000000000000000000000000000000000000000000006
+        hostname: bot.develop.example.invalid

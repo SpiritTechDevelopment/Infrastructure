@@ -70,6 +70,8 @@ def desired_references(
         )
     if scope in {"all", "control"} and state.environment.control is not None:
         references.update(state.environment.control.secret_refs.values())
+        if state.environment.control.bot is not None:
+            references.update(state.environment.control.bot.secret_refs.values())
     return sorted(references)
 
 

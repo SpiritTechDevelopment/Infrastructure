@@ -727,6 +727,35 @@ make fleet-pki-issue ENVIRONMENT=develop PROFILE=backend-client CA_STATE=~/.conf
 на самой ноде (`roles/pki_agent`), наружу уходит только CSR, который
 подписывается `make fleet-pki-sign INSTANCE=... CSR=...`.
 
+#### Телеграм-бот рядом с бэкендом
+
+`spec.control.bot` — необязательное поддерево. Среда, где его нет, бота не
+разворачивает; среда, где он есть, получает его на том же management-хосте, что
+и бэкенд, тем же `control-deploy`.
+
+Бот делит с бэкендом инстанс PostgreSQL, но не базу и не роли: `control_runtime`
+заводит ему отдельную базу и две отдельные учётные записи внутри того же
+контейнера. Для бэкенда бот — обычный внешний клиент: ходит по mTLS личностью
+`customer-service`, которая обязана быть перечислена и в
+`customer_access_writers`, и в `customer_access_readers`.
+
+```bash
+make fleet-pki-issue ENVIRONMENT=develop PROFILE=customer-service CA_STATE=~/.config/spiritvpn/ca
+```
+
+Наружу мини-апп публикуется исходящим туннелем Cloudflare: `cloudflared` в
+compose дозванивается до Cloudflare сам, поэтому на management-хосте не
+открывается ни одного входящего публичного порта. Токен туннеля кладётся в
+`tunnel_token_ref`, публичное имя объявляется в `ingress.hostname`, а
+`subscription_base_url` и `mini_app_url` компилятор выводит из него — вторая
+копия имени разошлась бы с тем, что туннель на самом деле публикует.
+
+Список секретов бота выводится тем же `--list-references --scope control`, что и
+для бэкенда. Две DSN бота обязаны нести драйвер (`postgresql+asyncpg://`): бот
+работает через асинхронный движок SQLAlchemy и на голом `postgresql://` не
+стартует. Миграции гоняются `alembic upgrade head` из того же образа, что и сам
+бот, поэтому схема и код приезжают одной парой.
+
 Создайте каталоги объектов:
 
 ```bash
