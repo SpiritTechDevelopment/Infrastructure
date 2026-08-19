@@ -14,6 +14,10 @@ spec:
     # на уже существующем релизе и первый записать отказывается. Значения взяты
     # из dispatch'а run 32020264625, поэтому backend и migration заведомо
     # собраны из одного source_git_sha. Дальше это поле правит автоматика.
+    #
+    # С 2026-08-19 изменение этого поддерева само вызывает control-deploy:
+    # desired-state-deploy сравнивает spec.control до и после пуша в main.
+    # Правка соседних полей ведёт к fleet-deploy, prod не выкатывается вовсе.
     backend_release:
       source_git_sha: eb3e875d847f551ddecf86c0f5e3ba81a607e9a0
       backend_image:
