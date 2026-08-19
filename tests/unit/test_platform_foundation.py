@@ -640,6 +640,18 @@ all:
         self.assertNotIn("update-deployment-ref", text)
         self.assertNotIn("eval", text)
 
+    def test_executor_trusts_only_compiled_host_keys(self) -> None:
+        path = REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-fleet-deploy.j2"
+        text = path.read_text(encoding="utf-8")
+        # known_hosts перестал быть защищённым входом и стал артефактом сборки:
+        # он компилируется из desired state тем же прогоном, который его читает.
+        self.assertIn('for required in bootstrap.yml readiness.yml; do', text)
+        self.assertNotIn("$config_dir/known_hosts", text)
+        self.assertIn('build/$environment/known_hosts', text)
+        self.assertIn("StrictHostKeyChecking=yes", text)
+        # Обнаружение ключа на проводе не появляется ни здесь, ни где-либо ещё.
+        self.assertNotIn("ssh-keyscan", text)
+
     def run_resolver_against_fake_vault(
         self, workspace: Path, *, fail_reads: bool
     ) -> subprocess.CompletedProcess[str]:

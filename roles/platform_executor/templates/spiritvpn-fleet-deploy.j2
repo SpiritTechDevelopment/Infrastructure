@@ -113,7 +113,7 @@ test "$resume" = true && arguments+=(--resume)
 test "$allow_destructive" = true && arguments+=(--allow-destructive)
 
 if test "$mode" = apply; then
-  for required in bootstrap.yml readiness.yml known_hosts; do
+  for required in bootstrap.yml readiness.yml; do
     test -s "$config_dir/$required" || { printf '%s\n' "missing protected executor input: $config_dir/$required" >&2; exit 66; }
   done
   # Bootstrapping a clean node signs its agent CSR here: the node keeps its
@@ -138,7 +138,16 @@ if test "$mode" = apply; then
   chmod 0600 "$secrets_file" "$ssh_key_file"
   export ANSIBLE_HOST_KEY_CHECKING=True
   export ANSIBLE_PRIVATE_KEY_FILE="$ssh_key_file"
-  export ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$config_dir/known_hosts -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
+  # known_hosts компилируется из desired state вместе с инвентарями и лежит в
+  # build-каталоге. Раньше это был рукописный файл рядом с bootstrap.yml, и он
+  # оставался последним входом пути флота, который надо было править руками на
+  # каждую новую ноду; забытая правка обнаруживалась только падением bootstrap.
+  #
+  # Файл появляется до первого вызова Ansible: координатор рендерит артефакты
+  # раньше, чем начинает фазы. Если его нет, ssh со StrictHostKeyChecking=yes
+  # откажет — как и должен.
+  known_hosts_file="{{ platform_executor_dir }}/build/$environment/known_hosts"
+  export ANSIBLE_SSH_ARGS="-o UserKnownHostsFile=$known_hosts_file -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
   arguments+=(
     --apply
     --bootstrap-vars "$config_dir/bootstrap.yml"

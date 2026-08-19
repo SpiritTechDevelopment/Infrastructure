@@ -256,8 +256,11 @@ Bootstrap может намеренно остановиться дважды:
 Bootstrap inventory явно использует `root`. Named `deploy` user создаётся как
 заготовка для steady state, но окончательная миграция подключения coordinator на
 этого пользователя ещё не завершена. На management executor лежит отдельный
-Ansible private key из Vault, а доверенные host keys задаются вручную в
-`known_hosts`. `StrictHostKeyChecking=yes` обязателен.
+Ansible private key из Vault, а доверенные host keys объявлены в desired state
+полем `ssh_host_key` инстанса; `known_hosts` компилируется в build-каталог
+вместе с инвентарями. `StrictHostKeyChecking=yes` обязателен, и `ssh-keyscan`
+не используется нигде: он спрашивает у проверяемого хоста доказательство его же
+подлинности.
 
 Ansible check mode полезен, но не является доказательством успешной раскатки:
 некоторые команды и реальные сетевые эффекты невозможно полноценно проверить
@@ -412,6 +415,46 @@ deployment-секретов.
 - проверки JSON/YAML/templates.
 
 Он не имеет секретов и доступа к серверам.
+
+### Реактивная выкатка: `desired-state-deploy`
+
+Пуш в `main` сам выкатывает `develop`. Никакого отдельного действия оператора
+не требуется, и неважно, кто положил коммит: автоматика релиза, ревьюер или
+оператор руками.
+
+`detect` решает, какие контуры затронуты, по путям изменённых файлов:
+
+| Что изменилось | Что выкатывается |
+|---|---|
+| `desired/environments/<env>/environment.yml`, поддерево `spec.control` | control |
+| тот же файл, всё остальное | fleet |
+| `desired/environments/<env>/platform/**` | platform |
+| `desired/environments/<env>/**` — `nodes/`, `fleets/`, `instances/` | fleet |
+| **всё прочее** — `roles/`, `playbooks/`, `fleetctl/`, `contracts/`, `desired/common/`, `scripts/` | platform + control + fleet |
+
+Последняя строка — не оговорка, а правило. Списка «путь → контур» здесь нет
+намеренно: он устаревает молча, и ровно так `nodes/` и `fleets/` полгода не
+вызывали ничего. Неопознанный путь считается способным задеть что угодно и
+выкатывает все три контура. Цена ошибки — холостой прогон с `changed=0`.
+
+Триггер тоже задан от обратного: `paths-ignore` перечисляет только то, что
+заведомо не описывает работающую систему (`**.md`, `docs/`, `tests/`,
+`examples/`, `.github/`). Новый каталог по умолчанию выкатывается, а не
+игнорируется.
+
+Порядок — platform → control → fleet, по зависимостям: хаб несёт Vault и
+исполнителя, из которых работают две другие выкатки. Пропущенное звено
+пропускает дальше, упавшее — останавливает цепь.
+
+`prod` через этот путь не проходит **никогда**: он отсекается в `detect`, потому
+что гейта одобрения не существует (GitHub Environments недоступны на плане
+free). Prod выкатывается только ручным `workflow_dispatch`.
+
+Для **новой** ноды достаточно объявления в `nodes/`, `fleets/`, `instances/`:
+выкатка запустится сама, нода забутстрапится сама. Host key нового VPS
+объявляется там же, полем `ssh_host_key` инстанса, и `known_hosts` компилируется
+из desired state вместе с инвентарями — рукописных файлов в пути флота не
+осталось.
 
 ### Ручной `fleet-deploy`
 
@@ -606,8 +649,11 @@ chains после получения CSR. На management VPS использую
 ```text
 /etc/spiritvpn/deploy/develop/bootstrap.yml
 /etc/spiritvpn/deploy/develop/readiness.yml
-/etc/spiritvpn/deploy/develop/known_hosts
 ```
+
+`known_hosts` в этом списке больше нет: он компилируется из desired state в
+build-каталог исполнителя. Host key ноды объявляется полем `ssh_host_key` её
+инстанса.
 
 AppRole credentials создаёт `configure develop`. Ansible private key лежит в
 Vault как `secret://kv/develop/executor/ansible#private_key`.

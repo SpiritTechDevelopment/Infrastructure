@@ -6,6 +6,7 @@ spec:
   logical_node: develop-entry-nl
   target_state: serving
   public_address: 192.0.2.10
+  ssh_host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO/bJ1VpSI+1ILrrizOi8GYzc/gHkzYK7aSK870neakM
   bandwidth_profile: vps-1g
   provider:
     name: manual

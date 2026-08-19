@@ -7,6 +7,8 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from fleetctl.compiler.known_hosts import HOST_KEY_TYPES, host_pattern
+
 from .output import MARKER
 
 
@@ -22,11 +24,16 @@ def validate_ansible_artifacts(build_directory: Path, environment: str) -> int:
     if not (build_directory / MARKER).is_file():
         raise CompiledArtifactsError(f"not a fleetctl-managed build directory: {build_directory}")
     inventory = _read_json(build_directory / "ansible-inventory.json")
-    plan_files = _validate_configure_inventory(inventory, build_directory, environment)
+    plan_files, configure_endpoints = _validate_configure_inventory(
+        inventory, build_directory, environment
+    )
     bootstrap = _read_json(build_directory / "bootstrap-inventory.json")
-    bootstrap_plan_files = _validate_bootstrap_inventory(bootstrap, build_directory, environment)
+    bootstrap_plan_files, bootstrap_endpoints = _validate_bootstrap_inventory(
+        bootstrap, build_directory, environment
+    )
     if bootstrap_plan_files != plan_files:
         raise CompiledArtifactsError("bootstrap and configure inventories do not reference the same node plans")
+    _validate_known_hosts(build_directory, configure_endpoints | bootstrap_endpoints)
 
     actual_plan_files = {
         path.resolve()
@@ -53,11 +60,47 @@ def validate_ansible_artifacts(build_directory: Path, environment: str) -> int:
     return len(plan_files)
 
 
+def _validate_known_hosts(build_directory: Path, expected: set[str]) -> None:
+    """Require one declared host key for every address the run will dial.
+
+    Both inventories are already checked against the node plans above; this is
+    the last of the three saying the same thing about the same hosts. An address
+    reached without an entry here would fail at the wire under
+    StrictHostKeyChecking, deep inside a play and after other nodes have already
+    been touched — so it is refused before anything is dialled. An entry with no
+    address left to reach is refused too: a stale key is a machine that is still
+    trusted for no stated reason.
+    """
+
+    path = build_directory / "known_hosts"
+    if path.is_symlink() or not path.is_file():
+        raise CompiledArtifactsError(f"compiled known_hosts is missing or unsafe: {path}")
+    rendered: set[str] = set()
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        fields = line.split(" ")
+        if len(fields) != 3 or fields[1] not in HOST_KEY_TYPES:
+            raise CompiledArtifactsError(f"compiled known_hosts line {number} is not a host entry")
+        for pattern in fields[0].split(","):
+            if pattern in rendered:
+                raise CompiledArtifactsError(
+                    f"compiled known_hosts declares {pattern} more than once"
+                )
+            rendered.add(pattern)
+    if rendered != expected:
+        missing = sorted(expected - rendered)
+        extra = sorted(rendered - expected)
+        raise CompiledArtifactsError(
+            f"compiled known_hosts does not match the inventories; missing={missing}, unexpected={extra}"
+        )
+
+
 def _validate_configure_inventory(
     inventory: dict[str, Any],
     build_directory: Path,
     environment: str,
-) -> set[Path]:
+) -> tuple[set[Path], set[str]]:
     all_group = _mapping(inventory, "all", "inventory")
     children = _mapping(all_group, "children", "inventory.all")
     fleet = _mapping(children, "spiritvpn_fleet", "inventory.all.children")
@@ -65,6 +108,7 @@ def _validate_configure_inventory(
 
     seen_hosts: set[str] = set()
     plan_files: set[Path] = set()
+    endpoints: set[str] = set()
     for role in ("entry", "exit"):
         group = _mapping(role_groups, role, "inventory spiritvpn_fleet children")
         hosts = _mapping(group, "hosts", f"inventory group {role}")
@@ -99,20 +143,22 @@ def _validate_configure_inventory(
             if hostvars["ansible_port"] != _mapping(networking, "ssh", f"node plan {host} networking").get("port"):
                 raise CompiledArtifactsError(f"inventory ansible_port disagrees with node plan for {host}")
             plan_files.add(plan_path.resolve())
+            endpoints.add(host_pattern(hostvars["ansible_host"], hostvars["ansible_port"]))
 
-    return plan_files
+    return plan_files, endpoints
 
 
 def _validate_bootstrap_inventory(
     inventory: dict[str, Any],
     build_directory: Path,
     environment: str,
-) -> set[Path]:
+) -> tuple[set[Path], set[str]]:
     all_group = _mapping(inventory, "all", "bootstrap inventory")
     children = _mapping(all_group, "children", "bootstrap inventory.all")
     bootstrap = _mapping(children, "spiritvpn_bootstrap", "bootstrap inventory children")
     hosts = _mapping(bootstrap, "hosts", "bootstrap inventory group")
     plan_files: set[Path] = set()
+    endpoints: set[str] = set()
     for host, raw_hostvars in sorted(hosts.items()):
         hostvars = _expect_mapping(raw_hostvars, f"bootstrap inventory host {host}")
         expected_keys = {
@@ -143,7 +189,10 @@ def _validate_bootstrap_inventory(
         if hostvars["ansible_host"] != instance.get("public_address"):
             raise CompiledArtifactsError(f"bootstrap ansible_host disagrees with public address for {host}")
         plan_files.add(plan_path.resolve())
-    return plan_files
+        # The bootstrap inventory declares no port on purpose: a clean VPS
+        # answers on 22 and nowhere else.
+        endpoints.add(host_pattern(hostvars["ansible_host"], 22))
+    return plan_files, endpoints
 
 
 def _validate_node_plan(plan: dict[str, Any], *, environment: str, host: str, role: str) -> None:

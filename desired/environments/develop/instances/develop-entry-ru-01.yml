@@ -6,6 +6,10 @@ spec:
   logical_node: develop-entry-ru
   target_state: serving
   public_address: 5.101.67.252
+  # Взят из known_hosts исполнителя на хабе, где совпадал по обоим адресам
+  # машины. Обнаружение на проводе не используется: ssh-keyscan спрашивает
+  # у проверяемого хоста доказательство его же подлинности.
+  ssh_host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIONqHp8FDK9KZplnxmYwEP9ml2acc5yvypJ8fy1LEtEZ
   bandwidth_profile: vps-1g
   provider:
     name: manual

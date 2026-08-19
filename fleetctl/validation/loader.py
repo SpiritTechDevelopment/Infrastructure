@@ -285,6 +285,7 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 logical_node=spec["logical_node"],
                 target_state=spec["target_state"],
                 public_address=spec["public_address"],
+                ssh_host_key=spec["ssh_host_key"],
                 bandwidth_profile=spec["bandwidth_profile"],
                 provider_name=spec["provider"]["name"],
                 provider_resource_id=spec["provider"]["resource_id"],

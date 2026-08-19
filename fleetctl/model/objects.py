@@ -192,6 +192,10 @@ class Instance:
     logical_node: str
     target_state: str
     public_address: str
+    # Public host key of the machine. Declared rather than discovered: the
+    # alternative is ssh-keyscan, which asks the host being authenticated to
+    # supply its own proof of identity.
+    ssh_host_key: str
     bandwidth_profile: str
     provider_name: str
     provider_resource_id: str

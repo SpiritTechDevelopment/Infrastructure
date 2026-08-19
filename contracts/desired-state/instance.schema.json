@@ -17,7 +17,14 @@
     "spec": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["logical_node", "target_state", "public_address", "bandwidth_profile", "provider"],
+      "required": [
+        "logical_node",
+        "target_state",
+        "public_address",
+        "ssh_host_key",
+        "bandwidth_profile",
+        "provider"
+      ],
       "properties": {
         "logical_node": {"type": "string", "minLength": 1, "maxLength": 63, "pattern": "^[a-z0-9-]+$"},
         "target_state": {"enum": ["provisioning", "candidate", "serving", "draining", "retired"]},
@@ -26,6 +33,13 @@
             {"type": "string", "format": "ipv4"},
             {"type": "string", "format": "ipv6"}
           ]
+        },
+        "ssh_host_key": {
+          "description": "Public SSH host key of this machine, without host patterns. The compiler renders known_hosts from it; the address a host answers on is declared here, not discovered on the wire. RSA keys are the longest form allowed, at roughly 550 characters for 3072 bits.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+=*$"
         },
         "bandwidth_profile": {
           "type": "string",

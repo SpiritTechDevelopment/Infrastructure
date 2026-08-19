@@ -33,6 +33,51 @@ class CompiledAnsibleArtifactTests(unittest.TestCase):
             output = self.render(Path(temporary))
             self.assertEqual(validate_ansible_artifacts(output, "develop"), 2)
 
+    # known_hosts решает, к какой машине выкатка вообще согласится подключиться.
+    # Расхождение с инвентарями обязано остановить прогон здесь, а не на проводе
+    # посреди play, когда часть флота уже тронута.
+    def test_missing_known_hosts_is_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = self.render(Path(temporary))
+            (output / "known_hosts").unlink()
+            with self.assertRaises(CompiledArtifactsError):
+                validate_ansible_artifacts(output, "develop")
+
+    def test_known_hosts_missing_one_endpoint_is_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = self.render(Path(temporary))
+            path = output / "known_hosts"
+            kept = [
+                line
+                for line in path.read_text(encoding="utf-8").splitlines(keepends=True)
+                if "192.0.2.20" not in line
+            ]
+            path.write_text("".join(kept), encoding="utf-8")
+            with self.assertRaisesRegex(CompiledArtifactsError, "missing="):
+                validate_ansible_artifacts(output, "develop")
+
+    def test_known_hosts_trusting_an_unreached_host_is_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = self.render(Path(temporary))
+            path = output / "known_hosts"
+            path.write_text(
+                path.read_text(encoding="utf-8")
+                + "198.51.100.7 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHwZ\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(CompiledArtifactsError, "unexpected="):
+                validate_ansible_artifacts(output, "develop")
+
+    def test_known_hosts_entry_that_is_not_a_host_line_is_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = self.render(Path(temporary))
+            path = output / "known_hosts"
+            path.write_text(
+                path.read_text(encoding="utf-8") + "192.0.2.30 not-a-key\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(CompiledArtifactsError, "not a host entry"):
+                validate_ansible_artifacts(output, "develop")
+
     def test_unsupported_node_plan_version_is_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = self.render(Path(temporary))
