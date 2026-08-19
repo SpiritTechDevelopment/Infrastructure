@@ -5,19 +5,43 @@ name: desired-state-deploy
 # Источником всегда остаётся коммит, поэтому правка digest'а вручную
 # раскатывается ровно так же, как автоматическая, и расхождения между Git и
 # работающей системой не возникает ни на одном пути.
+#
+# Фильтр отрицательный, и это главное решение здесь. Список включаемых путей
+# устаревает молча: появляется новая роль, новый скрипт, новый каталог — и
+# изменение в нём не выкатывается, о чём никто не узнает. Именно так и вышло с
+# `nodes/`, `fleets/`, `instances/`: они не попадали под `desired/environments/*/
+# environment.yml`, и добавление ноды не вызывало ничего. Со списком исключений
+# ошибка идёт в обратную сторону — лишний холостой прогон с `changed=0`.
+#
+# Здесь перечисляется только то, что заведомо не описывает работающую систему.
+# Второго такого списка нет: всё, что `detect` не опознал как принадлежащее
+# конкретной среде, считается общим изменением и выкатывает все три контура.
 on:
   push:
     branches: [main]
-    paths:
-      - desired/environments/*/environment.yml
+    paths-ignore:
+      - '**.md'
+      - docs/**
+      - tests/**
+      - examples/**
+      # Workflow GitHub читает из main напрямую; выкатывать их некуда.
+      - .github/**
 
 permissions:
   contents: read
+
+# Своя группа поверх групп вызываемых workflow. Без неё два пуша подряд дают
+# два перекрывающихся прогона, и порядок platform → control → fleet перестаёт
+# существовать: fleet первого пуша может уйти после platform второго.
+concurrency:
+  group: desired-state-deploy
+  cancel-in-progress: false
 
 jobs:
   detect:
     runs-on: ubuntu-latest
     outputs:
+      platform: ${{ steps.split.outputs.platform }}
       control: ${{ steps.split.outputs.control }}
       fleet: ${{ steps.split.outputs.fleet }}
     steps:
@@ -25,11 +49,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Релиз бэкенда и релиз агента живут в одном файле: первый в spec.control,
-      # второй в spec.common_overrides. По имени файла их не различить, поэтому
-      # сравниваются поддеревья. Всё, что не control, влияет на планы нод и
-      # ведёт к fleet-deploy; control не вызывает передеплой нод по построению
-      # компилятора.
+      # Изменение относится к конкретной среде только если среда написана в
+      # самом пути. Всё остальное — роли, playbooks, компилятор, контракты,
+      # общие куски desired state — влияет на любую среду сразу, и разбирать,
+      # на какую именно, значило бы вести таблицу «путь → контур». Такая таблица
+      # и есть источник тихого недовыката, поэтому её здесь нет: неопознанный
+      # путь выкатывает все три контура во всех средах.
       - name: Split changed environments by area
         id: split
         env:
@@ -37,34 +62,66 @@ jobs:
           AFTER: ${{ github.sha }}
         run: |
           set -euo pipefail
+          platform_list="$RUNNER_TEMP/platform"
           control_list="$RUNNER_TEMP/control"
           fleet_list="$RUNNER_TEMP/fleet"
+          : > "$platform_list"
           : > "$control_list"
           : > "$fleet_list"
+
+          # Среды читаются из дерева, а не перечисляются здесь: объявленная
+          # среда, о которой не знает этот шаг, — ровно тот же тихий недовыкат.
+          mapfile -t environments < <(
+            find desired/environments -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+          )
 
           # Первый push в ветку даёт нулевой BEFORE: сравнивать не с чем, и
           # раскатывать по такому событию нельзя.
           if [[ "$BEFORE" =~ ^0+$ ]]; then
             echo "первый push в ветку; выкатка не выводится" >&2
           else
+            global=false
             while read -r file; do
               test -n "$file" || continue
-              environment=$(sed -n 's|^desired/environments/\([^/]*\)/environment.yml$|\1|p' <<<"$file")
-              test -n "$environment" || continue
-
-              before_doc=$(git show "$BEFORE:$file" 2>/dev/null || printf '{}\n')
-              after_doc=$(git show "$AFTER:$file")
-
-              if [ "$(yq '.spec.control' <<<"$before_doc")" \
-                != "$(yq '.spec.control' <<<"$after_doc")" ]; then
-                echo "$environment" >> "$control_list"
+              environment=$(sed -n 's|^desired/environments/\([^/]*\)/.*|\1|p' <<<"$file")
+              if [ -z "$environment" ]; then
+                global=true
+                continue
               fi
-              if [ "$(yq 'del(.spec.control)' <<<"$before_doc")" \
-                != "$(yq 'del(.spec.control)' <<<"$after_doc")" ]; then
-                echo "$environment" >> "$fleet_list"
-              fi
-            done < <(git diff --name-only "$BEFORE" "$AFTER" \
-                       -- 'desired/environments/*/environment.yml')
+
+              case "$file" in
+                # Релиз бэкенда и релиз агента живут в одном файле: первый в
+                # spec.control, второй в spec.common_overrides. По имени файла
+                # их не различить, поэтому сравниваются поддеревья. Control не
+                # вызывает передеплой нод по построению компилятора.
+                */environment.yml)
+                  before_doc=$(git show "$BEFORE:$file" 2>/dev/null || printf '{}\n')
+                  after_doc=$(git show "$AFTER:$file" 2>/dev/null || printf '{}\n')
+                  if [ "$(yq '.spec.control' <<<"$before_doc")" \
+                    != "$(yq '.spec.control' <<<"$after_doc")" ]; then
+                    echo "$environment" >> "$control_list"
+                  fi
+                  if [ "$(yq 'del(.spec.control)' <<<"$before_doc")" \
+                    != "$(yq 'del(.spec.control)' <<<"$after_doc")" ]; then
+                    echo "$environment" >> "$fleet_list"
+                  fi
+                  ;;
+                */platform/*)
+                  echo "$environment" >> "$platform_list"
+                  ;;
+                # nodes/, fleets/, instances/ и всё, что появится рядом:
+                # описание флота, то есть fleet-deploy.
+                *)
+                  echo "$environment" >> "$fleet_list"
+                  ;;
+              esac
+            done < <(git diff --name-only "$BEFORE" "$AFTER")
+
+            if [ "$global" = true ]; then
+              printf '%s\n' "${environments[@]}" >> "$platform_list"
+              printf '%s\n' "${environments[@]}" >> "$control_list"
+              printf '%s\n' "${environments[@]}" >> "$fleet_list"
+            fi
           fi
 
           # prod через автоматический путь не проходит.
@@ -77,9 +134,9 @@ jobs:
           # desired/environments/prod/environment.yml выкатил бы prod в apply
           # без единого подтверждения.
           #
-          # Отсекается здесь, а не фильтром `paths` в триггере: так причина
-          # видна на месте решения и переживёт расширение путей.
-          for list in "$control_list" "$fleet_list"; do
+          # Отсекается здесь, а не фильтром путей в триггере: так причина видна
+          # на месте решения и переживёт расширение путей.
+          for list in "$platform_list" "$control_list" "$fleet_list"; do
             if grep -qx prod "$list"; then
               echo "prod изменился, но автоматический путь его не выкатывает: гейта одобрения нет" >&2
             fi
@@ -87,17 +144,41 @@ jobs:
             mv "$list.filtered" "$list"
           done
 
-          printf 'control=%s\n' "$(sort -u "$control_list" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
-          printf 'fleet=%s\n' "$(sort -u "$fleet_list" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
-          echo "control: $(sort -u "$control_list" | tr '\n' ' ')"
-          echo "fleet:   $(sort -u "$fleet_list" | tr '\n' ' ')"
+          for area in platform control fleet; do
+            list="$RUNNER_TEMP/$area"
+            printf '%s=%s\n' "$area" "$(sort -u "$list" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+            echo "$area: $(sort -u "$list" | tr '\n' ' ')"
+          done
 
   # Второго гейта здесь нет: одобрение GitHub Environment недоступно на плане
   # free, и вызываемые workflow его не объявляют. Автоматическому пути доверен
   # только develop — prod отсекается в detect выше и выкатывается dispatch'ем.
-  deploy-control:
+  #
+  # Порядок platform → control → fleet — это порядок зависимостей, а не вкуса:
+  # хаб несёт Vault и исполнителя, из которых работают две другие выкатки, а
+  # бэкенд принимает манифест, который потом описывает ноды. Каждое звено
+  # пропускается, когда его контур не затронут, поэтому у следующих стоит
+  # `!failure() && !cancelled()`, а не обычный `success()`: пропущенное звено
+  # обязано пропускать дальше, упавшее — останавливать.
+  deploy-platform:
     needs: [detect]
-    if: needs.detect.outputs.control != '[]'
+    if: needs.detect.outputs.platform != '[]'
+    strategy:
+      max-parallel: 1
+      matrix:
+        environment: ${{ fromJSON(needs.detect.outputs.platform) }}
+    uses: ./.github/workflows/platform-deploy.yml
+    with:
+      environment: ${{ matrix.environment }}
+      source_git_sha: ${{ github.sha }}
+      mode: apply
+    secrets: inherit
+
+  deploy-control:
+    needs: [detect, deploy-platform]
+    if: >-
+      !failure() && !cancelled() &&
+      needs.detect.outputs.control != '[]'
     strategy:
       max-parallel: 1
       matrix:
@@ -112,8 +193,10 @@ jobs:
   # initial остаётся false: первая раскатка среды требует осознанного решения
   # оператора и через автоматический путь проходить не должна.
   deploy-fleet:
-    needs: [detect]
-    if: needs.detect.outputs.fleet != '[]'
+    needs: [detect, deploy-platform, deploy-control]
+    if: >-
+      !failure() && !cancelled() &&
+      needs.detect.outputs.fleet != '[]'
     # Потолок прав вызванного workflow, а не выданное право: внутри
     # fleet-deploy.yml запись остаётся у одной задачи promote, а сама выкатка
     # по-прежнему идёт с contents: read. Без этой строки вызванный workflow

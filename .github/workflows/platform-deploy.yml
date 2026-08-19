@@ -19,6 +19,21 @@ on:
         type: choice
         options: [check, apply]
 
+  # Вызов из desired-state-deploy. `type: choice` в workflow_call не существует,
+  # поэтому допустимые значения проверяет сам job — иначе вызывающая сторона
+  # могла бы передать что угодно.
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      source_git_sha:
+        required: true
+        type: string
+      mode:
+        required: true
+        type: string
+
 permissions:
   contents: read
 
@@ -44,10 +59,12 @@ jobs:
         shell: bash
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_SHA: ${{ inputs.source_git_sha }}
         run: |
           set -euo pipefail
           [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
+          [[ "$REQUESTED_MODE" =~ ^(check|apply)$ ]]
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
