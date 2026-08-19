@@ -307,6 +307,25 @@
   no_log: true
   diff: false
 
+# Before the compose definition, and that ordering is load-bearing.
+#
+# It was moved after the backend once, on the reasoning that the bot is a tenant
+# and a mistyped bot secret should not hold back a backend release. The next run
+# failed on `Require backend readiness`: every `docker compose` invocation parses
+# the whole project, so a compose.yml naming an env_file that does not exist yet
+# breaks commands aimed at entirely different services. The bot's files are a
+# precondition of the project being valid, not a step of its rollout.
+#
+# So the split is files here, rollout at the end of this file. The cost is
+# accepted and real: a bot secret that fails these checks fails the run before
+# the backend is reconciled, leaving the backend on its previous release rather
+# than breaking it. Escaping that would mean giving the bot its own compose
+# project on an external network, which is a larger change than the cost
+# justifies today.
+- name: Prepare the bot's protected inputs
+  ansible.builtin.include_tasks: bot-prepare.yml
+  when: control_plan.bot
+
 - name: Render environment-isolated control compose definition
   ansible.builtin.template:
     src: compose.yml.j2
@@ -589,19 +608,11 @@
   when: not ansible_check_mode
 
 # Everything the bot needs, and nothing before it, lives past this line — after
-# the control release is already recorded.
+# the control release is already recorded: a bot that never comes up must not
+# make the next run repeat the backend's migrations.
 #
-# Preparing its secrets earlier would have been the natural place, and it was
-# wrong: a mistyped bot DSN would then fail the run before the backend was even
-# reconciled, so a bot typo could hold back a backend release. The bot is a
-# tenant of this host, not a part of the control plane, and it gets to break
-# only itself. That is also why the release marker above is already written: a
-# bot that never comes up must not make the next run repeat the backend's
-# migrations.
-- name: Prepare the bot's protected inputs
-  ansible.builtin.include_tasks: bot-prepare.yml
-  when: control_plan.bot
-
+# Only the rollout is late. The bot's files are written before the compose
+# definition, above, and that split is not cosmetic — see the note there.
 - name: Reconcile the bot beside the backend
   ansible.builtin.include_tasks: bot-apply.yml
   when: control_plan.bot

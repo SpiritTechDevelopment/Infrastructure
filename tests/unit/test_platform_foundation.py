@@ -508,6 +508,39 @@ all:
         # сертификат не несёт.
         self.assertIn("extra_hosts", services["bot"])
 
+    def test_bot_env_files_exist_before_any_compose_command(self) -> None:
+        """Каждый вызов `docker compose` разбирает проект целиком.
+
+        Регрессия, стоившая красной выкатки: подготовку бота перенесли в конец,
+        и `compose.yml` стал ссылаться на ещё не написанный bot.env. Упала при
+        этом проверка готовности **бэкенда** — команда `exec -T backend`, к боту
+        отношения не имеющая. Отсюда правило: файлы бота пишутся до рендера
+        compose, а раскатка бота остаётся в конце.
+        """
+        tasks = yaml.safe_load(
+            (REPO_ROOT / "roles" / "control_runtime" / "tasks" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        names = [task["name"] for task in tasks]
+        prepare = names.index("Prepare the bot's protected inputs")
+        render = names.index("Render environment-isolated control compose definition")
+        self.assertLess(prepare, render, "файлы бота обязаны быть написаны до рендера compose")
+
+        first_compose = next(
+            index
+            for index, task in enumerate(tasks)
+            if "docker" in str(task.get("ansible.builtin.command", {}).get("argv", ""))
+            and "compose" in str(task.get("ansible.builtin.command", {}).get("argv", ""))
+        )
+        self.assertLess(
+            prepare,
+            first_compose,
+            "ни одна команда compose не должна опережать запись env-файлов бота",
+        )
+        # Раскатка при этом остаётся последней: арендатор не роняет хозяина.
+        self.assertEqual(names[-1], "Reconcile the bot beside the backend")
+
     def test_bot_migrations_ship_with_the_bot_image(self) -> None:
         """Схема и код приезжают одной парой.
 
