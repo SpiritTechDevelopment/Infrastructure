@@ -580,6 +580,31 @@ all:
         self.assertIn(r"^postgresql\+asyncpg://\S+$", prepare)
         self.assertNotIn(r"[^ ]+$", prepare)
 
+    def test_bot_pem_secrets_are_checked_for_being_pem(self) -> None:
+        """Непустое — ещё не сертификат.
+
+        Церемония записи читает до EOF, поэтому не сработавшая вставка кладёт
+        один перевод строки: проверку на непустоту он проходит, а падает потом
+        в openssl как «Unable to load certificate» — сообщением про файл, а не
+        про то, как его наполняли.
+        """
+        prepare = yaml.safe_load(
+            (
+                REPO_ROOT / "roles" / "control_runtime" / "tasks" / "bot-prepare.yml"
+            ).read_text(encoding="utf-8")
+        )
+        names = [task["name"] for task in prepare]
+        guard = names.index("Require bot PEM secrets to actually be PEM")
+        # Раньше записи файлов: смысл в том, чтобы не дойти до openssl.
+        self.assertLess(guard, names.index("Install protected bot secret files"))
+        checked = str(prepare[guard]["loop"])
+        for reference in (
+            "grpc_client_certificate_ref",
+            "grpc_client_private_key_ref",
+            "grpc_server_ca_ref",
+        ):
+            self.assertIn(reference, checked)
+
     def test_bot_migrations_ship_with_the_bot_image(self) -> None:
         """Схема и код приезжают одной парой.
 

@@ -74,6 +74,26 @@
     fail_msg: "A bot database URL or the Telegram token has an invalid format."
   no_log: true
 
+# A value that is merely non-empty is not a certificate. The write ceremony
+# reads until EOF, so a paste that never landed stores the lone newline the
+# operator typed — one byte, which passes an emptiness check and then fails
+# three tasks later as `Unable to load certificate`, pointing at the file
+# instead of at how it was filled. Naming the shape here says what is actually
+# wrong.
+- name: Require bot PEM secrets to actually be PEM
+  ansible.builtin.assert:
+    that:
+      - "'-----BEGIN ' in control_secret_values[item]"
+      - "'-----END ' in control_secret_values[item]"
+    fail_msg: >-
+      A bot PEM secret does not contain a PEM block. Re-store it by redirecting
+      the file into the write ceremony rather than pasting it.
+  loop:
+    - "{{ control_plan.bot.secret_refs.grpc_client_certificate_ref }}"
+    - "{{ control_plan.bot.secret_refs.grpc_client_private_key_ref }}"
+    - "{{ control_plan.bot.secret_refs.grpc_server_ca_ref }}"
+  no_log: true
+
 - name: Create protected bot runtime directories
   ansible.builtin.file:
     path: "{{ item.path }}"
