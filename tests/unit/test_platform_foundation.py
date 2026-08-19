@@ -813,6 +813,61 @@ all:
             subprocess.run(["bash", "-n"], input=rendered, text=True, check=True)
 
 
+class AutomaticDesiredStateDeployTests(unittest.TestCase):
+    """The push-triggered path may deploy develop, and only develop.
+
+    Реактивная выкатка вызывает control-deploy и fleet-deploy напрямую в режиме
+    apply. Гейта одобрения за ними нет: GitHub Environments недоступны на плане
+    free, и вызываемые workflow это документируют. Значит единственное, что
+    удерживает prod от выкатки по пушу, — отсечка в detect, и она проверяется
+    здесь.
+    """
+
+    WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+
+    def load(self, name: str) -> dict:
+        document = yaml.safe_load((self.WORKFLOWS / name).read_text(encoding="utf-8"))
+        # PyYAML разбирает ключ `on:` как булево True — YAML 1.1.
+        document["on"] = document.get("on") or document.get(True)
+        return document
+
+    def test_caller_passes_exactly_what_the_reusable_workflows_require(self) -> None:
+        caller = self.load("desired-state-deploy.yml")
+        for job, specification in caller["jobs"].items():
+            target = specification.get("uses")
+            if target is None:
+                continue
+            with self.subTest(job=job):
+                callee = self.load(Path(target).name)
+                declared = callee["on"]["workflow_call"]["inputs"]
+                required = {name for name, value in declared.items() if value.get("required")}
+                supplied = set(specification.get("with", {}))
+                self.assertEqual(supplied, required)
+                self.assertEqual(specification.get("secrets"), "inherit")
+
+    def test_production_never_reaches_the_automatic_path(self) -> None:
+        caller = (self.WORKFLOWS / "desired-state-deploy.yml").read_text(encoding="utf-8")
+        self.assertIn("grep -vx prod", caller)
+        for job in ("deploy-control", "deploy-fleet"):
+            self.assertIn(job, caller)
+        # Первая раскатка среды остаётся решением человека.
+        self.assertIn("initial: false", caller)
+        self.assertNotIn("initial: true", caller)
+
+    def test_the_absent_approval_gate_is_not_claimed_to_exist(self) -> None:
+        """The reason prod is excluded must stay true.
+
+        Появится настоящий гейт — отсечку можно снимать; пока его нет, документ
+        не должен утверждать обратное. Проверяется отсутствие job-level
+        `environment:` в вызываемых workflow, то есть та самая причина.
+        """
+        for name in ("control-deploy.yml", "fleet-deploy.yml"):
+            document = self.load(name)
+            for job, specification in document["jobs"].items():
+                with self.subTest(workflow=name, job=job):
+                    self.assertNotIn("environment", specification)
+
+
 PEER_PUBLIC_KEY = base64.b64encode(bytes(range(32))).decode("ascii")
 HUB_PUBLIC_KEY = base64.b64encode(bytes(range(32, 64))).decode("ascii")
 BUNDLE_VARIABLES = {

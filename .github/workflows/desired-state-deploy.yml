@@ -1,0 +1,129 @@
+name: desired-state-deploy
+
+# Единственный триггер выкатки — появление изменения окружения в main. Неважно,
+# кто его положил: авто-слияние после release-bump, ревьюер или оператор руками.
+# Источником всегда остаётся коммит, поэтому правка digest'а вручную
+# раскатывается ровно так же, как автоматическая, и расхождения между Git и
+# работающей системой не возникает ни на одном пути.
+on:
+  push:
+    branches: [main]
+    paths:
+      - desired/environments/*/environment.yml
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      control: ${{ steps.split.outputs.control }}
+      fleet: ${{ steps.split.outputs.fleet }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      # Релиз бэкенда и релиз агента живут в одном файле: первый в spec.control,
+      # второй в spec.common_overrides. По имени файла их не различить, поэтому
+      # сравниваются поддеревья. Всё, что не control, влияет на планы нод и
+      # ведёт к fleet-deploy; control не вызывает передеплой нод по построению
+      # компилятора.
+      - name: Split changed environments by area
+        id: split
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          control_list="$RUNNER_TEMP/control"
+          fleet_list="$RUNNER_TEMP/fleet"
+          : > "$control_list"
+          : > "$fleet_list"
+
+          # Первый push в ветку даёт нулевой BEFORE: сравнивать не с чем, и
+          # раскатывать по такому событию нельзя.
+          if [[ "$BEFORE" =~ ^0+$ ]]; then
+            echo "первый push в ветку; выкатка не выводится" >&2
+          else
+            while read -r file; do
+              test -n "$file" || continue
+              environment=$(sed -n 's|^desired/environments/\([^/]*\)/environment.yml$|\1|p' <<<"$file")
+              test -n "$environment" || continue
+
+              before_doc=$(git show "$BEFORE:$file" 2>/dev/null || printf '{}\n')
+              after_doc=$(git show "$AFTER:$file")
+
+              if [ "$(yq '.spec.control' <<<"$before_doc")" \
+                != "$(yq '.spec.control' <<<"$after_doc")" ]; then
+                echo "$environment" >> "$control_list"
+              fi
+              if [ "$(yq 'del(.spec.control)' <<<"$before_doc")" \
+                != "$(yq 'del(.spec.control)' <<<"$after_doc")" ]; then
+                echo "$environment" >> "$fleet_list"
+              fi
+            done < <(git diff --name-only "$BEFORE" "$AFTER" \
+                       -- 'desired/environments/*/environment.yml')
+          fi
+
+          # prod через автоматический путь не проходит.
+          #
+          # Задумано было иначе: предполагалось, что вызываемый workflow встанет
+          # на одобрении GitHub Environment. Такого гейта не существует —
+          # control-deploy.yml объясняет, почему `environment:` там намеренно
+          # отсутствует: на плане free с приватными репозиториями environments
+          # недоступны, required reviewers тоже. То есть без этой отсечки пуш в
+          # desired/environments/prod/environment.yml выкатил бы prod в apply
+          # без единого подтверждения.
+          #
+          # Отсекается здесь, а не фильтром `paths` в триггере: так причина
+          # видна на месте решения и переживёт расширение путей.
+          for list in "$control_list" "$fleet_list"; do
+            if grep -qx prod "$list"; then
+              echo "prod изменился, но автоматический путь его не выкатывает: гейта одобрения нет" >&2
+            fi
+            grep -vx prod "$list" > "$list.filtered" || :
+            mv "$list.filtered" "$list"
+          done
+
+          printf 'control=%s\n' "$(sort -u "$control_list" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          printf 'fleet=%s\n' "$(sort -u "$fleet_list" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+          echo "control: $(sort -u "$control_list" | tr '\n' ' ')"
+          echo "fleet:   $(sort -u "$fleet_list" | tr '\n' ' ')"
+
+  # Второго гейта здесь нет: одобрение GitHub Environment недоступно на плане
+  # free, и вызываемые workflow его не объявляют. Автоматическому пути доверен
+  # только develop — prod отсекается в detect выше и выкатывается dispatch'ем.
+  deploy-control:
+    needs: [detect]
+    if: needs.detect.outputs.control != '[]'
+    strategy:
+      max-parallel: 1
+      matrix:
+        environment: ${{ fromJSON(needs.detect.outputs.control) }}
+    uses: ./.github/workflows/control-deploy.yml
+    with:
+      environment: ${{ matrix.environment }}
+      source_git_sha: ${{ github.sha }}
+      mode: apply
+    secrets: inherit
+
+  # initial остаётся false: первая раскатка среды требует осознанного решения
+  # оператора и через автоматический путь проходить не должна.
+  deploy-fleet:
+    needs: [detect]
+    if: needs.detect.outputs.fleet != '[]'
+    strategy:
+      max-parallel: 1
+      matrix:
+        environment: ${{ fromJSON(needs.detect.outputs.fleet) }}
+    uses: ./.github/workflows/fleet-deploy.yml
+    with:
+      environment: ${{ matrix.environment }}
+      source_git_sha: ${{ github.sha }}
+      mode: apply
+      initial: false
+      resume: false
+      allow_destructive: false
+    secrets: inherit
