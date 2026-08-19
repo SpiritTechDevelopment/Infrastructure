@@ -7,28 +7,37 @@ cd "$repository_root"
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/platform-bootstrap.sh           # validate only; no host changes
-  scripts/platform-bootstrap.sh --apply   # validate, confirm, bootstrap, verify
+  scripts/platform-bootstrap.sh                        # validate only; no host changes
+  scripts/platform-bootstrap.sh --apply                # validate, confirm, bootstrap, verify
+  scripts/platform-bootstrap.sh --reuse-tunnel --apply # deliver bundle values to a hardened hub
 
 Runs the complete operator-side platform bootstrap gate from one committed
 checkout. Vault is installed and checked, but this script never changes its
 initialization, seal, policy, authentication, or secret state.
+
+--reuse-tunnel is for a hub that is already bootstrapped: its public SSH is
+closed by design, so the clean-host phase cannot run and is replaced by the
+management tunnel that phase created. This is how a new bundle variable reaches
+a hardened hub without editing anything on it by hand.
 EOF
 }
 
 apply=false
-case "${1:-}" in
-  "") ;;
-  --apply) apply=true ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 64 ;;
-esac
-[[ $# -le 1 ]] || { usage >&2; exit 64; }
+reuse_tunnel=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --apply) apply=true ;;
+    --reuse-tunnel) reuse_tunnel=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 64 ;;
+  esac
+  shift
+done
 
 required_commands=(
   git make python3 sops wg wg-quick ansible ansible-playbook yamllint ansible-lint
 )
-if [[ "$apply" == true ]]; then
+if [[ "$apply" == true || "$reuse_tunnel" == true ]]; then
   required_commands+=(sudo ip)
 fi
 for command_name in "${required_commands[@]}"; do
@@ -73,14 +82,26 @@ make lint
 printf '%s\n' '3/4: validating the encrypted platform bundle'
 make fleet-platform-check PLATFORM_BUNDLE="$platform_bundle"
 
-printf '%s\n' '4/4: checking pinned SSH connectivity without changing the host'
-make fleet-platform-bootstrap-check \
-  CONNECT=1 \
-  PLATFORM_BUNDLE="$platform_bundle"
+if [[ "$reuse_tunnel" == true ]]; then
+  printf '%s\n' '4/4: checking the management tunnel; the hardened hub closes public SSH'
+  ip link show dev spiritvpn-mgmt >/dev/null || {
+    printf '%s\n' 'management tunnel spiritvpn-mgmt is not up; nothing to reuse' >&2
+    exit 66
+  }
+else
+  printf '%s\n' '4/4: checking pinned SSH connectivity without changing the host'
+  make fleet-platform-bootstrap-check \
+    CONNECT=1 \
+    PLATFORM_BUNDLE="$platform_bundle"
+fi
 
 if [[ "$apply" != true ]]; then
   printf '%s\n' 'validation complete; no local or remote bootstrap changes were made'
-  printf '%s\n' 'run scripts/platform-bootstrap.sh --apply to perform the bootstrap'
+  if [[ "$reuse_tunnel" == true ]]; then
+    printf '%s\n' 'run scripts/platform-bootstrap.sh --reuse-tunnel --apply to deliver the bundle'
+  else
+    printf '%s\n' 'run scripts/platform-bootstrap.sh --apply to perform the bootstrap'
+  fi
   exit 0
 fi
 
@@ -89,18 +110,30 @@ fi
   exit 67
 }
 
-cat <<EOF
+if [[ "$reuse_tunnel" == true ]]; then
+  target=fleet-platform-refresh
+  cat <<EOF
+
+The next step will reapply the encrypted platform bundle to the already
+hardened management VPS through the existing tunnel, from commit $source_sha.
+The local WireGuard interface is reused, not rewritten.
+Type APPLY to continue.
+EOF
+else
+  target=fleet-platform-bootstrap
+  cat <<EOF
 
 The next step will modify the management VPS and install the managed local
 WireGuard interface from commit $source_sha.
 Bootstrap will preserve the current Vault initialization and seal state.
 Type APPLY to continue.
 EOF
+fi
 read -r confirmation
 [[ "$confirmation" == APPLY ]] || { printf '%s\n' 'bootstrap cancelled'; exit 68; }
 
 sudo -v
-make fleet-platform-bootstrap \
+make "$target" \
   APPLY=1 \
   PLATFORM_BUNDLE="$platform_bundle" \
   PLATFORM_WIREGUARD_PRIVATE_KEY="$operator_key"
@@ -109,10 +142,18 @@ sudo test -f /etc/wireguard/spiritvpn-mgmt.conf
 ip link show dev spiritvpn-mgmt >/dev/null
 sudo wg show spiritvpn-mgmt
 
-cat <<'EOF'
+if [[ "$reuse_tunnel" == true ]]; then
+  cat <<'EOF'
+
+The hub persisted the reviewed bundle as its runtime configuration.
+Run the platform-deploy workflow to reconcile the steady state from it.
+EOF
+else
+  cat <<'EOF'
 
 Platform bootstrap and convergence verification completed.
 Vault is reachable. Bootstrap preserved its initialization and seal state.
 For a new Vault, perform the recovery ceremony only after external storage for
 unseal shares and the initial root token is ready.
 EOF
+fi

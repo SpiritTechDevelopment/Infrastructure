@@ -1249,6 +1249,7 @@ gh secret set PLATFORM_SSH_KNOWN_HOSTS --env develop < /protected/known-hosts
 |---|---|
 | `make fleet-platform-bootstrap-check CONNECT=1` | Только SSH/syntax preflight management VPS |
 | `make fleet-platform-bootstrap APPLY=1` | Реальный низкоуровневый bootstrap management VPS |
+| `make fleet-platform-refresh APPLY=1` | Довезти изменённые значения бандла на уже захардененный хаб по существующему туннелю |
 | `make fleet-bootstrap-check CONNECT=1` | Проверить SSH к новым fleet-нодам |
 | `make fleet-bootstrap APPLY=1 BOOTSTRAP_VARS=...` | Установить чистые fleet-ноды |
 | `make fleet-configure-check CONNECT=1` | Ansible check по compiled inventory |
@@ -1260,7 +1261,7 @@ gh secret set PLATFORM_SSH_KNOWN_HOSTS --env develop < /protected/known-hosts
 | Скрипт | Назначение | Когда запускать вручную |
 |---|---|---|
 | [`platform-bootstrap.sh`](scripts/platform-bootstrap.sh) | Единый guarded entrypoint: тесты → lint → SOPS → SSH → bootstrap → post-check | Основной путь первого bootstrap |
-| [`bootstrap-platform.py`](scripts/bootstrap-platform.py) | Двухфазный bootstrap WireGuard и management-платформы | Обычно вызывается Makefile, вручную только при разработке |
+| [`bootstrap-platform.py`](scripts/bootstrap-platform.py) | Двухфазный bootstrap WireGuard и management-платформы; с `--reuse-tunnel` — только вторая фаза, по уже поднятому туннелю | Обычно вызывается Makefile, вручную только при разработке |
 | [`platform-sops.py`](scripts/platform-sops.py) | Временная расшифровка и строгая валидация bootstrap bundle | Обычно через `make fleet-platform-check` |
 | [`platform-bootstrap-check.py`](scripts/platform-bootstrap-check.py) | Проверка односерверного inventory и pinned known_hosts | Внутренняя часть SOPS/preflight-контура |
 | [`platform-remote.sh`](scripts/platform-remote.sh) | Строго ограниченный SSH-клиент для GitHub workflows | Обычно только из Actions |

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import base64
+import contextlib
+import copy
+import importlib.util
+import io
 import json
 import os
 import re
@@ -806,6 +811,229 @@ all:
             rendered = re.sub(r"{{[^\n{}]+}}", "fixture", source)
             self.assertNotIn("{{", rendered)
             subprocess.run(["bash", "-n"], input=rendered, text=True, check=True)
+
+
+PEER_PUBLIC_KEY = base64.b64encode(bytes(range(32))).decode("ascii")
+HUB_PUBLIC_KEY = base64.b64encode(bytes(range(32, 64))).decode("ascii")
+BUNDLE_VARIABLES = {
+    "platform_operator_ssh_public_keys": ["ssh-ed25519 AAAA operator"],
+    "platform_github_ssh_keys": [{"environment": "develop", "public_key": "ssh-ed25519 AAAA gh"}],
+    "platform_ssh_allowed_cidrs": ["10.80.0.0/16"],
+    "platform_fail2ban_ignore_cidrs": [],
+    "platform_vault_node_id": "management-1",
+    "platform_vault_tls_server_name": "vault.internal",
+    "platform_wireguard_hub_addresses": {"develop": "10.80.0.1/16", "prod": "10.82.0.1/16"},
+    "platform_wireguard_operator_peers": [
+        {"id": "operator", "public_key": PEER_PUBLIC_KEY, "allowed_ips": ["10.80.0.9/32"]}
+    ],
+    # Именно эта тройка и завела задачу в тупик: значения есть в бандле, но на
+    # захардененный хаб их до сих пор доносили руками.
+    "platform_alertmanager_telegram_bot_token": "12345:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "platform_alertmanager_telegram_chat_id": "-100500",
+    "platform_alertmanager_telegram_thread_id": "",
+}
+
+
+class _RecordedRun:
+    """Stands in for every subprocess the bootstrap shells out to.
+
+    Записывает командные строки и содержимое переданных extra-vars: на живом
+    прогоне это ровно то, что доезжает до хаба, и ровно то, что нельзя проверить,
+    сравнивая скрипт со строками.
+    """
+
+    def __init__(self, *, endpoint: str, marker: str, tunnel_up: bool) -> None:
+        self.endpoint = endpoint
+        self.marker = marker
+        self.tunnel_up = tunnel_up
+        self.commands: list[list[str]] = []
+        self.extra_vars: dict[str, str] = {}
+
+    def __call__(
+        self,
+        command: list[str],
+        *,
+        environment: dict[str, str] | None = None,
+        input_data: bytes | None = None,
+        capture: bool = False,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[bytes]:
+        self.commands.append(list(command))
+        for index, value in enumerate(command[:-1]):
+            if value == "--extra-vars" and command[index + 1].startswith("@"):
+                path = Path(command[index + 1][1:])
+                self.extra_vars[path.name] = path.read_text(encoding="utf-8")
+            elif value == "--extra-vars" and "platform_wireguard_metadata_output" in command[index + 1]:
+                Path(json.loads(command[index + 1])["platform_wireguard_metadata_output"]).write_text(
+                    json.dumps(
+                        {
+                            "interface": "wg0",
+                            "listen_port": 51820,
+                            "hub_addresses": BUNDLE_VARIABLES["platform_wireguard_hub_addresses"],
+                            "public_key": HUB_PUBLIC_KEY,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+        stdout = b""
+        returncode = 0
+        if "head" in command:
+            stdout = f"{self.marker}\n".encode()
+        elif "cmp" in command:
+            returncode = 1  # the rendered client config always differs from what is installed
+        elif "cat" in command:
+            stdout = (
+                f"{self.marker}\n[Interface]\nPrivateKey = OPERATOR-PRIVATE-KEY\n"
+                f"Address = 10.80.0.9/32\n\n[Peer]\nPublicKey = {HUB_PUBLIC_KEY}\n"
+                f"AllowedIPs = 10.80.0.0/16\nEndpoint = {self.endpoint}\n"
+                "PersistentKeepalive = 25\n"
+            ).encode()
+        elif "link" in command and "show" in command:
+            returncode = 0 if self.tunnel_up else 1
+        return subprocess.CompletedProcess(command, returncode, stdout, b"")
+
+
+class HardenedHubBundleDeliveryTests(unittest.TestCase):
+    """The supported way to deliver reviewed bundle values to a hardened hub.
+
+    Публичный SSH на захардененном хабе закрыт по замыслу, поэтому первая фаза
+    бутстрапа до него не доходит. Здесь закреплено, что режим --reuse-tunnel
+    доносит бандл по уже поднятому туннелю и что он не трогает публичный путь.
+    """
+
+    module: object
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        path = REPO_ROOT / "scripts" / "bootstrap-platform.py"
+        spec = importlib.util.spec_from_file_location("spiritvpn_bootstrap_platform", path)
+        assert spec is not None and spec.loader is not None
+        cls.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.module)
+
+    def load_module(self) -> object:
+        return type(self).module
+
+    def run_bootstrap(
+        self,
+        *,
+        reuse_tunnel: bool,
+        endpoint: str = "1.1.1.1:51820",
+        marker: str | None = None,
+        tunnel_up: bool = True,
+    ) -> tuple[object, _RecordedRun]:
+        module = self.load_module()
+        recorder = _RecordedRun(
+            endpoint=endpoint,
+            marker=module.CLIENT_MARKER if marker is None else marker,
+            tunnel_up=tunnel_up,
+        )
+        inventory = yaml.safe_load(
+            (REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap" / "platform.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        known_hosts = (
+            REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap" / "known_hosts"
+        ).read_text(encoding="utf-8")
+
+        class _Bundle:
+            @staticmethod
+            def decrypt_bundle(path: Path) -> tuple[dict, str, dict]:
+                return copy.deepcopy(inventory), known_hosts, copy.deepcopy(BUNDLE_VARIABLES)
+
+        module._load_platform_sops = lambda: _Bundle
+        module._require_command = lambda command: command
+        module._validate_private_key = lambda path: PEER_PUBLIC_KEY
+        module._run = recorder
+        with tempfile.TemporaryDirectory() as temporary:
+            key = Path(temporary) / "operator.key"
+            key.write_text("unused\n", encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):  # keep test output clean
+                module.execute(
+                    bundle=Path("/does/not/matter"),
+                    operator_private_key=key,
+                    client_interface="spiritvpn-mgmt",
+                    verify_convergence=False,
+                    reuse_tunnel=reuse_tunnel,
+                )
+        return module, recorder
+
+    def applied_command(self, recorder: _RecordedRun) -> list[str]:
+        applied = [
+            command
+            for command in recorder.commands
+            if "playbooks/platform/bootstrap.yml" in command and "--syntax-check" not in command
+        ]
+        self.assertEqual(len(applied), 1)
+        return applied[0]
+
+    def test_reused_tunnel_delivers_the_bundle_without_touching_public_ssh(self) -> None:
+        _, recorder = self.run_bootstrap(reuse_tunnel=True)
+
+        for command in recorder.commands:
+            self.assertNotIn("playbooks/platform/wireguard-bootstrap.yml", command)
+            if command[0] == "ansible":
+                self.assertNotIn("--inventory", command)
+                joined = " ".join(command)
+                self.assertNotIn("public-inventory.yml", joined)
+                self.assertIn("internal-inventory.yml", joined)
+        # Локальный туннель переиспользуется, а не переписывается: чужой конфиг
+        # не заменяется, а wg-quick не перезапускается под работающим прогоном.
+        self.assertFalse(any("wg-quick" in command for command in recorder.commands))
+
+        applied = self.applied_command(recorder)
+        self.assertIn("internal-inventory.yml", " ".join(applied))
+        self.assertIn(json.dumps({"deploy_mode": "hardened"}), applied)
+
+        delivered = yaml.safe_load(recorder.extra_vars["runtime-vars.yml"])
+        self.assertEqual(
+            delivered["platform_alertmanager_telegram_bot_token"],
+            BUNDLE_VARIABLES["platform_alertmanager_telegram_bot_token"],
+        )
+        self.assertEqual(delivered["platform_wireguard_public_endpoint"], "1.1.1.1:51820")
+
+    def test_reused_tunnel_refuses_a_tunnel_it_did_not_create_or_cannot_trust(self) -> None:
+        module = self.load_module()
+        for description, keywords in (
+            ({"marker": "# hand-written"}, "unmanaged"),
+            ({"endpoint": "9.9.9.9:51820"}, "does not lead to the hub"),
+            ({"tunnel_up": False}, "is not up"),
+        ):
+            with self.subTest(**description):
+                with self.assertRaises(module.BootstrapError) as raised:
+                    self.run_bootstrap(reuse_tunnel=True, **description)
+                self.assertIn(keywords, str(raised.exception))
+
+    def test_clean_host_bootstrap_still_creates_the_tunnel_it_needs(self) -> None:
+        _, recorder = self.run_bootstrap(reuse_tunnel=False)
+
+        self.assertTrue(
+            any("playbooks/platform/wireguard-bootstrap.yml" in c for c in recorder.commands)
+        )
+        self.assertTrue(any("wg-quick" in command for command in recorder.commands))
+        applied = self.applied_command(recorder)
+        # Первый прогон обязан оставаться в режиме bootstrap: он меняет sshd и
+        # firewall под собственным соединением и держит для этого порт 22.
+        self.assertNotIn(json.dumps({"deploy_mode": "hardened"}), applied)
+        delivered = yaml.safe_load(recorder.extra_vars["runtime-vars.yml"])
+        self.assertEqual(delivered["platform_wireguard_public_endpoint"], "1.1.1.1:51820")
+
+    def test_every_bundle_variable_is_persisted_by_the_executor(self) -> None:
+        """A bundle key the hub never writes down is delivered nowhere."""
+        path = REPO_ROOT / "scripts" / "platform-sops.py"
+        spec = importlib.util.spec_from_file_location("spiritvpn_platform_sops", path)
+        assert spec is not None and spec.loader is not None
+        sops = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sops)
+
+        tasks = (REPO_ROOT / "roles" / "platform_executor" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        start = tasks.index("Persist the bounded management runtime configuration")
+        persisted = set(re.findall(r"'(platform_[a-z0-9_]+)':", tasks[start : tasks.index("dest:", start)]))
+        self.assertTrue(persisted)
+        self.assertLessEqual(sops.EXPECTED_VARIABLE_KEYS, persisted)
 
 
 if __name__ == "__main__":

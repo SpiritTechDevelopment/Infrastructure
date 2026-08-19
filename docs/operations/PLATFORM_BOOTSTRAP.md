@@ -113,6 +113,39 @@ The role hardens SSH/firewall, installs Docker, generates a host-local transport
 CA and Vault certificate, starts loopback-only Vault, and installs the
 `github-deploy` forced command. Private TLS keys never leave the host.
 
+### Changing a bundle value after the hub is hardened
+
+The first phase is unreachable once the hub is hardened: its public SSH is
+closed by design, so `fleet-platform-bootstrap` would hang on the reachability
+check. CI cannot carry the value either — the `github-deploy` forced command
+parses a fixed argument list and refuses everything else, and that is the point
+of it.
+
+Edit the value in the encrypted bundle, commit it, then deliver it through the
+tunnel the first phase already built:
+
+```bash
+scripts/platform-bootstrap.sh --reuse-tunnel --apply
+# or, without the repository-wide gate:
+make fleet-platform-refresh APPLY=1 \
+  PLATFORM_BUNDLE=inventories/bootstrap/platform.sops.yml \
+  PLATFORM_WIREGUARD_PRIVATE_KEY="$HOME/.config/spiritvpn/keys/operator-wg.key"
+```
+
+This reuses `/etc/wireguard/spiritvpn-mgmt.conf` instead of rewriting it, takes
+the hub's public endpoint from that file rather than guessing it, and refuses a
+config it did not write, one that points at a different host than the bundle
+describes, or an interface that is down. It applies the same playbook the second
+phase applies, but as `deploy_mode: hardened`, so the hub does not fall back to
+the wider bootstrap port set. The hub rewrites
+`/etc/spiritvpn/platform/runtime-vars.yml`, and the next `platform-deploy` run
+reconciles the steady state from it.
+
+A new key must be added in two places or it silently goes nowhere:
+`EXPECTED_VARIABLE_KEYS` in `scripts/platform-sops.py`, which validates the
+bundle, and the persisted allow-list in `roles/platform_executor`, which decides
+what the hub writes down. A unit test fails if the first outgrows the second.
+
 ## 3. Vault ceremony
 
 The bootstrap installs `/usr/local/sbin/spiritvpn-vault-operator`. It is the

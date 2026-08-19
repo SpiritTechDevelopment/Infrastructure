@@ -106,6 +106,12 @@ fleet-platform-bootstrap: fleet-platform-check ## Reconcile Vault and management
 	  --bundle "$(PLATFORM_BUNDLE)" \
 	  --operator-wireguard-private-key "$(PLATFORM_WIREGUARD_PRIVATE_KEY)"
 
+fleet-platform-refresh: fleet-platform-check ## Deliver reviewed bundle values to a hardened hub over the existing tunnel; requires APPLY=1
+	@test "$(APPLY)" = 1 || (echo 'refusing platform SSH/mutation: set APPLY=1 explicitly' >&2; exit 2)
+	python3 scripts/bootstrap-platform.py --apply --reuse-tunnel --verify-convergence \
+	  --bundle "$(PLATFORM_BUNDLE)" \
+	  --operator-wireguard-private-key "$(PLATFORM_WIREGUARD_PRIVATE_KEY)"
+
 syntax: ## Syntax-check the active v1 playbooks
 	@# Discovered, not enumerated: a hand-maintained list is how a new playbook
 	@# reaches the deployment path without ever being parsed. `find` rather than
@@ -140,4 +146,5 @@ check: fleet-validate fleet-test ## Run local v1 static checks
 .PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-manifest \
 	fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check \
 	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-platform-check \
-	fleet-platform-bootstrap-check fleet-platform-bootstrap fleet-deploy-log syntax lint check
+	fleet-platform-bootstrap-check fleet-platform-bootstrap fleet-platform-refresh \
+	fleet-deploy-log syntax lint check
