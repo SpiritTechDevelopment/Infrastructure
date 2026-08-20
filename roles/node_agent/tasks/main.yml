@@ -17,6 +17,24 @@
         == 'spiffe://spiritvpn/' ~ spiritvpn_node_plan.environment ~ '/service/backend'
     fail_msg: "NodeAgent requires one digest-pinned image and one environment-bound backend identity."
 
+# NodeAgent keeps its users and per-user routes in Xray's startup config before
+# applying the same changes through the runtime API. Atomic replacement needs
+# write permission on the directory, not merely on config.json itself.
+- name: Grant NodeAgent durable Xray configuration access
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: "{{ item.state }}"
+    owner: root
+    group: "{{ node_agent_gid }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ vpn_stack_dir }}/xray"
+      state: directory
+      mode: "0770"
+    - path: "{{ vpn_stack_dir }}/xray/config.json"
+      state: file
+      mode: "0660"
+
 - name: Require node-local machine PKI before NodeAgent deployment
   ansible.builtin.stat:
     path: "{{ item }}"

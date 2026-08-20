@@ -23,7 +23,9 @@ services:
     network_mode: host
     logging: *logging
     volumes:
-      - {{ vpn_stack_dir }}/xray/config.json:/etc/xray/config.json:ro
+      # Directory bind is deliberate: NodeAgent atomically replaces
+      # config.json, so a file bind would leave this container on the old inode.
+      - {{ vpn_stack_dir }}/xray:/etc/xray:ro
       - /var/log/xray:/var/log/xray
     command: ["run", "-config", "/etc/xray/config.json"]
     healthcheck:
@@ -100,6 +102,7 @@ services:
       SPIRIT_GRPC_ALLOWED_CLIENT_IDENTITIES: "{{ node_agent_allowed_client_identities | join(',') }}"
       SPIRIT_XRAY_API_ADDRESS: "{{ node_agent_xray_api_address }}"
       SPIRIT_XRAY_INBOUND_TAG: "{{ node_agent_xray_inbound_tag }}"
+      SPIRIT_XRAY_CONFIG_PATH: /opt/vpn/xray/config.json
       SPIRIT_XRAY_LOCAL_OUTBOUND_TAG: "{{ node_agent_local_outbound_tag }}"
       SPIRIT_XRAY_FALLBACK_OUTBOUND_TAG: "{{ node_agent_fallback_outbound_tag }}"
       SPIRIT_STATE_DB_PATH: /var/lib/spirit-agent/state.db
@@ -109,3 +112,5 @@ services:
     volumes:
       - {{ node_agent_state_dir }}:/var/lib/spirit-agent
       - {{ node_agent_tls_dir }}:/run/spiritvpn-pki:ro
+      # The whole directory must be writable for create-temp + atomic rename.
+      - {{ vpn_stack_dir }}/xray:/opt/vpn/xray

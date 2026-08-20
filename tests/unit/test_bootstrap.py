@@ -407,6 +407,19 @@ class BootstrapContourTests(unittest.TestCase):
         self.assertIn("network_mode: host", compose)
         self.assertIn("SPIRIT_STATE_DB_PATH", compose)
         self.assertIn("/var/lib/spirit-agent", compose)
+        # Durable users are written with create-temp + rename. A writable file
+        # bind cannot support that operation, and Xray must resolve the new
+        # inode when its process starts again.
+        self.assertIn("SPIRIT_XRAY_CONFIG_PATH: /opt/vpn/xray/config.json", compose)
+        self.assertIn("{{ vpn_stack_dir }}/xray:/opt/vpn/xray", compose)
+        self.assertIn("{{ vpn_stack_dir }}/xray:/etc/xray:ro", compose)
+        self.assertNotIn(
+            "{{ vpn_stack_dir }}/xray/config.json:/etc/xray/config.json:ro",
+            compose,
+        )
+        self.assertIn("Grant NodeAgent durable Xray configuration access", tasks)
+        self.assertIn('mode: "0770"', tasks)
+        self.assertIn('mode: "0660"', tasks)
         self.assertIn("remote_src: true", tasks)
         self.assertIn('node_agent_uid: "65532"', (
             REPO_ROOT / "roles" / "node_agent" / "defaults" / "main.yml"
