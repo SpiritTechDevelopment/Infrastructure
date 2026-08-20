@@ -123,4 +123,4 @@ spec:
     components:
       node_agent:
         repository: ghcr.io/spirittechdevelopment/node-agent
-        digest: sha256:5f59a0a884fcb3ba98ccb423d8458d69f03c669931a572b273d639e041f89f9a
+        digest: sha256:03cc6137de96a95c58514b4b59e8f20299b636810fc66f3197b408bfb3ee87c0
