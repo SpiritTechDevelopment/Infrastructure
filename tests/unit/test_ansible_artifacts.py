@@ -120,6 +120,8 @@ class CompiledAnsibleArtifactTests(unittest.TestCase):
 
     def test_new_configure_contour_loads_compiled_plan_and_does_not_read_desired(self) -> None:
         playbook = (REPO_ROOT / "playbooks" / "deploy" / "configure.yml").read_text(encoding="utf-8")
+        play = yaml.safe_load(playbook)[0]
+        roles = [item["role"] for item in play["roles"]]
         loader = (REPO_ROOT / "roles" / "compiled_node_plan" / "tasks" / "main.yml").read_text(
             encoding="utf-8"
         )
@@ -131,6 +133,20 @@ class CompiledAnsibleArtifactTests(unittest.TestCase):
         self.assertNotIn("fleet-exits.yml", playbook)
         self.assertIn("common_restricted_tcp_rules", loader)
         self.assertIn("infrastructure.networking.agent.port", loader)
+        self.assertIn("node_layout", roles)
+        self.assertLess(roles.index("node_layout"), roles.index("compiled_runtime"))
+
+    def test_readiness_rejects_a_stale_installed_node_plan(self) -> None:
+        for relative in (
+            "playbooks/bootstrap/readiness.yml",
+            "playbooks/operations/readiness.yml",
+        ):
+            with self.subTest(playbook=relative):
+                readiness = (REPO_ROOT / relative).read_text(encoding="utf-8")
+                self.assertIn("/etc/spiritvpn/node-plan.json", readiness)
+                self.assertIn("| b64decode | from_json", readiness)
+                self.assertIn("== spiritvpn_node_plan", readiness)
+                self.assertIn("no_log: true", readiness)
 
 
 class ContainerLogCeilingTests(unittest.TestCase):

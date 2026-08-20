@@ -1,8 +1,9 @@
 #!/usr/sbin/nft -f
 # Replace only this role's own table — never `flush ruleset` (that would wipe
 # Docker's ip nat table and strand every published port). `destroy table` needs
-# nft>=1.0.3; add+delete is the 1.0.2-compatible equivalent and leaves the
-# Docker/ufw-managed tables untouched, so no `docker restart` is required.
+# nft>=1.0.3; add+delete is the 1.0.2-compatible equivalent and leaves
+# Docker-managed tables untouched, so no `docker restart` is required. The
+# common role separately retires UFW and neutralises legacy INPUT hooks.
 add table inet spiritvpn_filter
 delete table inet spiritvpn_filter
 table inet spiritvpn_filter {

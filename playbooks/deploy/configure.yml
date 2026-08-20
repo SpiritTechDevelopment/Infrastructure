@@ -12,6 +12,10 @@
   roles:
     - role: common
     - role: docker
+    # Bootstrap writes the first copy, but every steady-state reconciliation
+    # must replace it with the exact compiled plan for this deployment. Without
+    # this role the on-host audit artifact silently freezes at bootstrap time.
+    - role: node_layout
     - role: node_limits
     - role: xray
     - role: nginx_mask

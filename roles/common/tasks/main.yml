@@ -137,10 +137,16 @@
 
 # nftables firewall. Uses add+delete (not `flush ruleset`) so Docker's ip nat
 # table survives — no `docker restart` needed after a reload. `validate` parses
-# the candidate with `nft -c` before it is placed.
+# the candidate with `nft -c` before it is placed. Once the managed table is
+# live, the role retires persistent legacy firewall managers and neutralises
+# their INPUT hooks; two input owners with the same priority compose rather
+# than override one another, so one stale DROP policy can otherwise strand a
+# healthy node behind an entirely correct spiritvpn_filter table.
 - name: Install nftables firewall tooling
   ansible.builtin.apt:
-    name: nftables
+    name:
+      - nftables
+      - iptables
     state: present
     update_cache: true
   when:
@@ -182,6 +188,113 @@
   changed_when: false
   when:
     - common_manage_firewall | bool
+
+# UFW and netfilter-persistent are mutually exclusive with this role owning
+# ingress policy. Disable a live UFW ruleset before purging its package so its
+# OUTPUT/FORWARD hooks are removed cleanly, then make the legacy INPUT base
+# chains inert without flushing Docker-owned FORWARD/NAT chains.
+- name: Check whether UFW is installed
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - --show
+      - "--showformat=${db:Status-Abbrev}"
+      - ufw
+  register: _common_ufw_package
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: common_manage_firewall | bool
+
+- name: Read UFW state before retirement
+  ansible.builtin.command:
+    argv: [ufw, status]
+  register: _common_ufw_status
+  changed_when: false
+  check_mode: false
+  environment:
+    LC_ALL: C
+  when:
+    - common_manage_firewall | bool
+    - _common_ufw_package.stdout is match('^ii')
+
+- name: Disable the active UFW ruleset
+  ansible.builtin.command:
+    argv: [ufw, --force, disable]
+  changed_when: true
+  when:
+    - common_manage_firewall | bool
+    - not ansible_check_mode
+    - _common_ufw_package.stdout is match('^ii')
+    - "'Status: active' in _common_ufw_status.stdout"
+
+- name: Remove competing persistent firewall managers
+  ansible.builtin.apt:
+    name:
+      - ufw
+      - iptables-persistent
+      - netfilter-persistent
+    state: absent
+    purge: true
+  when: common_manage_firewall | bool
+
+- name: Inspect the legacy IPv4 INPUT chain
+  ansible.builtin.command:
+    argv: [iptables, -w, -S, INPUT]
+  register: _common_legacy_ipv4_input
+  changed_when: false
+  check_mode: false
+  when: common_manage_firewall | bool
+
+- name: Set the legacy IPv4 INPUT policy to accept
+  ansible.builtin.command:
+    argv: [iptables, -w, -P, INPUT, ACCEPT]
+  changed_when: true
+  when:
+    - common_manage_firewall | bool
+    - not ansible_check_mode
+    - "'-P INPUT ACCEPT' not in _common_legacy_ipv4_input.stdout_lines"
+
+- name: Remove rules from the legacy IPv4 INPUT chain
+  ansible.builtin.command:
+    argv: [iptables, -w, -F, INPUT]
+  changed_when: true
+  when:
+    - common_manage_firewall | bool
+    - not ansible_check_mode
+    - >-
+      _common_legacy_ipv4_input.stdout_lines
+      | select('match', '^-A INPUT(?: |$)')
+      | list | length > 0
+
+- name: Inspect the legacy IPv6 INPUT chain
+  ansible.builtin.command:
+    argv: [ip6tables, -w, -S, INPUT]
+  register: _common_legacy_ipv6_input
+  changed_when: false
+  check_mode: false
+  when: common_manage_firewall | bool
+
+- name: Set the legacy IPv6 INPUT policy to accept
+  ansible.builtin.command:
+    argv: [ip6tables, -w, -P, INPUT, ACCEPT]
+  changed_when: true
+  when:
+    - common_manage_firewall | bool
+    - not ansible_check_mode
+    - "'-P INPUT ACCEPT' not in _common_legacy_ipv6_input.stdout_lines"
+
+- name: Remove rules from the legacy IPv6 INPUT chain
+  ansible.builtin.command:
+    argv: [ip6tables, -w, -F, INPUT]
+  changed_when: true
+  when:
+    - common_manage_firewall | bool
+    - not ansible_check_mode
+    - >-
+      _common_legacy_ipv6_input.stdout_lines
+      | select('match', '^-A INPUT(?: |$)')
+      | list | length > 0
 
 # fail2ban — SSH brute-force protection (systemd journal backend, port-aware ban).
 - name: Install fail2ban

@@ -57,6 +57,7 @@ NODE_RECONCILE_PATH_PREFIXES = (
     "roles/nginx_mask/",
     "roles/node_agent/",
     "roles/node_exporter/",
+    "roles/node_layout/",
     "roles/node_limits/",
     "roles/xray/",
 )

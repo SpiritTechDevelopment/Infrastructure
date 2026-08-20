@@ -15,6 +15,21 @@
       ansible.builtin.include_role:
         name: compiled_node_plan
   tasks:
+    - name: Read installed compiled node plan
+      ansible.builtin.slurp:
+        path: /etc/spiritvpn/node-plan.json
+      register: _readiness_installed_node_plan
+      no_log: true
+
+    - name: Require installed node plan to match this deployment
+      ansible.builtin.assert:
+        that:
+          - >-
+            (_readiness_installed_node_plan.content | b64decode | from_json)
+            == spiritvpn_node_plan
+        fail_msg: "Installed node plan is stale or belongs to another deployment."
+      no_log: true
+
     - name: Require management address on the expected interface
       ansible.builtin.command:
         argv:

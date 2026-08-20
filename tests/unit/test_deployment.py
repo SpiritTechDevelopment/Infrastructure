@@ -548,15 +548,15 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
     def test_runtime_code_change_reconciles_every_current_node(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = self.prepare_repository(Path(temporary))
-            template = repository.root / "roles" / "xray" / "templates" / "config.json.j2"
+            template = repository.root / "roles" / "node_layout" / "tasks" / "main.yml"
             template.parent.mkdir(parents=True)
             template.write_text("old runtime\n", encoding="utf-8")
-            repository.git("add", "roles/xray/templates/config.json.j2")
+            repository.git("add", "roles/node_layout/tasks/main.yml")
             repository.git("commit", "-qm", "add runtime input")
             baseline = repository.head()
             repository.git("update-ref", "refs/deployments/develop", baseline)
             template.write_text("new runtime\n", encoding="utf-8")
-            repository.git("add", "roles/xray/templates/config.json.j2")
+            repository.git("add", "roles/node_layout/tasks/main.yml")
             repository.git("commit", "-qm", "change runtime input")
             variables = {}
             for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
@@ -592,7 +592,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
         self.assertNotIn("csr.yml", calls)
         self.assertEqual(
             record["node_reconcile_paths"],
-            ["roles/xray/templates/config.json.j2"],
+            ["roles/node_layout/tasks/main.yml"],
         )
         self.assertIn(
             "NODE_RUNTIME_INPUTS_CHANGED",

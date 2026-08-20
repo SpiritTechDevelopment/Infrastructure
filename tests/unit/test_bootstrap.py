@@ -398,6 +398,73 @@ class SshPortHandoverTests(unittest.TestCase):
         self.assertEqual(service["ansible.builtin.service"]["state"], "started")
         self.assertTrue(service["ansible.builtin.service"]["enabled"])
 
+    def test_managed_firewall_retires_competing_input_owners(self) -> None:
+        tasks = yaml.safe_load(
+            (REPO_ROOT / "roles" / "common" / "tasks" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        by_name = {task.get("name"): task for task in tasks}
+
+        install = by_name["Install nftables firewall tooling"]["ansible.builtin.apt"]
+        self.assertEqual(install["name"], ["nftables", "iptables"])
+
+        retire = by_name["Remove competing persistent firewall managers"][
+            "ansible.builtin.apt"
+        ]
+        self.assertEqual(
+            retire["name"],
+            ["ufw", "iptables-persistent", "netfilter-persistent"],
+        )
+        self.assertEqual(retire["state"], "absent")
+        self.assertTrue(retire["purge"])
+
+        expected_commands = {
+            "Set the legacy IPv4 INPUT policy to accept": [
+                "iptables",
+                "-w",
+                "-P",
+                "INPUT",
+                "ACCEPT",
+            ],
+            "Remove rules from the legacy IPv4 INPUT chain": [
+                "iptables",
+                "-w",
+                "-F",
+                "INPUT",
+            ],
+            "Set the legacy IPv6 INPUT policy to accept": [
+                "ip6tables",
+                "-w",
+                "-P",
+                "INPUT",
+                "ACCEPT",
+            ],
+            "Remove rules from the legacy IPv6 INPUT chain": [
+                "ip6tables",
+                "-w",
+                "-F",
+                "INPUT",
+            ],
+        }
+        for name, argv in expected_commands.items():
+            with self.subTest(task=name):
+                self.assertEqual(by_name[name]["ansible.builtin.command"]["argv"], argv)
+                self.assertIn("not ansible_check_mode", by_name[name]["when"])
+
+        names = [task.get("name") for task in tasks]
+        self.assertLess(
+            names.index("Reconcile the live nftables ruleset on every hardened run"),
+            names.index("Remove competing persistent firewall managers"),
+        )
+
+    def test_fail2ban_uses_the_managed_nftables_backend(self) -> None:
+        jail = (REPO_ROOT / "roles" / "common" / "templates" / "jail.local.j2").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("banaction = nftables-multiport", jail)
+        self.assertIn("banaction_allports = nftables-allports", jail)
+
 class BridgeCredentialGuardTests(unittest.TestCase):
     """A bridge UUID goes straight into an Xray client id.
 
