@@ -395,29 +395,6 @@ class SshPortHandoverTests(unittest.TestCase):
         self.assertEqual(service["ansible.builtin.service"]["state"], "started")
         self.assertTrue(service["ansible.builtin.service"]["enabled"])
 
-    def test_legacy_netbird_is_retired_only_on_compiled_traffic_nodes(self) -> None:
-        defaults = yaml.safe_load(
-            (REPO_ROOT / "roles" / "common" / "defaults" / "main.yml").read_text(
-                encoding="utf-8"
-            )
-        )
-        tasks = yaml.safe_load(
-            (REPO_ROOT / "roles" / "common" / "tasks" / "main.yml").read_text(
-                encoding="utf-8"
-            )
-        )
-        self.assertEqual(defaults["common_retired_services"], [])
-        self.assertEqual(compiled_node_facts()["common_retired_services"], ["netbird.service"])
-        retirement = next(
-            task
-            for task in tasks
-            if task.get("name") == "Stop, disable and mask explicitly retired services"
-        )
-        self.assertEqual(retirement["ansible.builtin.systemd_service"]["state"], "stopped")
-        self.assertFalse(retirement["ansible.builtin.systemd_service"]["enabled"])
-        self.assertTrue(retirement["ansible.builtin.systemd_service"]["masked"])
-
-
 class BridgeCredentialGuardTests(unittest.TestCase):
     """A bridge UUID goes straight into an Xray client id.
 

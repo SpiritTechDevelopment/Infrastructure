@@ -31,10 +31,6 @@ common_ssh_port: ""
 # never pruned from a host without first being named here.
 common_retired_sshd_dropins:
   - 99-temp-bootstrap.conf
-# Legacy services explicitly retired by the caller for this host group. Keep
-# the role default empty: a service is stopped only where desired state assigns
-# that retirement policy.
-common_retired_services: []
 
 # --- Firewall (nftables) — rendered only when common_manage_firewall is true.
 # Safe defaults: empty lists render a minimal ruleset, and an empty
