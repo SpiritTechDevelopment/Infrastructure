@@ -58,6 +58,9 @@ class RepositorySurfaceTests(unittest.TestCase):
                 "platform-sops.py",
                 "platform-remote.sh",
                 "bootstrap-self-hosted-runner.sh",
+                # Creates the one decryption identity intentionally assigned to
+                # the dedicated runner; the private half never leaves it.
+                "bootstrap-runner-sops.sh",
                 # Joins that runner to the management overlay; the hub is only
                 # reachable there, so registering the runner is part of the
                 # same bootstrap as installing it.
@@ -74,6 +77,9 @@ class RepositorySurfaceTests(unittest.TestCase):
                 # answer decides a write to the repository and has to be testable
                 # without a deployment.
                 "deployment-record.py",
+                # Packs and updates the encrypted environment bundle while
+                # keeping plaintext in process memory.
+                "topology-release.py",
             },
         )
 

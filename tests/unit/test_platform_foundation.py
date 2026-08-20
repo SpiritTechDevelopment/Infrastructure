@@ -116,8 +116,8 @@ class PlatformFoundationTests(unittest.TestCase):
             if "topology" in rule["path_regex"]
         )
         recipients = [value.strip() for value in topology_rule["age"].split(",")]
-        self.assertEqual(len(recipients), 2)
-        self.assertEqual(len(set(recipients)), 2)
+        self.assertEqual(len(recipients), 3)
+        self.assertEqual(len(set(recipients)), 3)
         for recipient in recipients:
             self.assertRegex(recipient, r"^age1[0-9a-z]+$")
 
