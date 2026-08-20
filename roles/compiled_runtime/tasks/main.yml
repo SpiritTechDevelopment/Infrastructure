@@ -132,6 +132,43 @@
     or 'Pulled' in _compiled_runtime_apply.stderr
   when: not ansible_check_mode
 
+# Xray reads config.json only at process start. The file is also a durable
+# target for NodeAgent, which atomically replaces it, so a bind-mounted update
+# alone never changes the running process. Reload the reviewed startup config
+# before readiness; otherwise the on-disk API route and the live route can
+# silently disagree while the syntax-only check stays green.
+- name: Restart Xray onto a changed startup configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ vpn_stack_dir }}/compose.yml"
+      - restart
+      - xray
+  when:
+    - not ansible_check_mode
+    - _xray_config_render.changed
+  changed_when: true
+
+- name: Wait for the restarted Xray API
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ vpn_stack_dir }}/compose.yml"
+      - up
+      - -d
+      - --wait
+      - --wait-timeout
+      - "120"
+      - xray
+  when:
+    - not ansible_check_mode
+    - _xray_config_render.changed
+  changed_when: false
+
 # Конфигурация приезжает bind-mount'ом, поэтому её правка не пересоздаёт
 # контейнер, а Alloy не перечитывает файл на ходу. Без этого изменённый конфиг
 # лежал бы на диске, а работал бы прежний — до следующего пересоздания по

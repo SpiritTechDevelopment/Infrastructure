@@ -1089,6 +1089,8 @@ make fleet-validate
 make fleet-render ENVIRONMENT=develop
 make fleet-ansible-check ENVIRONMENT=develop
 make fleet-provisioning-check ENVIRONMENT=develop
+make fleet-dns-plan ENVIRONMENT=develop \
+  CLOUDFLARE_TOKEN_FILE=.local-secrets/cloudflare-token.txt
 ```
 
 Посмотрите конкретные результаты, а не только exit code:
@@ -1164,8 +1166,9 @@ CSR в вывод, оператор подписывает его `make fleet-pk
 
 - `readiness.yml` требует реальные `spiritvpn_direct_smoke_argv` и
   `spiritvpn_entry_exit_smoke_argv`;
-- backend ApplyFleetManifest, DNS promotion и deployment ref advancement ещё не
-  реализованы.
+- backend ApplyFleetManifest, автоматическая DNS promotion внутри coordinator и
+  deployment ref advancement ещё не реализованы. DNS можно сверить и применить
+  отдельной защищённой командой `fleet-dns-plan`/`fleet-dns-apply`.
 
 Bootstrap останавливается fail-closed и может быть продолжен с тем же SHA через
 `RESUME=1`; уже подписанные цепочки при этом не выпускаются заново.
@@ -1270,6 +1273,7 @@ gh secret set PLATFORM_SSH_KNOWN_HOSTS --env develop < /protected/known-hosts
 | `make fleet-plan ENVIRONMENT=develop SOURCE=HEAD` | Рассчитать impact относительно deployment ref |
 | `make fleet-ansible-check ENVIRONMENT=develop` | Проверить generated inventory и node plans |
 | `make fleet-provisioning-check ENVIRONMENT=develop` | Проверить ручные декларации VPS без provider API |
+| `make fleet-dns-plan ENVIRONMENT=develop CLOUDFLARE_TOKEN_FILE=...` | Сверить serving entry/exit записи с Cloudflare без изменений |
 | `make fleet-platform-check` | Проверить и временно расшифровать SOPS bootstrap bundle |
 
 ### Команды с сетью или изменениями
@@ -1283,6 +1287,7 @@ gh secret set PLATFORM_SSH_KNOWN_HOSTS --env develop < /protected/known-hosts
 | `make fleet-bootstrap APPLY=1 BOOTSTRAP_VARS=...` | Установить чистые fleet-ноды |
 | `make fleet-configure-check CONNECT=1` | Ansible check по compiled inventory |
 | `make fleet-configure APPLY=1 COMPILED_SECRETS=...` | Применить compiled node plans |
+| `make fleet-dns-apply APPLY=1 ENVIRONMENT=develop CLOUDFLARE_TOKEN_FILE=...` | Создать или обновить DNS-only записи serving entry/exit в Cloudflare; записи не удаляет |
 | `make fleet-deploy ...` | Координатор; без `APPLY=1` всегда dry-run. С новыми нодами требует `CA_STATE` — иначе их CSR некому подписать |
 
 ## Что делают скрипты?

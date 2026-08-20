@@ -502,13 +502,15 @@ Xray обслуживает VLESS/REALITY data plane. Infrastructure владе�
 конфигурацией, transport, static bridge credentials и outbound'ами. Customer
 users должны добавляться только node-agent через loopback API.
 
-Xray API в compiled contour слушает `127.0.0.1:10085`, потому что у него нет
-собственной надёжной application authentication. Публичный доступ к нему не
-нужен.
+Xray API в compiled contour слушает напрямую на `127.0.0.1:10085`, потому что
+у него нет собственной надёжной application authentication. Публичный доступ к
+нему не нужен. Служебный `tunnel` inbound для API запрещён: при потере runtime
+route он замыкает порт на самого себя и исчерпывает ephemeral TCP ports ноды.
 
-Сейчас включены `HandlerService`, `StatsService` и `ReflectionService`.
-Требуемый node-agent спецификацией `RoutingService` ещё не включён — это
-известный блокер до запуска агента.
+Включены `HandlerService`, `RoutingService`, `StatsService` и
+`ReflectionService`. Container health вызывает реальный `StatsService`, а не
+только синтаксическую проверку файла. Изменение startup-конфигурации обязательно
+перезапускает Xray и ожидает успешный API healthcheck.
 
 ### nginx mask
 

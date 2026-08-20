@@ -6,6 +6,7 @@ COMPILED_SECRETS ?=
 BOOTSTRAP_VARS ?=
 READINESS_VARS ?=
 FLEET_STATE_DIR ?=
+CLOUDFLARE_TOKEN_FILE ?=
 PLATFORM_BUNDLE ?= inventories/bootstrap/platform.sops.yml
 PLATFORM_WIREGUARD_PRIVATE_KEY ?= $(HOME)/.config/spiritvpn/keys/operator-wg.key
 RESUME ?= 0
@@ -62,6 +63,15 @@ fleet-configure: fleet-ansible-check ## Apply compiled configure; requires APPLY
 
 fleet-provisioning-check: ## Validate manual VPS declarations; never calls provider APIs
 	python3 -m fleetctl.cli provisioning-check --environment "$(or $(ENVIRONMENT),develop)"
+
+fleet-dns-plan: ## Compare compiled DNS with Cloudflare; requires CLOUDFLARE_TOKEN_FILE
+	@test -n "$(CLOUDFLARE_TOKEN_FILE)" || (echo 'CLOUDFLARE_TOKEN_FILE is required' >&2; exit 2)
+	python3 -m fleetctl.cli dns --environment "$(or $(ENVIRONMENT),develop)" --token-file "$(CLOUDFLARE_TOKEN_FILE)"
+
+fleet-dns-apply: ## Create/update compiled DNS in Cloudflare; requires APPLY=1
+	@test "$(APPLY)" = 1 || (echo 'refusing DNS mutation: set APPLY=1 explicitly' >&2; exit 2)
+	@test -n "$(CLOUDFLARE_TOKEN_FILE)" || (echo 'CLOUDFLARE_TOKEN_FILE is required' >&2; exit 2)
+	python3 -m fleetctl.cli dns --environment "$(or $(ENVIRONMENT),develop)" --token-file "$(CLOUDFLARE_TOKEN_FILE)" --apply
 
 fleet-pki-issue: ## Issue a control-plane certificate; requires PROFILE and CA_STATE outside the repo
 	@test -n "$(PROFILE)" || (echo 'PROFILE is required: backend-server, backend-client, manifest-writer or customer-service' >&2; exit 2)
@@ -160,6 +170,7 @@ check: fleet-validate fleet-test ## Run local v1 static checks
 
 .PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-manifest \
 	fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check \
+	fleet-dns-plan fleet-dns-apply \
 	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-promote fleet-platform-check \
 	fleet-platform-bootstrap-check fleet-platform-bootstrap fleet-platform-refresh \
 	fleet-deploy-log syntax lint check

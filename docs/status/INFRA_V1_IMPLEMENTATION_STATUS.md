@@ -305,7 +305,7 @@ environment-bound backend SPIFFE identity. Readiness проверяет service,
 - автоматическая выдача/ротация backend↔client и backend↔NodeAgent mTLS;
 - применение materialization/agent-operation dashboards и alerts из
   нормативного backend observability contract;
-- фактическое применение DNS plan и monitoring targets внешними адаптерами;
+- фактическое применение monitoring targets внешним адаптером;
 - продвижение `candidate → serving`, drain и retire;
 - реальные флоты в `desired/environments/*`;
 - воспроизводимое построение `develop` fleet-нод с чистых машин;

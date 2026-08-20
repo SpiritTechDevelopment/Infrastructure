@@ -11,6 +11,7 @@
 {% if xray_enable_api | bool %}
   "api": {
     "tag": "api",
+    "listen": "{{ xray_api_bind }}:{{ xray_api_port }}",
     "services": {{ xray_api_services | to_json }}
   },
 {% endif %}
@@ -35,17 +36,6 @@
     }
   },
   "inbounds": [
-{% if xray_enable_api | bool %}
-    {
-      "listen": "{{ xray_api_bind }}",
-      "port": {{ xray_api_port }},
-      "protocol": "tunnel",
-      "tag": "api",
-      "settings": {
-        "rewriteAddress": "127.0.0.1"
-      }
-    },
-{% endif %}
     {
       "listen": "0.0.0.0",
       "port": {{ xray_listen_port }},
@@ -122,9 +112,6 @@
   "routing": {
     "domainStrategy": "{{ xray_domain_strategy }}",
     "rules": [
-{% if xray_enable_api | bool %}
-      { "type": "field", "inboundTag": ["api"], "outboundTag": "api" },
-{% endif %}
       { "type": "field", "ip": ["geoip:private"], "outboundTag": "{{ xray_block_outbound_tag }}" }
 {% if xray_block_domains | length > 0 %}
       ,{ "type": "field", "domain": {{ xray_block_domains | to_json }}, "outboundTag": "block" }

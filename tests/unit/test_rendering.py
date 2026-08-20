@@ -92,18 +92,34 @@ class RenderingTests(unittest.TestCase):
         # обязателен-но-пустой.
         self.assertIn("@sha256:", plan["backend"]["image"])
 
-    def test_dns_plan_publishes_only_serving_entries(self) -> None:
+    def test_dns_plan_publishes_all_serving_client_endpoints(self) -> None:
         plan = json.loads(render_files(self.state)["dns-plan.json"])
         self.assertEqual(plan["zone"], "develop.example.invalid")
-        self.assertEqual(len(plan["records"]), 1)
-        record = plan["records"][0]
-        self.assertEqual(record["logical_node_id"], "develop-entry-nl")
-        self.assertEqual(record["instance_id"], "develop-entry-nl-01")
-        self.assertEqual(record["name"], "edge-a7.develop.example.invalid")
-        self.assertEqual(record["record_type"], "A")
-        self.assertEqual(record["value"], "192.0.2.10")
-        self.assertEqual(record["ttl_seconds"], 60)
-        self.assertFalse(record["proxied"])
+        self.assertEqual(
+            plan["records"],
+            [
+                {
+                    "id": "develop-entry-nl",
+                    "instance_id": "develop-entry-nl-01",
+                    "logical_node_id": "develop-entry-nl",
+                    "name": "edge-a7.develop.example.invalid",
+                    "proxied": False,
+                    "record_type": "A",
+                    "ttl_seconds": 60,
+                    "value": "192.0.2.10",
+                },
+                {
+                    "id": "develop-exit-de",
+                    "instance_id": "develop-exit-de-01",
+                    "logical_node_id": "develop-exit-de",
+                    "name": "edge-b4.develop.example.invalid",
+                    "proxied": False,
+                    "record_type": "A",
+                    "ttl_seconds": 60,
+                    "value": "192.0.2.20",
+                },
+            ],
+        )
 
     def test_monitoring_targets_distinguish_instance_lifecycle_and_slo(self) -> None:
         plan = json.loads(render_files(self.state)["monitoring-targets.json"])
@@ -199,7 +215,10 @@ class RenderingTests(unittest.TestCase):
             files = render_files(state)
 
         dns = json.loads(files["dns-plan.json"])
-        self.assertEqual([record["instance_id"] for record in dns["records"]], ["develop-entry-nl-01"])
+        self.assertEqual(
+            [record["instance_id"] for record in dns["records"]],
+            ["develop-entry-nl-01", "develop-exit-de-01"],
+        )
         monitoring = json.loads(files["monitoring-targets.json"])
         candidate_targets = [
             target

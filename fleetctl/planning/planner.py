@@ -45,6 +45,8 @@ def build_impact_plan(
     baseline_nodes = _by_id(baseline_data["nodes"])
     current_instances = _by_id(current_data["instances"])
     baseline_instances = _by_id(baseline_data["instances"])
+    current_dns_nodes = set(_serving_by_node(current_instances))
+    baseline_dns_nodes = set(_serving_by_node(baseline_instances))
     current_fleets = _by_id(current_data["fleets"])
     baseline_fleets = _by_id(baseline_data["fleets"])
     current_node_models = {node.object_id: node for node in current.nodes}
@@ -81,7 +83,7 @@ def build_impact_plan(
             affected["dns_nodes"].update(
                 node_id
                 for node_id in changed_node_ids
-                if current_nodes[node_id]["role"] == "entry"
+                if node_id in current_dns_nodes | baseline_dns_nodes
                 and current_nodes[node_id]["common"]["networking"]["dns"]
                 != baseline_nodes[node_id]["common"]["networking"]["dns"]
             )
@@ -102,7 +104,7 @@ def build_impact_plan(
             affected["configure"].update(current_instances)
             affected["node_runtime"].update(current_instances)
         if "dns_zone" in fields:
-            affected["dns_nodes"].update(_node_ids_with_role(current_nodes, "entry"))
+            affected["dns_nodes"].update(current_dns_nodes | baseline_dns_nodes)
         if "management_network" in fields:
             affected["monitoring"].update(_active_instance_ids(current_instances))
 
@@ -166,7 +168,7 @@ def build_impact_plan(
     for node_id in sorted(set(current_nodes) - set(baseline_nodes)):
         changes.append({"type": "LOGICAL_NODE_ADDED", "node_id": node_id})
         affected["backend_nodes"].add(node_id)
-        if current_nodes[node_id]["role"] == "entry":
+        if node_id in current_dns_nodes:
             affected["dns_nodes"].add(node_id)
         _add_instances_for_nodes(affected["node_runtime"], current_instances, (node_id,))
         _add_instances_for_nodes(affected["monitoring"], current_instances, (node_id,))
@@ -174,7 +176,7 @@ def build_impact_plan(
         changes.append({"type": "LOGICAL_NODE_REMOVED", "node_id": node_id})
         destructive = True
         affected["backend_nodes"].add(node_id)
-        if baseline_nodes[node_id]["role"] == "entry":
+        if node_id in baseline_dns_nodes:
             affected["dns_nodes"].add(node_id)
         _add_instances_for_nodes(affected["node_runtime"], baseline_instances, (node_id,))
         _add_instances_for_nodes(affected["monitoring"], baseline_instances, (node_id,))
@@ -202,7 +204,10 @@ def build_impact_plan(
             object_fields = set(fields) - {"common"}
             if object_fields:
                 affected["backend_nodes"].add(node_id)
-                if current_node["role"] == "entry" and "hostname" in fields:
+                if (
+                    "hostname" in fields
+                    and node_id in current_dns_nodes | baseline_dns_nodes
+                ):
                     affected["dns_nodes"].add(node_id)
                 _add_instances_for_nodes(affected["configure"], current_instances, (node_id,))
                 _add_instances_for_nodes(affected["node_runtime"], current_instances, (node_id,))
@@ -216,7 +221,7 @@ def build_impact_plan(
                     current_instances,
                     affected,
                 )
-            if current_node["role"] == "entry" and dns_common_changed:
+            if dns_common_changed and node_id in current_dns_nodes | baseline_dns_nodes:
                 affected["dns_nodes"].add(node_id)
 
     baseline_serving = _serving_by_node(baseline_instances)
@@ -240,8 +245,7 @@ def build_impact_plan(
             affected["provision"].add(new_id)
             affected["configure"].add(new_id)
             affected["backend_nodes"].add(node_id)
-            if current_nodes[node_id]["role"] == "entry":
-                affected["dns_nodes"].add(node_id)
+            affected["dns_nodes"].add(node_id)
             affected["monitoring"].update((old_id, new_id))
             affected["management"].update((old_id, new_id))
             if old_id in current_instances:
@@ -260,7 +264,7 @@ def build_impact_plan(
         affected["monitoring"].add(instance_id)
         affected["management"].add(instance_id)
         node_id = instance["logical_node"]
-        if instance["target_state"] == "serving" and current_nodes[node_id]["role"] == "entry":
+        if instance["target_state"] == "serving":
             affected["dns_nodes"].add(node_id)
     for instance_id in sorted(set(baseline_instances) - set(current_instances) - replaced_old):
         instance = baseline_instances[instance_id]
@@ -269,7 +273,7 @@ def build_impact_plan(
         affected["monitoring"].add(instance_id)
         affected["management"].add(instance_id)
         node_id = instance["logical_node"]
-        if instance["target_state"] == "serving" and baseline_nodes[node_id]["role"] == "entry":
+        if instance["target_state"] == "serving":
             affected["dns_nodes"].add(node_id)
     for instance_id in sorted(set(current_instances) & set(baseline_instances)):
         current_instance = current_instances[instance_id]
@@ -285,8 +289,7 @@ def build_impact_plan(
             baseline_was_serving = baseline_instance["target_state"] == "serving"
             current_is_serving = current_instance["target_state"] == "serving"
             if (
-                current_nodes[node_id]["role"] == "entry"
-                and (current_is_serving or baseline_was_serving)
+                (current_is_serving or baseline_was_serving)
                 and ({"public_address", "target_state"} & set(fields))
             ):
                 affected["dns_nodes"].add(node_id)
@@ -363,10 +366,6 @@ def _active_instance_ids(instances: dict[str, dict[str, Any]]) -> set[str]:
         for instance_id, instance in instances.items()
         if instance["target_state"] != "retired"
     }
-
-
-def _node_ids_with_role(nodes: dict[str, dict[str, Any]], role: str) -> set[str]:
-    return {node_id for node_id, node in nodes.items() if node["role"] == role}
 
 
 def _changed_fields(current: dict[str, Any], baseline: dict[str, Any], *, exclude: tuple[str, ...] = ()) -> list[str]:

@@ -29,7 +29,9 @@ services:
       - /var/log/xray:/var/log/xray
     command: ["run", "-config", "/etc/xray/config.json"]
     healthcheck:
-      test: ["CMD", "xray", "run", "-test", "-config", "/etc/xray/config.json"]
+      # Syntax validation cannot detect a dead gRPC API or a recursive API
+      # tunnel. Query the same runtime endpoint NodeAgent depends on.
+      test: ["CMD", "xray", "api", "statsquery", "--server=127.0.0.1:10085"]
       interval: 15s
       timeout: 10s
       retries: 6

@@ -13,7 +13,10 @@ def compile_dns_plan(state: DesiredState) -> dict[str, Any]:
     records: list[dict[str, Any]] = []
     for instance in sorted(state.instances, key=lambda item: item.object_id):
         node = nodes[instance.logical_node]
-        if node.role != "entry" or instance.target_state != "serving":
+        # Both roles are client endpoints. Entry can route a user to a linked
+        # exit, while an exit also serves that fleet's users directly through
+        # its local FREEDOM outbound.
+        if instance.target_state != "serving":
             continue
         common = state.common_for_node(node.object_id)
         address = ipaddress.ip_address(instance.public_address)

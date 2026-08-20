@@ -195,6 +195,46 @@ class BootstrapReadinessTests(unittest.TestCase):
         self.assertTrue(any(f"{{{{ {name} }}}}" in body for name in defaults))
 
 
+class XrayApiRuntimeTests(unittest.TestCase):
+    """The API must be a real readiness dependency, not a syntax-only claim."""
+
+    def test_api_uses_direct_loopback_listener_without_recursive_tunnel(self) -> None:
+        config = (
+            REPO_ROOT / "roles" / "xray" / "templates" / "config.json.j2"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"listen": "{{ xray_api_bind }}:{{ xray_api_port }}"', config)
+        self.assertNotIn('"protocol": "tunnel"', config)
+        self.assertNotIn('"inboundTag": ["api"]', config)
+        self.assertNotIn('"outboundTag": "api"', config)
+
+    def test_healthcheck_calls_the_live_stats_api(self) -> None:
+        compose = (
+            REPO_ROOT / "roles" / "compiled_runtime" / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'test: ["CMD", "xray", "api", "statsquery", '
+            '"--server=127.0.0.1:10085"]',
+            compose,
+        )
+        self.assertNotIn(
+            'test: ["CMD", "xray", "run", "-test", '
+            '"-config", "/etc/xray/config.json"]',
+            compose,
+        )
+
+    def test_changed_startup_config_restarts_xray_and_waits_for_api(self) -> None:
+        tasks = (
+            REPO_ROOT / "roles" / "compiled_runtime" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Restart Xray onto a changed startup configuration", tasks)
+        self.assertIn("Wait for the restarted Xray API", tasks)
+        self.assertGreaterEqual(tasks.count("_xray_config_render.changed"), 2)
+        restart = tasks.index("Restart Xray onto a changed startup configuration")
+        wait = tasks.index("Wait for the restarted Xray API")
+        self.assertLess(restart, wait)
+        self.assertIn("--wait-timeout", tasks[wait:])
+
+
 class SshPortHandoverTests(unittest.TestCase):
     """Bootstrap must not close the port it is talking over.
 

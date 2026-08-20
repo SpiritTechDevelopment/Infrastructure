@@ -67,7 +67,7 @@ class ImpactPlanningTests(unittest.TestCase):
         self.assertIn("develop-entry-nl-01", plan.affected["node_runtime"])
         self.assertIn("develop-entry-nl-01", plan.affected["configure"])
         self.assertIn("develop-exit-de", plan.affected["backend_nodes"])
-        self.assertNotIn("develop-exit-de", plan.affected["dns_nodes"])
+        self.assertIn("develop-exit-de", plan.affected["dns_nodes"])
 
     def test_entry_replacement_affects_dns(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

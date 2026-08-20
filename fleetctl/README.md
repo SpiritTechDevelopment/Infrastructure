@@ -14,8 +14,17 @@ fleetctl render --environment develop --output build/develop
 fleetctl plan --environment develop --source HEAD --output build/develop
 fleetctl ansible-check --environment develop --build-dir build/develop
 fleetctl provisioning-check --environment develop
+fleetctl dns --environment develop --token-file /protected/cloudflare-token
 fleetctl deploy --environment develop --source HEAD
 ```
+
+`dns` сверяет с Cloudflare все `serving` entry- и exit-endpoint из
+`dns-plan.json`. По умолчанию команда только показывает `create`/`update`;
+изменение записей требует явного `--apply`. Адаптер не удаляет записи, принимает
+только `A`/`AAAA` внутри объявленной зоны и всегда требует DNS-only режим. Файл
+API-токена должен быть обычным файлом без доступа для group/world (например,
+mode `0600`). Эквивалентные Make-цели — `fleet-dns-plan` и
+`fleet-dns-apply APPLY=1` с `CLOUDFLARE_TOKEN_FILE=...`.
 
 `plan` resolves its normal baseline from
 `refs/deployments/<environment>`. A missing ref fails closed unless the first
@@ -63,7 +72,8 @@ With a manifest-writer identity the coordinator hands the compiled manifest to
 the backend and finishes at `BACKEND_APPLIED`; without one it stops at
 `WAITING_FOR_BACKEND` and says so. DNS/data-plane promotion and
 `refs/deployments/*` updates remain outside the coordinator, and it never
-reports them as complete.
+reports them as complete. DNS reconciliation is a separate, explicitly guarded
+operator operation and is not inferred from a successful Ansible deployment.
 
 `update-deployment-ref` is the atomic compare-and-swap that records a deployment
 the coordinator has already finished. The coordinator does not call it: moving

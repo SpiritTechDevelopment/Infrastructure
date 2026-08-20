@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 import sys
 from pathlib import Path
 
 from fleetctl.adapters import (
     CompiledArtifactsError,
+    CloudflareClient,
+    CloudflareDnsError,
     GitAdapterError,
     GitRepository,
     OutputDirectoryError,
+    reconcile_cloudflare_dns,
     write_generated_artifact,
     write_rendered_files,
     validate_ansible_artifacts,
@@ -20,6 +25,7 @@ from fleetctl.compiler import (
     BackendManifestError,
     backend_manifest_bytes,
     compile_backend_manifest,
+    compile_dns_plan,
     render_files,
 )
 from fleetctl.deployment import DeploymentCoordinator, DeploymentError, DeploymentOptions
@@ -87,6 +93,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="run provider-neutral manual provisioning preflight without external actions",
     )
     provisioning_check.add_argument("--environment", required=True, choices=("develop", "prod"))
+    dns = commands.add_parser(
+        "dns",
+        help="plan or explicitly apply compiled DNS records through Cloudflare",
+    )
+    dns.add_argument("--environment", required=True, choices=("develop", "prod"))
+    dns.add_argument(
+        "--token-file",
+        type=Path,
+        help="mode-0600 Cloudflare API token file; otherwise CLOUDFLARE_API_TOKEN is used",
+    )
+    dns.add_argument("--apply", action="store_true", help="create or update records")
     deploy = commands.add_parser(
         "deploy",
         help="run infrastructure workflow; dry-run is the default and stops at WAITING_FOR_BACKEND",
@@ -287,6 +304,28 @@ def main(argv: list[str] | None = None) -> int:
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if payload["passed"] else 1
+    if args.command == "dns":
+        try:
+            state = validate_environment(args.root, args.environment)
+            if args.apply:
+                repository = GitRepository(args.root)
+                source_git_sha = repository.resolve_commit("HEAD")
+                repository.assert_desired_matches_commit(source_git_sha)
+            token = _read_cloudflare_token(args.token_file)
+            result = reconcile_cloudflare_dns(
+                compile_dns_plan(state),
+                CloudflareClient(token),
+                apply=args.apply,
+            )
+        except DesiredStateInvalid as exc:
+            for issue in exc.issues:
+                print(issue.render(), file=sys.stderr)
+            return 1
+        except (CloudflareDnsError, GitAdapterError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     if args.command == "deploy":
         try:
             record = DeploymentCoordinator(args.root).run(
@@ -345,6 +384,27 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     raise AssertionError(f"unreachable command: {args.command}")
+
+
+def _read_cloudflare_token(token_file: Path | None) -> str:
+    if token_file is None:
+        token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+        if not token:
+            raise CloudflareDnsError("provide --token-file or set CLOUDFLARE_API_TOKEN")
+        return token
+    if token_file.is_symlink():
+        raise CloudflareDnsError(f"refusing symlink Cloudflare token file: {token_file}")
+    metadata = token_file.stat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise CloudflareDnsError(f"Cloudflare token path is not a regular file: {token_file}")
+    if stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise CloudflareDnsError(
+            f"Cloudflare token file must not be group/world accessible: {token_file}"
+        )
+    token = token_file.read_text(encoding="utf-8").strip()
+    if not token:
+        raise CloudflareDnsError(f"Cloudflare token file is empty: {token_file}")
+    return token
 
 
 def _prepare_plan(
