@@ -18,9 +18,12 @@ executor_dir="{{ platform_executor_dir }}"
 repository="$executor_dir/platform-repository.git"
 bundle="$(mktemp "$executor_dir/incoming/platform.XXXXXXXX.bundle")"
 worktree="$(mktemp -d "$executor_dir/incoming/platform.XXXXXXXX.worktree")"
+vars_dir="$(mktemp -d "$executor_dir/incoming/platform.XXXXXXXX.vars")"
+component_vars="$vars_dir/components.yml"
 cleanup() {
   rm -f -- "$bundle"
   rm -rf -- "$worktree"
+  rm -rf -- "$vars_dir"
 }
 trap cleanup EXIT
 
@@ -67,11 +70,19 @@ test -s "{{ platform_runtime_vars_file }}" || {
   exit 66
 }
 
+SOPS_AGE_KEY_FILE="{{ platform_executor_sops_identity_file }}" \
+  "{{ platform_executor_dir }}/venv/bin/python" \
+  "$worktree/scripts/platform-component-vars.py" \
+  --components "$worktree/desired/common/components.yml" \
+  --schema "$worktree/contracts/desired-state/components.schema.json" \
+  --output "$component_vars"
+
 arguments=(
   -i localhost,
   --connection local
   "$worktree/playbooks/platform/steady.yml"
   --extra-vars "@{{ platform_runtime_vars_file }}"
+  --extra-vars "@$component_vars"
 )
 if test "$mode" = check; then
   arguments+=(--check --diff)

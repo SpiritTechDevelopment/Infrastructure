@@ -245,10 +245,12 @@ all:
         defaults = (REPO_ROOT / "roles" / "platform_vault" / "defaults" / "main.yml").read_text(
             encoding="utf-8"
         )
-        self.assertRegex(
-            defaults,
-            r"hashicorp/vault:1\.21\.4@sha256:[0-9a-f]{64}",
+        self.assertEqual(yaml.safe_load(defaults)["platform_vault_image"], "")
+        projection = (REPO_ROOT / "scripts" / "platform-component-vars.py").read_text(
+            encoding="utf-8"
         )
+        self.assertIn('"vault": "platform_vault_image"', projection)
+        self.assertIn("requires an immutable digest", projection)
 
     def test_platform_bootstrap_creates_wireguard_without_laptop_cidr(self) -> None:
         playbook = (REPO_ROOT / "playbooks" / "platform" / "bootstrap.yml").read_text(
@@ -509,6 +511,9 @@ all:
             "refs/spiritvpn/platform-source",
             "playbooks/platform/steady.yml",
             "platform_runtime_vars_file",
+            "scripts/platform-component-vars.py",
+            "desired/common/components.yml",
+            "SOPS_AGE_KEY_FILE",
         ):
             self.assertIn(required, executor)
         self.assertNotIn("eval", executor)
@@ -1530,17 +1535,38 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
         module._require_command = lambda command: command
         module._validate_private_key = lambda path: PEER_PUBLIC_KEY
         module._run = recorder
+        original_materializer = module._materialize_platform_component_vars
+
+        def materialize(path: Path) -> None:
+            variables = {
+                name: f"registry.invalid/{name}:fixture@sha256:{'a' * 64}"
+                for name in (
+                    "platform_vault_image",
+                    "platform_prometheus_image",
+                    "platform_node_exporter_image",
+                    "platform_grafana_image",
+                    "platform_alertmanager_image",
+                    "platform_loki_image",
+                    "platform_alloy_image",
+                )
+            }
+            path.write_text(yaml.safe_dump(variables), encoding="utf-8")
+
+        module._materialize_platform_component_vars = materialize
         with tempfile.TemporaryDirectory() as temporary:
             key = Path(temporary) / "operator.key"
             key.write_text("unused\n", encoding="utf-8")
-            with contextlib.redirect_stdout(io.StringIO()):  # keep test output clean
-                module.execute(
-                    bundle=Path("/does/not/matter"),
-                    operator_private_key=key,
-                    client_interface="spiritvpn-mgmt",
-                    verify_convergence=False,
-                    reuse_tunnel=reuse_tunnel,
-                )
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):  # keep test output clean
+                    module.execute(
+                        bundle=Path("/does/not/matter"),
+                        operator_private_key=key,
+                        client_interface="spiritvpn-mgmt",
+                        verify_convergence=False,
+                        reuse_tunnel=reuse_tunnel,
+                    )
+            finally:
+                module._materialize_platform_component_vars = original_materializer
         return module, recorder
 
     def applied_command(self, recorder: _RecordedRun) -> list[str]:
@@ -1569,6 +1595,7 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
         applied = self.applied_command(recorder)
         self.assertIn("internal-inventory.yml", " ".join(applied))
         self.assertIn(json.dumps({"deploy_mode": "hardened"}), applied)
+        self.assertIn("component-vars.yml", " ".join(applied))
 
         delivered = yaml.safe_load(recorder.extra_vars["runtime-vars.yml"])
         self.assertEqual(

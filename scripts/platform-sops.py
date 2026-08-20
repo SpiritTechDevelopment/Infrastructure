@@ -245,6 +245,7 @@ def execute(mode: str, bundle: Path) -> None:
         inventory_path = protected / "inventory.yml"
         known_hosts_path = protected / "known_hosts"
         variables_path = protected / "vars.yml"
+        component_variables_path = protected / "component-vars.yml"
         _write_private(
             inventory_path,
             yaml.safe_dump(inventory, allow_unicode=True, sort_keys=False),
@@ -253,6 +254,14 @@ def execute(mode: str, bundle: Path) -> None:
         _write_private(
             variables_path,
             yaml.safe_dump(variables, allow_unicode=True, sort_keys=False),
+        )
+        _run(
+            [
+                sys.executable,
+                str(REPOSITORY_ROOT / "scripts" / "platform-component-vars.py"),
+                "--output",
+                str(component_variables_path),
+            ]
         )
 
         _run(
@@ -292,6 +301,8 @@ def execute(mode: str, bundle: Path) -> None:
             "playbooks/platform/bootstrap.yml",
             "--extra-vars",
             f"@{variables_path}",
+            "--extra-vars",
+            f"@{component_variables_path}",
         ]
         if mode == "bootstrap-check":
             command.append("--syntax-check")

@@ -94,6 +94,21 @@ def _write_private(path: Path, content: str) -> None:
         raise
 
 
+def _materialize_platform_component_vars(path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPOSITORY_ROOT / "scripts" / "platform-component-vars.py"),
+            "--output",
+            str(path),
+        ],
+        cwd=REPOSITORY_ROOT,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise BootstrapError("cannot materialize platform images from common desired state")
+
+
 def _one_platform_host(inventory: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     try:
         hosts = inventory["all"]["children"]["spiritvpn_platform_bootstrap"]["hosts"]
@@ -321,10 +336,12 @@ def execute(
         public_inventory_path = protected / "public-inventory.yml"
         public_known_hosts_path = protected / "public-known-hosts"
         variables_path = protected / "vars.yml"
+        component_variables_path = protected / "component-vars.yml"
         metadata_path = protected / "wireguard-metadata.json"
         _write_private(public_inventory_path, yaml.safe_dump(inventory, sort_keys=False))
         _write_private(public_known_hosts_path, known_hosts)
         _write_private(variables_path, yaml.safe_dump(variables, sort_keys=False))
+        _materialize_platform_component_vars(component_variables_path)
 
         _run(
             [
@@ -345,6 +362,8 @@ def execute(
                 "playbooks/platform/bootstrap.yml",
                 "--extra-vars",
                 f"@{variables_path}",
+                "--extra-vars",
+                f"@{component_variables_path}",
                 "--extra-vars",
                 json.dumps({"platform_wireguard_public_endpoint": f"{public_host}:51820"}),
                 "--syntax-check",
@@ -448,6 +467,8 @@ def execute(
             "playbooks/platform/bootstrap.yml",
             "--extra-vars",
             f"@{runtime_variables_path}",
+            "--extra-vars",
+            f"@{component_variables_path}",
         ]
         if reuse_tunnel:
             # Хаб уже захарденен, и говорить ему обратное — регресс: режим bootstrap

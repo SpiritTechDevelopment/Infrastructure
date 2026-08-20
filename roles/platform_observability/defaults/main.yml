@@ -9,9 +9,10 @@ platform_observability_state_dir: /var/lib/spiritvpn/observability
 # reference the container path; the fragments are written to the host path.
 platform_observability_targets_dir: /opt/spiritvpn/platform/observability/targets
 platform_prometheus_targets_container_dir: /etc/prometheus/targets
-# Public, reviewed supply-chain pin, updated through the normal pull-request
-# flow exactly like platform_vault_image. Not a secret.
-platform_prometheus_image: "docker.io/prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996"
+# Supplied from SOPS-encrypted desired/common/components.yml. Empty defaults are
+# deliberate: a platform run without the canonical desired-state projection
+# must fail instead of silently deploying a second version source.
+platform_prometheus_image: ""
 # Upstream prom/prometheus runs as uid 65534 (nobody) and creates lock and
 # chunk files in the TSDB directory at startup.
 platform_prometheus_uid: "65534"
@@ -58,7 +59,7 @@ platform_observability_jobs:
 # Образ и digest — те же, что у нод в desired/common/components.yml. Одна
 # версия экспортера на весь контур означает, что запросы дашборда одинаково
 # верны и для нод, и для хаба.
-platform_node_exporter_image: "mirror.gcr.io/prom/node-exporter@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a"
+platform_node_exporter_image: ""
 platform_node_exporter_bind_address: 127.0.0.1
 platform_node_exporter_port: 9100
 
@@ -66,7 +67,7 @@ platform_node_exporter_port: 9100
 # только loopback по той же причине, что и коллектор: routable-слушатель на
 # хосте с Vault публиковал бы состав флота и объёмы трафика. Доступ —
 # SSH-туннелем на хаб.
-platform_grafana_image: "mirror.gcr.io/grafana/grafana@sha256:b5b59bfc7561634c2d7b136c4543d702ebcc94a3da477f21ff26f89ffd4214fa"
+platform_grafana_image: ""
 # Upstream grafana/grafana работает под uid 472 и пишет в /var/lib/grafana.
 platform_grafana_uid: "472"
 platform_grafana_gid: "472"
@@ -99,7 +100,7 @@ platform_grafana_datasource_uids:
 
 # Сигнализация. Дашборд показывает, но не будит: пока никто не разбудит,
 # наблюдаемость работает ровно в те минуты, когда оператор сам смотрит.
-platform_alertmanager_image: "mirror.gcr.io/prom/alertmanager@sha256:27c475db5fb156cab31d5c18a4251ac7ed567746a2483ff264516437a39b15ba"
+platform_alertmanager_image: ""
 # Upstream prom/alertmanager работает под uid 65534.
 platform_alertmanager_uid: "65534"
 platform_alertmanager_gid: "65534"
@@ -130,7 +131,7 @@ platform_alertmanager_repeat_interval: 4h
 # Loki — единственное место, где логи собираются вместе, и один инстанс на обе
 # среды, как Prometheus и Vault. Изоляция по меткам, а не по инстансам: у
 # каждой записи есть environment.
-platform_loki_image: "mirror.gcr.io/grafana/loki@sha256:70b9f699fc9bb868b62f1cfd4f787dfa50242f1fd92e6089787d5d7daea75fe8"
+platform_loki_image: ""
 # Upstream grafana/loki работает под uid 10001.
 platform_loki_uid: "10001"
 platform_loki_gid: "10001"
@@ -154,6 +155,6 @@ platform_loki_retention_days: 7
 
 # Alloy на хабе собирает логи его собственных контейнеров. На нодах тот же
 # компонент разворачивает roles/compiled_runtime и шлёт сюда через оверлей.
-platform_alloy_image: "mirror.gcr.io/grafana/alloy@sha256:4f6ddc56ffdcf8a6316748fc5162972e20cb301523cac1bb4a31957df733ae9b"
+platform_alloy_image: ""
 platform_alloy_dir: /opt/spiritvpn/platform/observability/alloy
 platform_alloy_state_dir: /var/lib/spiritvpn/alloy

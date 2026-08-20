@@ -450,6 +450,13 @@ commit и требует вручную ввести `APPLY`. Затем он:
 Сценарий откажется перезаписывать чужой WireGuard config. Если туннель не
 поднялся, основная фаза hardening не начинается.
 
+Версии Vault и общего observability-стека не задаются в defaults ролей или в
+локальном runtime bundle хаба. Их единственный источник — SOPS-зашифрованный
+`desired/common/components.yml`. Bootstrap и `platform-deploy` расшифровывают
+этот файл только на доверенном контроллере, проверяют schema и обязательные
+digest, материализуют временные Ansible variables с mode `0600` и удаляют их
+после прогона. Отсутствующий pin завершает deployment до изменения compose.
+
 Низкоуровневый entrypoint, используемый сценарием:
 
 ```bash
