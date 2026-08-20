@@ -235,6 +235,70 @@ class XrayApiRuntimeTests(unittest.TestCase):
         self.assertIn("--wait-timeout", tasks[wait:])
 
 
+class XrayBridgeRoutingTests(unittest.TestCase):
+    """An exit must allow its static entry bridge before agent default-deny."""
+
+    def test_exit_static_bridge_clients_route_to_freedom(self) -> None:
+        template = ansible_jinja().from_string(
+            (REPO_ROOT / "roles" / "xray" / "templates" / "config.json.j2").read_text(
+                encoding="utf-8"
+            )
+        )
+        rendered = template.render(
+            xray_loglevel="warning",
+            xray_access_log="none",
+            xray_error_log="/var/log/xray/error.log",
+            xray_mask_address="quarter",
+            xray_dns_servers=[],
+            xray_enable_api=True,
+            xray_api_bind="127.0.0.1",
+            xray_api_port=10085,
+            xray_api_services=["HandlerService", "RoutingService", "StatsService"],
+            xray_metrics_enabled=False,
+            xray_stats_user_traffic=True,
+            xray_listen_port=443,
+            xray_inbound_tag="xi-vless",
+            xray_static_clients=[
+                {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "email": "bridge-develop-entry-ru.to-develop-exit-ro",
+                    "flow": "xtls-rprx-vision",
+                }
+            ],
+            reality_dest="www.example.com:443",
+            reality_server_names=["ro.example.com"],
+            reality_private_key_eff="private-key",
+            reality_short_ids=["0123456789abcdef"],
+            xray_sniffing_route_only=True,
+            node_role="exit",
+            entry_exits=[],
+            xray_direct_outbound_tag="direct",
+            xray_block_outbound_tag="block",
+            xray_domain_strategy="AsIs",
+            xray_block_domains=[],
+            xray_manage_routing_via_agent=True,
+            entry_default_exit_tag="",
+            xray_entry_block_unmatched=True,
+        )
+        config = json.loads(rendered)
+
+        bridge_rule = next(
+            rule
+            for rule in config["routing"]["rules"]
+            if rule.get("ruleTag")
+            == "spirit-static:bridge:bridge-develop-entry-ru.to-develop-exit-ro"
+        )
+        self.assertEqual(
+            bridge_rule,
+            {
+                "type": "field",
+                "user": ["bridge-develop-entry-ru.to-develop-exit-ro"],
+                "outboundTag": "direct",
+                "ruleTag": "spirit-static:bridge:bridge-develop-entry-ru.to-develop-exit-ro",
+            },
+        )
+
+
 class SshPortHandoverTests(unittest.TestCase):
     """Bootstrap must not close the port it is talking over.
 

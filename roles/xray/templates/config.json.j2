@@ -116,6 +116,11 @@
 {% if xray_block_domains | length > 0 %}
       ,{ "type": "field", "domain": {{ xray_block_domains | to_json }}, "outboundTag": "block" }
 {% endif %}
+{% if node_role == 'exit' %}
+{% for client in xray_static_clients %}
+      ,{ "type": "field", "user": ["{{ client.email }}"], "outboundTag": "{{ xray_direct_outbound_tag }}", "ruleTag": "spirit-static:bridge:{{ client.email }}" }
+{% endfor %}
+{% endif %}
 {% if node_role == 'entry' %}
 {% if not (xray_manage_routing_via_agent | bool) %}
 {% for exit in entry_exits %}
