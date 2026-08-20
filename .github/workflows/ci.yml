@@ -96,8 +96,10 @@ jobs:
       - name: Validate and test decrypted desired state
         run: |
           set -euo pipefail
-          make fleet-validate
-          make fleet-test
+          for environment in develop prod; do
+            python -m fleetctl.cli validate --environment "$environment"
+          done
+          python -m unittest discover -s tests/unit -v
       - name: Verify deterministic render and Ansible inventory
         env:
           FIRST_RENDER: ${{ runner.temp }}/fleetctl-render-first
