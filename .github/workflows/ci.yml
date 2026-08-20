@@ -2,8 +2,9 @@ name: ci
 
 # Static validation only: desired state, compiler tests, deterministic render,
 # generated inventory parsing, and active v1 Ansible lint/syntax checks.
-# Runs on the GitHub-hosted runner — it needs NO secrets and NO fleet access
-# and is safe to run on every PR, including from forks.
+# Pull-request checks stay on GitHub-hosted runners with no decryption identity.
+# A trusted push gets one additional job on the dedicated runner, where the
+# runner-local age identity validates and compiles the real topology.
 
 on:
   pull_request:
@@ -23,32 +24,16 @@ jobs:
           python-version: "3.12"
       - name: Install fleetctl and inventory parser
         run: python -m pip install . 'ansible-core>=2.18,<2.19'
-      - name: Validate desired state
-        run: make fleet-validate
+      - name: Validate encrypted desired-state envelopes
+        run: make fleet-sops-envelope-check
       - name: Run fleetctl tests
-        run: make fleet-test
-      - name: Verify deterministic render and Ansible inventory
         env:
-          FIRST_RENDER: ${{ runner.temp }}/fleetctl-render-first
-          SECOND_RENDER: ${{ runner.temp }}/fleetctl-render-second
-        run: |
-          for environment in develop prod; do
-            python -m fleetctl.cli render --environment "$environment" --output "$FIRST_RENDER/$environment"
-            python -m fleetctl.cli render --environment "$environment" --output "$SECOND_RENDER/$environment"
-            diff -ru "$FIRST_RENDER/$environment" "$SECOND_RENDER/$environment"
-            ansible-inventory -i "$FIRST_RENDER/$environment/ansible-inventory.json" --list >/dev/null
-            python -m fleetctl.cli plan \
-              --environment "$environment" \
-              --baseline desired \
-              --output "$FIRST_RENDER/$environment"
-            python -m json.tool "$FIRST_RENDER/$environment/impact-plan.json" >/dev/null
-          done
+          SPIRITVPN_SKIP_LIVE_DESIRED: "1"
+        run: make fleet-test
 
-      # The repository environments carry no fleet, so the step above proves
-      # the frame and not the paths that handle real topology. The fixture is
-      # the only desired state with nodes, instances and a control plane in it,
-      # and `--root` is enough to compile it without a flag that could later be
-      # pointed at an unreviewed directory for real.
+      # Public CI cannot decrypt the repository topology. A populated plaintext
+      # fixture therefore keeps schema/compiler coverage available on pull
+      # requests without exposing the runner-local identity.
       - name: Compile the populated fixture desired state
         env:
           FIXTURE_ROOT: ${{ runner.temp }}/fleetctl-fixture
@@ -86,6 +71,51 @@ jobs:
           print(f"fixture: {len(targets)} targets, {len(scraped)} scraped")
           PYTHON
 
+  trusted-desired-state:
+    if: github.event_name == 'push'
+    runs-on: [self-hosted, linux, spiritvpn-deploy]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Bind the runner-local SOPS identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -un)" = github-runner
+          bin="$HOME/.local/spiritvpn/bin"
+          identity="$HOME/.config/spiritvpn/sops/age-identity.txt"
+          test "$(stat -c '%a:%U' "$identity")" = 600:github-runner
+          test -x "$bin/sops"
+          printf '%s\n' "$bin" >> "$GITHUB_PATH"
+          printf 'SOPS_AGE_KEY_FILE=%s\n' "$identity" >> "$GITHUB_ENV"
+      - name: Install fleetctl and inventory parser
+        run: python -m pip install . 'ansible-core>=2.18,<2.19'
+      - name: Validate and test decrypted desired state
+        run: |
+          set -euo pipefail
+          make fleet-validate
+          make fleet-test
+      - name: Verify deterministic render and Ansible inventory
+        env:
+          FIRST_RENDER: ${{ runner.temp }}/fleetctl-render-first
+          SECOND_RENDER: ${{ runner.temp }}/fleetctl-render-second
+        run: |
+          set -euo pipefail
+          for environment in develop prod; do
+            python -m fleetctl.cli render --environment "$environment" --output "$FIRST_RENDER/$environment"
+            python -m fleetctl.cli render --environment "$environment" --output "$SECOND_RENDER/$environment"
+            diff -ru "$FIRST_RENDER/$environment" "$SECOND_RENDER/$environment"
+            ansible-inventory -i "$FIRST_RENDER/$environment/ansible-inventory.json" --list >/dev/null
+            python -m fleetctl.cli plan \
+              --environment "$environment" \
+              --baseline desired \
+              --output "$FIRST_RENDER/$environment"
+            python -m json.tool "$FIRST_RENDER/$environment/impact-plan.json" >/dev/null
+          done
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -98,6 +128,8 @@ jobs:
       - name: Install tooling
         run: pip install -r requirements-ansible.txt
       - name: Static checks
+        env:
+          SPIRITVPN_SKIP_LIVE_DESIRED: "1"
         run: make check
       - name: Lint
         run: make lint

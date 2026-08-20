@@ -70,7 +70,7 @@ class KnownHostsCompilerTests(unittest.TestCase):
             f"ssh-dss {blob}",
             blob,
             f"ssh-ed25519 {blob} root@host",
-            f"5.101.67.252 ssh-ed25519 {blob}",
+            f"192.0.2.252 ssh-ed25519 {blob}",
         ):
             with self.subTest(rejected=rejected):
                 self.assertIsNone(expression.fullmatch(rejected))

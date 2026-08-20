@@ -80,6 +80,9 @@ class RepositorySurfaceTests(unittest.TestCase):
                 # Packs and updates the encrypted environment bundle while
                 # keeping plaintext in process memory.
                 "topology-release.py",
+                # Public CI can validate ciphertext structure and coverage
+                # without receiving any age identity.
+                "sops-envelope-check.py",
             },
         )
 

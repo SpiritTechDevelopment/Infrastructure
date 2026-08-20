@@ -172,7 +172,7 @@ jobs:
           # control-deploy.yml объясняет, почему `environment:` там намеренно
           # отсутствует: на плане free с приватными репозиториями environments
           # недоступны, required reviewers тоже. То есть без этой отсечки пуш в
-          # desired/environments/prod/environment.yml выкатил бы prod в apply
+          # desired/environments/prod/topology.sops.yml выкатил бы prod в apply
           # без единого подтверждения.
           #
           # Отсекается здесь, а не фильтром путей в триггере: так причина видна

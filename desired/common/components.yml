@@ -1,55 +1,88 @@
-schema_version: 1
+schema_version: ENC[AES256_GCM,data:xg==,iv:q6S2edOJoZcj+Hy6XbzfB1i0+j3wX+OqjlLJNZ8lmnU=,tag:BkGgzCPmgFhJjCcmJCnQeg==,type:int]
 components:
-  xray:
-    repository: ghcr.io/xtls/xray-core
-    tag: 26.3.27
-    digest: sha256:592ec4d11f656db95598d01e76dbcc6e002d67360b96a5436500a938230f52c7
-  # Docker Hub и quay.io недоступны из сети, где стоит entry-1: соединение не
-  # отвергается, а виснет до таймаута. Три образа ниже объявлены через
-  # pull-through зеркало Google, иначе вход не вытянет три компонента из
-  # четырёх. Адресация по содержимому, поэтому digest'ы для nginx и alloy те же
-  # самые, что на Docker Hub, и подмены слоёв зеркало допустить не может.
-  #
-  # node_exporter — единственный, кто сменил источник: он был объявлен на quay,
-  # а зеркало отдаёт копию из Docker Hub (prom/node-exporter). Это отдельный
-  # пуш того же релиза, поэтому и digest здесь другой, не quay'ный.
-  nginx_mask:
-    repository: mirror.gcr.io/library/nginx
-    tag: 1.29-alpine
-    digest: sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
-  alloy:
-    repository: mirror.gcr.io/grafana/alloy
-    tag: v1.17.1
-    digest: sha256:4f6ddc56ffdcf8a6316748fc5162972e20cb301523cac1bb4a31957df733ae9b
-  node_exporter:
-    repository: mirror.gcr.io/prom/node-exporter
-    tag: v1.9.1
-    digest: sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
-  node_agent:
-    repository: ghcr.io/spirittechdevelopment/node-agent
-    tag: unpinned
-    digest: null
-  vault:
-    repository: docker.io/hashicorp/vault
-    tag: 2.0.3
-    digest: null
-  loki:
-    repository: docker.io/grafana/loki
-    tag: 3.7.3
-    digest: null
-  prometheus:
-    repository: docker.io/prom/prometheus
-    tag: v3.5.0
-    digest: null
-  alertmanager:
-    repository: docker.io/prom/alertmanager
-    tag: v0.28.1
-    digest: null
-  grafana:
-    repository: docker.io/grafana/grafana
-    tag: 12.0.2
-    digest: null
-  blackbox_exporter:
-    repository: docker.io/prom/blackbox-exporter
-    tag: v0.27.0
-    digest: null
+    xray:
+        repository: ENC[AES256_GCM,data:tcPZUkHEn8rpJi/fxb6mVE9tu1Jr9Q==,iv:hbt8YeDOy7edADp18ozA+49UARkRz3rUzViTlPF+UJI=,tag:EpsHC0FITkEg3ONR3Cv30w==,type:str]
+        tag: ENC[AES256_GCM,data:isQ9+KOxUQ==,iv:6yVTvzUwA8CuQtRFfbpMarHVlqi/fBsZun4LWihZb3A=,tag:96wMyiY+iKsH4HuKLxfEhQ==,type:str]
+        digest: ENC[AES256_GCM,data:l5n+11zYml9H1UagEZgqdB/FzWcPQ+z2UA3p1zaODICTPrKpOjWTS4K2IDs+GyiClxZBAVgNi55yrR6mAj4D+in+K1YBnDk=,iv:mdxN9rcKS0nC1t5PTvpl1pODeMqi8Ct1VpZ5KEsLAZA=,tag:Ach2BbWfARE9PYuCnoRpxg==,type:str]
+    #ENC[AES256_GCM,data:d0YUwPgGS6neC2gZ+f9KVTlQXF6jWOffR1ctQQ+tO+k0I1uvuQlDVnZdAMbb0kOl+t2DnWQkIWqK9uH2/tRjRjeKk6OwqgaHVcHZu2ThlyoOuqqzXxmhF6DLOkvXPBd6+n4AregMXaJUTFni+r2P,iv:CynOCnGe/934Tv3Tcqe9fKd+kt9N8SDuKgReoAh30m8=,tag:3p/QSClv1xiUMykj96JT6g==,type:comment]
+    #ENC[AES256_GCM,data:lvKvmSl78bNsBCbfguhJVk4nofFinnrvh810tRy8LI8Imedyn2/HYGE2of7ee7nQ0xWrodKsG2X2FfaZISDF39E+xiJjwb8VsV6f8KABDCzycCYe0b85RWhmhorHgnQzsvpf0DMoG9ZX6rZ+c60mQV2zwJLgpGfbf8M=,iv:Ad1KiRR+MPs7kWLJwYvzK87ZudnqHA3xF5cIbLZYrDY=,tag:Sbwr3wSEdg3UliqX3PV4iQ==,type:comment]
+    #ENC[AES256_GCM,data:/GOj/cLNJApPEA+IVnn55N4+RsfERyKzCALah0ENsWb95WP1lMx8ydRzDfW2MPR1Ga3Gm9RDQ7ytsb3jkKiHiqW9L9QM4R13iTo2U7KPbXckYMpuory9jGbGRJCoNNIdX3LTz2xpLOxWgChmlA==,iv:rxWD8n499uaR3oA1OiSAhoVrcl3ALOXhwO0kV2pc63g=,tag:1727Qq8hxe0Ac/pxFsLBCA==,type:comment]
+    #ENC[AES256_GCM,data:HomP1pnWWGpR/DCoPp8k6egR9ZFxHZWCMtjPU4UGkIU6W+8uw91/41uYWbNgc7Id7vXZhfYVymUsFeBD5IMcbi81NZ90rvlxtAeqQ8I67Ds6thYm5u8RKj5GfLYGOPqvThF7LM9QH0MxYfHfMzvzPrDgRPXAMmsIXw==,iv:EB4MKH1/7ZWsd8OYvRu26v9oZ7t4epu0pD4wwtEC3XY=,tag:R/PbEsUCxLPMT4dIeskgHQ==,type:comment]
+    #ENC[AES256_GCM,data:3stB6i3LYy9Gu+ZoyRI2UZ+8wmjSoKfp/Dtn+aG0F5GvdsAata+9y/ksBAa3wYvA/u+8xpwOlv/glYlmvUPpmeVkg+MohcCLIlOvDAkmjlLDZiXozkX/WhOSvfvq0G3J5v8VO827EpeIoTeVvzsA+tlsj7A=,iv:OWnZRuvebosTrHj9Ys2eK729bazk5hsd8NuamTnv1FE=,tag:CwW41l9+rpwxC38wNE0pKw==,type:comment]
+    #
+    #ENC[AES256_GCM,data:xQHRKTr9pV9qYcKbu7pup64z749fCC0K1ZOjKSsNOw8e55WurB0x/UOezzL4XTh5Yc7NyvecRMYxVNAjhI5DK564rqTrP4NVLOLZjJvXiqsMTlpHjLgjC2bQXjaTRQmtuec0kM3jZW3CXYljOOBILpFgpSVGTlOlppA=,iv:AhkQLnIJZvDj2LohB1I9fof+MgDEkxL4rILNvwEGKCE=,tag:diehg9EDGwUFnNvYPPX5gg==,type:comment]
+    #ENC[AES256_GCM,data:ATil0rK/NoVx5DVYPRArcNySvnvleVXqXSEA8TLCr3Ns0MoOA0H8fN+Xg/7EvbIU28vR7SbLM+wt7FQ0L08zu1UKP04xsgDuP/DiEUfeWs6xpzDN784mNRcBYNN9MzA1kPmx5bc6u4rRFw==,iv:JDNUFsASHtbG34FYVnIScPD6BUAa0SddM8aOP/IAeH8=,tag:Xe7k1wHw6n2Lx6g1AXZI1w==,type:comment]
+    #ENC[AES256_GCM,data:TU8uWRHTC1F5n+Z5LlOzqImGc379lPMTdWtCwfwqLZ5yPwlwiQ+NV/0C+NZSax5Tvh0yMz7QGXVD/bcQIBju8CnzTiTZpoRul0fiiyr4ZZf/QRKnK1gftljjIaD0yEX1eJh3fbCNqA==,iv:bsw5KFUZFjrltDVoi7ayu8HfSuZr2iZj97MBB25x0Lw=,tag:XZr1di2Lu8TwpTzYG2sdmA==,type:comment]
+    nginx_mask:
+        repository: ENC[AES256_GCM,data:4jM1T/ovAlWiSUjGNkyRIYXPUdpC0z11NJ6w,iv:Fh1bXKUXm+tkdM+GZDLTMlNvUGR32F2J9KdAFr8dAxA=,tag:NvEuaLsEJmoCNFuCanokTg==,type:str]
+        tag: ENC[AES256_GCM,data:EO8X80TvKNBM1+Y=,iv:fH0/BWGToLtrVm7vIaBJkTBmpMx2B5mrq3lKUMGW+x4=,tag:TOxQCSlnwfr5XuOjvu+T5Q==,type:str]
+        digest: ENC[AES256_GCM,data:oeeMHl/vx99NdcI0Oq2ejP3Dem/aHuENd20KJ3/TdtBJSxKot3yryQ3xbYZsjBNaTViOTlr6fumP0+WMtErSDB4BAHSoiAs=,iv:J+ubTFnVOY9KCAsfJ0g3CzChNX4rkl0pfmHEx+qG2jU=,tag:+LstNr/PfLFOavu7PuroFA==,type:str]
+    alloy:
+        repository: ENC[AES256_GCM,data:BfmKA+rsOoSndm2B9c/ZtYFS7+7e9qGlOJyZ,iv:/e3s3NOKBJXEEWGhZB0ODHCUzKcva6cjypfSZr2aimI=,tag:9ss5Xegqm52Mu6gl/D3CuQ==,type:str]
+        tag: ENC[AES256_GCM,data:EPsxf5OJyQ==,iv:BGzIMYPDCuyhe+KcjRcd2cBDqHq/ekFrd5/p95ER7aE=,tag:451tsU0r13OittQi6+jxLA==,type:str]
+        digest: ENC[AES256_GCM,data:B1s7uVwv41y5UFKZ6MkaGV99275cKh1PvcI0MfMYFJwNlqhLP8rBUKcbm4mUdiQ7KWJUGsmQAV3TSoGDf+ZEad61sH8jJJw=,iv:nXtqUfMKMdJQHwwLE4vsog14vL2THBBeV/NYnZ/KVJ8=,tag:AjmN/mgfhqiXn9hqQGKQKg==,type:str]
+    node_exporter:
+        repository: ENC[AES256_GCM,data:6YlmnXL3nxzOUbhUqSfXjw1hgLzFjL0XQ3/PbOxtLUA=,iv:nFTFyJyxzpKG6t3bMpzaBCgaX0b8dn/hNCMp+f40e6s=,tag:LfqRgMYaHnNX8fSRuCevfw==,type:str]
+        tag: ENC[AES256_GCM,data:gm3BY3Ej,iv:5ij3buIIW3X1Po/v6RWL4XQ4jTGVmXSUScDJucbDVwc=,tag:9vRewsRhW5fs1WBvEnXAZQ==,type:str]
+        digest: ENC[AES256_GCM,data:H/MZpscrfP+noxrzbQeHfzDlGRcbH2SUCZupK5wF2n3k/o+PZOyatM0NDFK31TWXVeA2APLKRXxhCMzkBaSVLZx1FEXCqkg=,iv:bRHjRIy739NSK+bnLJ/eM6zikQGmBJr7vOAxFrhii6Q=,tag:61jvu+9C4NtFSp4Xk8+Osw==,type:str]
+    node_agent:
+        repository: ENC[AES256_GCM,data:rBgEZN9qhjyHyQDW4/V9FtFqTDY4DWugWO0K0H6AFaIj+OYvSdMXDA==,iv:zflSh3JN4QnevWKQvqJVLX645593gQjqAtvKKwD5YQ8=,tag:P7WsZtkjKcpTEJXTgCap6A==,type:str]
+        tag: ENC[AES256_GCM,data:31jA8z1Yzjk=,iv:YoHBvmBTI3noeMfviLfk0KUD7DGC4d6fvNQXRPTDTpg=,tag:5MtFZjy4yLxNc3ZU9xl8pg==,type:str]
+        digest: null
+    vault:
+        repository: ENC[AES256_GCM,data:Wlsswe7HMXG1zqwa993q02siKSqU/ohYXQ==,iv:05MvK7fKaKjNCwPX15pP6keyf3d1+J4QyD4TlvQaHHc=,tag:xWfrCPOUZqKOdgB6seo9eA==,type:str]
+        tag: ENC[AES256_GCM,data:hN79gGo=,iv:imVjuHA1mkRLAi9t0bvp22GIsl79++215FhlMwBbqsk=,tag:+JpR9r/jtzg1t1PMUzSeog==,type:str]
+        digest: null
+    loki:
+        repository: ENC[AES256_GCM,data:NhPhFAMCIqF+CmHEMYdj1c6AMfHUfw==,iv:bWkNsMkmENSMYf1I4tuEp6iR9k0fDyaozLRQPc+Bios=,tag:S3spz1jSRefVCiZgzVbFog==,type:str]
+        tag: ENC[AES256_GCM,data:OtD0um8=,iv:v25RUdgP2++aSS+BqFvvZMUbQ524sInnfgtbeTx9MAg=,tag:B7wT346xWp5raLoTTsQowA==,type:str]
+        digest: null
+    prometheus:
+        repository: ENC[AES256_GCM,data:nf/SJeSzc441s88ESK0EsabIg5w+0VcKfA==,iv:Y3rSyFL0raJLZRSc9EbJaAOTZ2EeKJjaRvgbB8i3c68=,tag:x+r7IRJN12n7+ytBbHqiRg==,type:str]
+        tag: ENC[AES256_GCM,data:ipfS3GxP,iv:WbX7w8bydjg+FGk8mzvbZ7P02jzWCDLocIlRqfDjSpQ=,tag:HjjRUtOhRbFnWCHSkfn4yw==,type:str]
+        digest: null
+    alertmanager:
+        repository: ENC[AES256_GCM,data:45KErSCMqb+dlPkfnFHQ2T1ef758Ni+Lg2sx,iv:/o4qCFcZkJvt5bjuie7pBReBLt5jYvkXmWwrpAjRLXU=,tag:mTkZDRGWRZWiuH65k9Auqg==,type:str]
+        tag: ENC[AES256_GCM,data:RIk2FouZGg==,iv:buUIZGFLY6gf8XWIum1LEk36D55OGg4khl7At4fDLW4=,tag:txpmpOyGjz3XGY9HhVHRYQ==,type:str]
+        digest: null
+    grafana:
+        repository: ENC[AES256_GCM,data:GhgGzg8CA4v5MBVCD5yiEuRPkVaIkG6LRA==,iv:WSr+SlyPjJrdhRwlyz4MBDvH1QgZ/EGAPvEYOqM2Osc=,tag:cUbK17IV/1DuhW+X8+vlmA==,type:str]
+        tag: ENC[AES256_GCM,data:3F54SjmM,iv:UYVw9A6XtlvhIJemR0duzh+CR5hA9UlmMnoEoiqbMnE=,tag:9DdPD6czPcDnjUBq6eNafg==,type:str]
+        digest: null
+    blackbox_exporter:
+        repository: ENC[AES256_GCM,data:GNMOaDAdqAurPvUeWZQwyJHGPr1E2X1dsxvQpS3emAw=,iv:Lrm6QudELSMEthTRtSSYwERsp16z2dz74n/yabfwtH8=,tag:dyaTu1Uilr2muS7Dhv6W7g==,type:str]
+        tag: ENC[AES256_GCM,data:7SS5GkfG0w==,iv:twxzObLK39W6Ul9OGNys89j853L6Xk9gz0M9fEcZCdY=,tag:2xlQJTCRi7a96b1UAIRuyQ==,type:str]
+        digest: null
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBoemNCT3VPQnB1U3huVHdF
+            Yks3akZhcUlKWk40YzdOZFhFMmJ5YXRkYW1FCmdRZU5EZ2R6b0JyYWFNVG5BRlcy
+            S25vSmVtYUxrQVJwS0plQlFvUkQ2aGsKLS0tIDQzRGZxTmNTRDkxUFB1alVnRTBG
+            UlVDNWE5Y0R6U0RUbVFqOHBVN1Q2dncKd+gAxAtRaebZoFXme6zs9UF+MTqQU5cT
+            TfztBZ6masxBrT+G74/rOVvSZKlpJJHOMn1nrUCPtl3VVUdSr6QTWA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBPcXJTMEJxOCs0LzhtOGpG
+            RWdWV3JHTVdYQklMeElndmx5SnVWVkhaMjI4CkJmdU0weGpDZ0xaeHB5YmtmdE1r
+            dWFvcDdqRy83Zko3ajUxWlBJUHFPamcKLS0tIDBtOXBzZjc2ZmNydjRVa2VEYmRa
+            d2h1WU95d3pXWnZpZ2FkR0ZtUXhuNWsKoZKwsRfkZKztFEbQXitpy1JAArxpckOK
+            lVH/gjGd0cM/4du9rmBzl62NFMgEJ3BzOXPLLn8L1WXq++3tanTZMQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1gkflnrtnkwqza5p0zyjjd264x66kdxckf3dfnmcq6glhfekx5u5q9erfhc
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBWSXJCU1ZDZnJSc0o3OGo5
+            RDR5aVdFaDR5STZvK1krZHlBTXNSaElrSkhzCkU3SFUwWVlKNWJyL3hneTFib25V
+            T3VXcmxPd1RzK2pvYlExdXlrV1lNaGcKLS0tIEFBenRxKzh2aUhkVXNPbEdWLzV6
+            eHFpS05pR29mSUVWL3E0RHFSc25pVE0K3gL2JBxqRLJ4szLi+xGikr18C/Y/+1sP
+            61t1waEjlucIur2RbZi3qh8d5jygSKkz0PsGpqdBnE0xANBxhU3P+A==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
+    lastmodified: "2026-08-20T20:06:23Z"
+    mac: ENC[AES256_GCM,data:TjupdUhvPDKMid0VDCZm888VlK0Yyeih+duP26ywrM5AACG1TzQZv2kwJ7d6MtB2EvK5R26QDJK5eSxXBfuzfWl9ajCCwokqvXzvQl3N+TCKPSzfjsfM6iWLZTgukgbQgDLIf8sh8cfXnfxtqukFEY7mMXvi8oHyBLFUkx31+gM=,iv:Dc4b4WyqLlzQKEiP12CzYD4Pf+iBb09Q+q/rtBrpxew=,tag:F3mif5VbtKdoS1jT73oZNw==,type:str]
+    unencrypted_suffix: _unencrypted
+    version: 3.13.2

@@ -30,6 +30,9 @@ help: ## Show targets
 fleet-validate: ## Validate desired state for all environments without network access
 	@for environment in develop prod; do python3 -m fleetctl.cli validate --environment "$$environment" || exit $$?; done
 
+fleet-sops-envelope-check: ## Validate encrypted desired-state structure without a private key
+	python3 scripts/sops-envelope-check.py
+
 fleet-test: ## Run offline fleetctl unit tests
 	python3 -m unittest discover -s tests/unit -v
 
@@ -152,7 +155,8 @@ lint: ## Run YAML and Ansible lint on the active v1 contour
 	ANSIBLE_INVENTORY="$(CURDIR)/tests/fixtures/platform-bootstrap/platform.yml" \
 		ansible-lint playbooks roles
 
-check: fleet-validate fleet-test ## Run local v1 static checks
+check: fleet-sops-envelope-check fleet-test ## Run local v1 static checks
+	@if test "$(SPIRITVPN_SKIP_LIVE_DESIRED)" != 1; then $(MAKE) fleet-validate; fi
 	@for script in scripts/*.sh; do bash -n "$$script" || exit $$?; done
 	@python3 -m py_compile scripts/*.py
 	@# A skipped syntax pass used to be a one-line note on stderr, which scrolled
@@ -168,7 +172,7 @@ check: fleet-validate fleet-test ## Run local v1 static checks
 	  exit 1; \
 	fi
 
-.PHONY: help fleet-validate fleet-test fleet-render fleet-plan fleet-manifest \
+.PHONY: help fleet-validate fleet-sops-envelope-check fleet-test fleet-render fleet-plan fleet-manifest \
 	fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check \
 	fleet-dns-plan fleet-dns-apply \
 	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-promote fleet-platform-check \

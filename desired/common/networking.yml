@@ -1,16 +1,49 @@
-schema_version: 1
+schema_version: ENC[AES256_GCM,data:Fw==,iv:8gPBqVdRa96xHx/FIBOXddq89jPP29cEI6Sc9IuEJ2I=,tag:z2BbLZunrqV/nditdgoRQQ==,type:int]
 management:
-  interface: wg0
-  listen_port: 51820
-  mtu: 1420
-  persistent_keepalive_seconds: 25
+    interface: ENC[AES256_GCM,data:o9MK,iv:B9QW2LdWALLBE9fBGg5JjFaiRFHdbOAAnlop+i5e3u4=,tag:yfp663Wr9h1+EKQW2XdZxw==,type:str]
+    listen_port: ENC[AES256_GCM,data:gjh3c7M=,iv:4ZdrsHhPElmVqrQgwHcJfaDp1t8AsLwknc1PJXCLchk=,tag:eZU4N/9wK46yHOTarEmNNg==,type:int]
+    mtu: ENC[AES256_GCM,data:aIJR1Q==,iv:cdz/Gxlp84U187TxMWvwVAKCQzj6VypG/UXq/GFGZqk=,tag:mpfhGnTMQptRn7FJwHiqWA==,type:int]
+    persistent_keepalive_seconds: ENC[AES256_GCM,data:+HQ=,iv:DmrU0LTi4f8E99AQWfAX6986sVkXcuz+d8jTwXWGvs8=,tag:9Ej0wkf8DToWiyUoJdjsQQ==,type:int]
 ssh:
-  # Steady-state sshd port on every traffic node. First-time bootstrap still
-  # connects on 22 (a clean VPS has nothing else); the common role moves sshd
-  # here, and every later phase reaches the node on this port.
-  port: 232
+    #ENC[AES256_GCM,data:f5vtdlPqmDlen9G4ESWZbTLgt0stiE2NOKO2JHBuKgKpz+SXWz678BIqomMABpWEQhbIc4vyGlSQVfOKFzcRH88AAnKSnCaxLw==,iv:ijql4scSSZMC83SSQjZ7NRHDil5OHEI2jHZeewim9Nc=,tag:RDsKqBchIAsiQk0UJID7aA==,type:comment]
+    #ENC[AES256_GCM,data:ofu3KCKvHZ8ZGIr8ySV3GzsDARj7wGOxnwMue/6FE3mbnkwhaZUiO+BRVvYiJzSvGZEKo75YW8RvbDLkC1l9VEr4OMlsJB5EsMc=,iv:q6rHRxE7untzzSNvaZRbl7cYM9YHRmlnFuk91T28hFE=,tag:h3pa9oDWCESl1/nqYFxLEA==,type:comment]
+    #ENC[AES256_GCM,data:Oo3qHPEqaZ3Ax/7Ay3kClKWCNj7RYp6icsllq2NxHQEt7NTZGIGB0P0HJlgT8lraIj1LKjryPBUCohk=,iv:paGsYtsFPeA49tsWsARgYvW+8ZNjulgNqe522AFzKq4=,tag:5SAgQAGBFKGLURR5fwm67g==,type:comment]
+    port: ENC[AES256_GCM,data:fhE1,iv:YwD/BR/YlNabuFy9bqQvS9EusS1qCR+hp8hJG9cWaFQ=,tag:gPCGsWmL42uuxyk9DC0zRw==,type:int]
 agent:
-  port: 9443
+    port: ENC[AES256_GCM,data:ArhPTw==,iv:/b9X6Ms86HT/TFVNeNvi6ZDZ0k+mJqQLLDww1oVerPE=,tag:Mm+h/2tMARGBqSur6n8voQ==,type:int]
 dns:
-  ttl_seconds: 60
-  proxied: false
+    ttl_seconds: ENC[AES256_GCM,data:9Lk=,iv:iJ9q2WQMmWC1cDwTgD8nkGMjGDQQVkrfJf/3Eel5waU=,tag:MwHB5tE30yXTXR+ZmAI1YQ==,type:int]
+    proxied: ENC[AES256_GCM,data:ZYCnyag=,iv:LBBwLbc7acy9YoU8vG/wkK5YIishJxQe9YVINJ0GTAM=,tag:LoTatopfN4VShslzK5NRSg==,type:bool]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB0WlV4UHE5KzM5YW5vZ2pz
+            bGRlbWlkYUdmSDYzT3BLWFBHaUo0VCsrN0NFCmRIUXBnT3FVdVJtL1JEQU5yYnpx
+            U0g3cVhTVDVkQ1d5U3Jkbll3RHNQR2sKLS0tIHhiY1VHWTV5QWxwckY4cXgvdmh6
+            MjMvZ241QlNJWkJsOTBWUkc1ZE1FOXMKHnG7zdN/SpwF3DhnNFjg/4igjlyceq9P
+            QUTkf3TRoFhnKQqklppizmCtShyk7QrdUnU7qa7H5YMQFxwZ0w5KLQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA4ZVJUMEcvKzhidW96K2V1
+            OUhXZ0RrSjEvbDR2Y0daUmErVllaVEs0c0RjCnRORGlHdVE5WXhsTU8rRzZER0dt
+            ckdrUXI1ZHNtOXkwT0YrUS9zQmRFWDgKLS0tIHR3KzgxcE1LRUsyL2V5c2xwcVQr
+            WGFhRkgwNUhPQW9YalJhbi9iQ1poUmsKg+D12y5zDZs5N8Ktk0yarc0vC3xvAlnI
+            sqQw7fGsW161faUJ6Zp8IGKUPE66nS/RXavSgMoHROooZEd+/69vwg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1gkflnrtnkwqza5p0zyjjd264x66kdxckf3dfnmcq6glhfekx5u5q9erfhc
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSArNXhONlhMNzlkN3lQUHNm
+            RzFtVWlNOTdhN1pEeVIwUFg3Q0Y0MDB4Y1hjCjg2eWZKVE0zOEF6L0tGQUw5cXVW
+            N1JOOVk3Q1JJL3BhemNsUmlVYVQwMWsKLS0tIFNocVZoQmhNTHB4VkpVRlBmZjdO
+            clZ4ZmJWeFJodDJPRkU4ckUwc1FucncKiSpb+wmyc1D4O5Pigfj//OhewzbFPNEr
+            7F3W6xKs3xCJ4ripdY1+kN25Si8uT/Lgw1CDEjhUAfJ/9qUmKchjug==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
+    lastmodified: "2026-08-20T20:06:24Z"
+    mac: ENC[AES256_GCM,data:KoWv0acfqi0Q86ZCyj5eI7cvLD8XbOtz/y+3oiGPFLj0BXAw+Cup4fnaB3SUZdP1hUFq7eBuXyd8Bin5qPQtIxuyP8VcNHzXcCJhtVwof/Dhp3aNM4DPezwtC+/mi6WNrjJN7zEwxdpzQ83vXMJPiCe8AlvqsTxKva/yxusRoCQ=,iv:B2r8tb5ACGS7txL/IeZBeuKzSVikqeeK1A/fdK+Ryg4=,tag:7RBczUQNq81ae1blvOWeYA==,type:str]
+    unencrypted_suffix: _unencrypted
+    version: 3.13.2

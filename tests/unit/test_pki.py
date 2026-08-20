@@ -21,6 +21,7 @@ from fleetctl.validation import validate_environment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+LIVE_DESIRED_SKIP_REASON = "encrypted repository desired state requires a trusted SOPS identity"
 
 # The floor both roles enforce: control_tls_minimum_validity_seconds and
 # pki_agent_minimum_validity_seconds are each 604800.
@@ -165,6 +166,7 @@ class LocalPkiTests(unittest.TestCase):
         self.assertIn("TLS Web Server Authentication", text)
         self.assertNotIn("TLS Web Client Authentication", text)
 
+    @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_issuance_names_where_the_bot_certificate_belongs(self) -> None:
         """Оператор получает путь из desired state, а не из головы.
 

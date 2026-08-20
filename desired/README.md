@@ -3,10 +3,11 @@
 This directory is the human-edited source of truth for infrastructure topology.
 It must contain references to secrets, never secret values.
 
-- `common/` contains shared non-secret defaults.
-- `fleet-ids.yml` is the append-only mapping from fleet identifiers to numeric
-  `vpn_fleet_id` values.
-- `environments/` contains isolated `develop` and `prod` objects.
+- `common/` contains shared defaults encrypted in place with SOPS.
+- `fleet-ids.yml` is the SOPS-encrypted append-only mapping from fleet
+  identifiers to numeric `vpn_fleet_id` values.
+- `environments/` contains one encrypted topology for each isolated
+  `develop` and `prod` environment.
 
 An `Environment` may also contain `spec.control`: immutable backend,
 migration and PostgreSQL images plus environment-scoped Vault references. The
@@ -36,23 +37,21 @@ make fleet-plan ENVIRONMENT=develop BASELINE=path/to/desired
 neither a fleet nor a control release. A complete synthetic fleet and control
 stack live under `tests/fixtures/valid/`.
 
-An environment may be represented either by the current per-object files or by
-one `EnvironmentTopology` document named `topology.yml` (eventually
-`topology.sops.yml`). The two layouts compile to identical runtime artifacts and
-may not be mixed. Migration of the live environments waits for the management
-executor to receive a reviewed SOPS decryption identity; Git continues to carry
-only Vault references, never secret values.
+Each live environment is represented by one `EnvironmentTopology` document
+named `topology.sops.yml`. Per-object files remain supported only for synthetic
+test fixtures; they may not be mixed with a topology bundle. Git carries Vault
+references, never secret values, and encrypts the complete environment payload,
+including addresses, ports, domains and release pins.
 
-The management executor creates that age identity locally with mode `0600` and
-publishes only its recipient into a separate root-readable file. The private
-identity is neither returned to CI nor committed to Git; deployment processes
-receive only its file path through `SOPS_AGE_KEY_FILE`.
+The management executor and the dedicated self-hosted runner each own a separate
+age identity with mode `0600`. Their private identities are neither returned to
+GitHub nor committed to Git; trusted processes receive only the local file path
+through `SOPS_AGE_KEY_FILE`. A third recipient is held for operator recovery.
 
 `fleetctl` decrypts a SOPS document to process memory and never writes plaintext
 beside it. A missing or invalid age identity is a validation failure, not a
 reason to accept the encrypted placeholders as desired state.
 
-Three components are declared through `mirror.gcr.io` rather than their
-canonical registries. Docker Hub and quay.io are unreachable from the network
-`entry-1` sits in, so a canonical declaration would leave the entry unable to
-pull three of its four components. See the comment in `common/components.yml`.
+Some components are declared through a reviewed registry mirror because direct
+access to their canonical registries is unavailable from one traffic-node
+network. See the comments in `common/components.yml`.

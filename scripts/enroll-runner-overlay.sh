@@ -26,7 +26,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: enroll-runner-overlay.sh \
          --hub-public-key <base64>        # /etc/wireguard/wg0.pub on the hub
-         --hub-endpoint <host:port>       # public address, e.g. 202.50.55.242:51820
+         --hub-endpoint <host:port>       # public address, e.g. 192.0.2.1:51820
          --hub-overlay-address <ipv4>     # the hub address the runner will SSH to, e.g. 10.80.0.1
          --runner-address <ipv4/32>       # a free operator-range /32, e.g. 10.80.255.240/32
          [--runner-id <id>]               # peer label on the hub (default: ci-runner)

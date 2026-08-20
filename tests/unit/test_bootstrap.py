@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import unittest
@@ -9,8 +10,11 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment
 
+from fleetctl.validation import validate_environment
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+LIVE_DESIRED_SKIP_REASON = "encrypted repository desired state requires a trusted SOPS identity"
 
 
 def compiled_node_facts() -> dict[str, object]:
@@ -133,12 +137,11 @@ class XrayAccessLogTests(unittest.TestCase):
         )
         self.assertEqual(defaults["xray_access_log"], "none")
 
+    @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_repository_desired_state_keeps_the_access_log_off(self) -> None:
-        common = yaml.safe_load(
-            (REPO_ROOT / "desired" / "common" / "xray.yml").read_text(encoding="utf-8")
-        )
-        self.assertFalse(common["access_log"]["enabled"])
-        self.assertFalse(common["access_log"]["export_enabled"])
+        state = validate_environment(REPO_ROOT, "develop")
+        self.assertFalse(state.common.xray.access_log_enabled)
+        self.assertFalse(state.common.xray.access_log_export_enabled)
 
     def test_export_stays_forbidden_while_enabling_became_a_choice(self) -> None:
         """Only half of the old pair was removed, and deliberately so."""

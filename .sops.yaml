@@ -14,6 +14,14 @@ creation_rules:
       age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax,
       age1gkflnrtnkwqza5p0zyjjd264x66kdxckf3dfnmcq6glhfekx5u5q9erfhc,
       age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
+  # Shared runtime defaults and the fleet ID registry affect every compiled
+  # environment. Encrypt every scalar; the filenames and YAML keys remain
+  # visible so public CI can enforce the repository layout without a key.
+  - path_regex: ^desired/(common/(components|limits|networking|observability|rollout|xray)|fleet-ids)\.ya?ml$
+    age: >-
+      age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax,
+      age1gkflnrtnkwqza5p0zyjjd264x66kdxckf3dfnmcq6glhfekx5u5q9erfhc,
+      age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
   - path_regex: ^inventories/bootstrap/platform\.sops\.ya?ml$
     encrypted_regex: '^(inventory|known_hosts|vars)$'
     age: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax

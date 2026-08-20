@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import shutil
 import subprocess
 import tempfile
@@ -17,6 +18,7 @@ from fleetctl.validation import DesiredStateInvalid, validate_environment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+LIVE_DESIRED_SKIP_REASON = "encrypted repository desired state requires a trusted SOPS identity"
 
 
 class DesiredStateValidationTests(unittest.TestCase):
@@ -53,6 +55,7 @@ class DesiredStateValidationTests(unittest.TestCase):
                 validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             return {issue.code for issue in raised.exception.issues}
 
+    @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_repository_environments_are_valid(self) -> None:
         # develop declares the live fleet: one entry in Russia and one exit it
         # bridges to. prod is still an empty placeholder, so the assertion that
@@ -63,9 +66,10 @@ class DesiredStateValidationTests(unittest.TestCase):
                 self.assertEqual(state.environment.object_id, environment)
                 self.assertEqual(len(state.fleets), fleets)
 
+    @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_develop_declares_the_live_fleet(self) -> None:
         state = validate_environment(REPO_ROOT, "develop")
-        # develop-exit-nl (82.24.174.244) выведен из эксплуатации 2026-08-18.
+        # The former Netherlands exit was retired on 2026-08-18.
         self.assertEqual(
             [node.object_id for node in state.nodes],
             ["develop-entry-ru", "develop-exit-ro"],
@@ -511,6 +515,7 @@ class DesiredStateValidationTests(unittest.TestCase):
                 validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             self.assertIn("FILENAME", {issue.code for issue in raised.exception.issues})
 
+    @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_cli_reports_success(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):

@@ -612,7 +612,8 @@ desired/environments/develop/
 desired/environments/prod/
 ```
 
-Пример `desired/environments/develop/environment.yml`:
+Расшифрованный `Environment` внутри
+`desired/environments/develop/topology.sops.yml` имеет вид:
 
 ```yaml
 apiVersion: spiritvpn.io/v1alpha1

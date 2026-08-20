@@ -26,6 +26,7 @@ from fleetctl.validation import validate_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VALID_DESIRED = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+LIVE_DESIRED_SKIP_REASON = "encrypted repository desired state requires a trusted SOPS identity"
 
 
 class RecordingVault(BaseHTTPRequestHandler):
@@ -777,6 +778,7 @@ all:
             any("/var/log/xray" in volume for volume in compose["services"]["xray"]["volumes"])
         )
 
+    @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_logs_leave_the_node_only_over_the_overlay(self) -> None:
         """Тот же инвариант, что у скрейп-целей, но в другую сторону.
 
@@ -893,6 +895,7 @@ all:
             "http://127.0.0.1:{{ platform_loki_port }}/ready", collector_tasks
         )
 
+    @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_control_containers_may_reach_the_backend_on_the_hub(self) -> None:
         """Регрессия, найденная на тестовом заказе.
 
@@ -923,12 +926,8 @@ all:
 
         endpoint_ports = set()
         for environment in ("develop", "prod"):
-            declared = yaml.safe_load(
-                (
-                    REPO_ROOT / "desired" / "environments" / environment / "environment.yml"
-                ).read_text(encoding="utf-8")
-            )
-            endpoint = declared["spec"]["backend_endpoint"]
+            state = validate_environment(REPO_ROOT, environment)
+            endpoint = state.environment.backend_endpoint
             endpoint_ports.add(int(endpoint.rsplit(":", 1)[1]))
         self.assertEqual(set(rule["ports"]), endpoint_ports)
 

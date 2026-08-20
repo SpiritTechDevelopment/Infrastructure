@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import os
 import re
 import subprocess
 import sys
@@ -197,6 +198,7 @@ def parser() -> argparse.ArgumentParser:
     pack_parser = subcommands.add_parser("pack")
     pack_parser.add_argument("--root", type=Path, default=Path.cwd())
     pack_parser.add_argument("--environment", required=True)
+    pack_parser.add_argument("--output", type=Path)
 
     bump_parser = subcommands.add_parser("bump")
     bump_parser.add_argument("--root", type=Path, default=Path.cwd())
@@ -221,7 +223,18 @@ def main() -> None:
         output = pack(root, arguments.environment)
     else:
         output = bump(arguments)
-    sys.stdout.write(output)
+    if arguments.command == "pack" and arguments.output is not None:
+        target = topology_path(root, arguments.environment).resolve()
+        if arguments.output.resolve() != target:
+            fail("pack output must be the environment topology.sops.yml path")
+        try:
+            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        except OSError as exc:
+            fail(f"cannot create encrypted topology: {exc}")
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(output)
+    else:
+        sys.stdout.write(output)
 
 
 if __name__ == "__main__":

@@ -1,13 +1,46 @@
-schema_version: 1
+schema_version: ENC[AES256_GCM,data:PQ==,iv:1M8duyrXuQ828iMXe/xVoYUGBVrwVOyIY4o9VVmBdGE=,tag:5q4MyIiKzYmRVKK9J3jRtw==,type:int]
 bandwidth_profiles:
-  vps-1g:
-    port_capacity_mbps: 1000
-    egress_utilization_percent: 90
-    qdisc:
-      kind: cake
-      diffserv: besteffort
-      entry_flow_isolation: dual-dsthost
-      exit_flow_isolation: flows
-      nat: false
-      rtt: internet
+    vps-1g:
+        port_capacity_mbps: ENC[AES256_GCM,data:spk5aw==,iv:pdqjUXg334NVq9gnCqWwvWC0caT3T2J12PPy6eO1qHI=,tag:K8h9JZ1YJNmsHbsh5SNi1g==,type:int]
+        egress_utilization_percent: ENC[AES256_GCM,data:INA=,iv:EMpOhtsJcKKT/9KI8wRlcVgQFd1DSXUOMovdPyRpiII=,tag:G6/WEQlrb7uXeEARHN1tHw==,type:int]
+        qdisc:
+            kind: ENC[AES256_GCM,data:Iv9LVQ==,iv:Wu/6CByFtbnBZ4mQ/JdBMTsirZNOKpyz3DUULDSiBUc=,tag:iMpA6oUdHkIkYMM8CuIvmQ==,type:str]
+            diffserv: ENC[AES256_GCM,data:u8O7hCkSZFUwlg==,iv:Hqi69LKx/WA9tZvfdgAER2DaYocWITdLnnPjkoWER6I=,tag:cN4sRQ+i/yoC9H8TWoRgsQ==,type:str]
+            entry_flow_isolation: ENC[AES256_GCM,data:bIWYh7p2At2Va3dM,iv:gkBbYtuYUMacSVsNcJSprp3ClR7NNdRnptsz5qh9G60=,tag:4c1wCcoJJLNRk5h8qAygPQ==,type:str]
+            exit_flow_isolation: ENC[AES256_GCM,data:P+RjUHY=,iv:eYb/ZcN+BOYAVYc9JqMfXxCr4WC7x0v5JlyfLQpep3s=,tag:4Tp4JTi0l9igZv0QcHW9bg==,type:str]
+            nat: ENC[AES256_GCM,data:RIPcU+0=,iv:08kBkub0rBCwo2D4WZa+fVRn2LiMKQ2t7s3ucUB4wg4=,tag:VS+Mql46/CmbROnW5cRMNw==,type:bool]
+            rtt: ENC[AES256_GCM,data:FBtOm8NtSgw=,iv:0rCvH6y4WG/jw6lyiUfWcSv+21L/kklzMXxCnkR3PXE=,tag:XUsNPBrPoEhdrBE4sJ61HQ==,type:str]
 degradation_threshold_percent: null
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBadHZoeG5tS1F5d3FBaktH
+            bFNhTjVtRTllSUQzS1VITjFZaE1yejZCVWk4CmU2aG92UjJ5V1kvRjBOeld4S0s0
+            RFBxUHNkeWNNM1ZBTk95VThHM00zaFUKLS0tIEdBbERzbUcvd2svdE0rZkRCOFhp
+            aWY4NlIxdzRUeWFDUkQzYmNIYkJ2SlEKv2jAv1dN189Bo1BqAUTIx5/PGe1Z0s9z
+            HEGw8HXeDgWlU+gzWOXgKgLHKQMmxp9yjz2YnqzJfRJeSDnrZAlAoA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBiV1RFNDI3RnlRa3dTQm1R
+            SkorL3lPVk5jN3A0RE9mcDJZdkwyNGJpTnc4CjRqaUhuQjN3KzhMY3RFMWFOSVdD
+            ZTBBUnd3WE84S1hlMU5XdlJIYmh6b3cKLS0tIE9sWXdKTzdWM2N5LzhXYTdzc0p1
+            YVFzcm1jTWRacXZoR3hmWWNWcWdoc00KVsPSUufFgZpF3nPvdY+lHtiutI/IFGlD
+            sTLFNy5coWEZnyGOY+pYuOrYKYYoQ6SpQVuw7SuaC7tl+3LUEE3HrQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1gkflnrtnkwqza5p0zyjjd264x66kdxckf3dfnmcq6glhfekx5u5q9erfhc
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAyM1JrdFRoVllmbUswQkI4
+            eXUzVzRONmp1aHkwNWdnME9MeW1CN2hTQlQwCkJjRUxtaUZjZkV0eTZRcmJGSGV2
+            NzVkKzVXaEplcEJQbzJhMUsrZkFhQWMKLS0tIHRaaUpaRk1OTllXYUVlTXErSTZq
+            TXVSUG4zdUxXZHpueFlHaVJON29pdHMKEdfbQXtLmnb+/Az3K8OTURN/ejc/777Z
+            y9M594WHCA7BtTIqFdh3/dn6zjl9nCv6y7UKwLVmNAw85epFb8jChg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
+    lastmodified: "2026-08-20T20:06:24Z"
+    mac: ENC[AES256_GCM,data:2WxRG3A4tENfRBkCrUU3ep3uOelauGxzQ6nqVVA1gSwKguJG5qFOMyQY7gBs8GDfaRXgBmbJFJDrY8998XJvdCR7tAXCCKWV6s3lUAMeQP7m8ruVSYSDc1TTU2eMjDX4az4clQ9r06MHRVj0JF6g1W4RSkp6a3D/GqnXX2iyHps=,iv:xlgcMU0zdfiar+lBBQsvAzl69GVkZdBAWmqNVMUBsOM=,tag:PSDF0uyyfIYzovuHLEYIGQ==,type:str]
+    unencrypted_suffix: _unencrypted
+    version: 3.13.2

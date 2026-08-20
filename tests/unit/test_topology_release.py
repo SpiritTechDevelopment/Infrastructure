@@ -98,6 +98,26 @@ cat
         self.assertEqual(topology["spec"]["objects"], [self.environment_object()])
         self.assertFalse((self.environment_root / "topology.sops.yml").exists())
 
+    def test_pack_writes_only_to_the_canonical_ciphertext_path(self) -> None:
+        source = self.environment_root / "environment.yml"
+        source.write_text(yaml.safe_dump(self.environment_object()), encoding="utf-8")
+        target = self.environment_root / "topology.sops.yml"
+        result = self.run_script(
+            "pack",
+            "--root",
+            str(self.root),
+            "--environment",
+            "develop",
+            "--output",
+            str(target),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            yaml.safe_load(target.read_text(encoding="utf-8"))["kind"],
+            "EnvironmentTopology",
+        )
+        self.assertEqual(target.stat().st_mode & 0o777, 0o644)
+
     def test_release_bump_changes_only_the_selected_release(self) -> None:
         topology = {
             "apiVersion": "spiritvpn.io/v1alpha1",

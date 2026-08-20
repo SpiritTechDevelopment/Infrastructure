@@ -426,10 +426,7 @@ deployment-секретов.
 
 | Что изменилось | Что выкатывается |
 |---|---|
-| `desired/environments/<env>/environment.yml`, поддерево `spec.control` | control |
-| тот же файл, всё остальное | fleet |
-| `desired/environments/<env>/platform/**` | platform |
-| `desired/environments/<env>/**` — `nodes/`, `fleets/`, `instances/` | fleet |
+| `desired/environments/<env>/topology.sops.yml` | platform + control + fleet |
 | **всё прочее** — `roles/`, `playbooks/`, `fleetctl/`, `contracts/`, `desired/common/`, `scripts/` | platform + control + fleet |
 
 Последняя строка — не оговорка, а правило. Списка «путь → контур» здесь нет

@@ -1,17 +1,50 @@
-schema_version: 1
+schema_version: ENC[AES256_GCM,data:aw==,iv:W5iE/LhfGQQapde4/zZfWePCW/H5/6iPdiCGLv/NOes=,tag:zKpW8wi8HqniBKWYfKx4Cw==,type:int]
 tags:
-  inbound: xi-vless
-  direct_outbound: direct
-  block_outbound: block
-  exit_outbound_prefix: xo-
-  probe_outbound_prefix: xp-
-default_outbound_tag: block
+    inbound: ENC[AES256_GCM,data:t5qZ7UAS/7o=,iv:zSdemWvAULO9SZbZuosyUbES5k6NNihnWdMppAW3YOg=,tag:KfTqRYW+8Nyj/117ptY8VQ==,type:str]
+    direct_outbound: ENC[AES256_GCM,data:El4ep8gw,iv:Dw8Jj8enkmhG5xFgvCNgQRo/R093eRZUjwEOcT8jR5A=,tag:+zmsYWkLu6ePEZAC545Jkg==,type:str]
+    block_outbound: ENC[AES256_GCM,data:TY7I8YA=,iv:Wdx8XDVPwiJxcP8TN5LceKvsnQZx+z2fgKHaMh9L+pg=,tag:ktr7C7n2QzRItoxqMJPdMw==,type:str]
+    exit_outbound_prefix: ENC[AES256_GCM,data:zSwF,iv:bG9HXLEkG8Ercn1mDAWDyY+7nVHrYimcbJKP0rBRO3U=,tag:JBVOCFzk1aE8UIGR29fMSA==,type:str]
+    probe_outbound_prefix: ENC[AES256_GCM,data:9hMY,iv:IA3sn25cu65nbLlYWR36hoKcoVVTT5kcz7uODvLFWqk=,tag:aub/xRabV+0olXaCze0BVA==,type:str]
+default_outbound_tag: ENC[AES256_GCM,data:2Uq70iY=,iv:uuhLeAqXOB7vgWm7O3OpD+yhHmiAzxyHfVx5WRdA0AM=,tag:zQg/kgi5EtyJz75+O8kN2A==,type:str]
 access_log:
-  # The access log records the client address, the destination and the user
-  # that opened the connection. Data that is never written cannot leak, be
-  # shipped by a later configuration change, or be compelled out of us.
-  # Per-user volume accounting does not depend on it: the agent reads that
-  # from Xray's stats API. Turn this on through a reviewed override when a
-  # specific investigation needs it, so that the decision stays in history.
-  enabled: false
-  export_enabled: false
+    #ENC[AES256_GCM,data:tGTPo8XEYpdCN+jfHbLBzlbdwgVtq0UtC33WFiMkFkT5d0cwXIyg4UMiUDMs3isW+ojjZJxYT4A3KPVt4ggD+DBwYzCBrHpw,iv:1GZiHLHBNgj0naKJGdPMtvZyszr1110FcFjPcIXemjo=,tag:vfpJNnY1RUb78KM1CfTnaQ==,type:comment]
+    #ENC[AES256_GCM,data:gVC4Ba9rKGOM/zmPE1ZhU4tJMsTgytdKVqd4H6ThIzt09XNKEDoW0aSdD1u75+PzV9XQeBsdag8SdP74IJ/LqUSaXvkdTjg=,iv:Lp1C0XJhOLw1ROkOQQ0vOskED/CMax5CU4MJOyNzPUo=,tag:HhfcS9+H+XvIwpFXfcV/iQ==,type:comment]
+    #ENC[AES256_GCM,data:cO0U5vzlZPty5GdaFu8pZoJBRjLadVLPpJFQTd9ZLncirylMuIP2Qry+Ixossv31SyzR2tYjRVq1lfXlPPpGAt/g6Xo=,iv:nfS5tXC9yjEknijhVA5N5fA32RZH3JKZ5ZMPr+M5km4=,tag:GSbVV/ERb9391aA/Ha7E/w==,type:comment]
+    #ENC[AES256_GCM,data:QulqBkeMYYhoB+9yiTvAd6yDkF1pydLgbvJkFd8JU9kMctb2AEprkP9WnMPMtxBPvPSCWZQS9bI0ad6NtRsfnlobM3PQQZg=,iv:IFjcLUo2fHKf6PbNARvrH2QuBoDhyoB3xRLGmXJ5gTU=,tag:yfxZgA8jyQdCjA99vd3aHQ==,type:comment]
+    #ENC[AES256_GCM,data:0rC9qHi2RxB+9DrbF5AKsO1irlMVtaXOH2q5sNUi785/prIrPERIyjt4u+bHVOSQYDb23PXz05oqanmmeuy6eAwDqpY4Dz8=,iv:J1hPeHWYMjAKuuasw76LZYwE73nvwOYPOZzNHkIdrRY=,tag:NRJqofBIe8P9TFADRPFTcQ==,type:comment]
+    #ENC[AES256_GCM,data:hCC8l9Sak21rz5dmbjJHV9sB087sEoEMYPtrjtg4UWl4Gw37tCAEcB4al3XpI68pKMjTnh1skQokVSthdQhS1YH0TOVYqb7b,iv:J9/1tPYsNJceRuWFqoFqcWrJY078WP7CpmZdLOUk86E=,tag:giUR13AUvUlWSypCwAVQow==,type:comment]
+    enabled: ENC[AES256_GCM,data:Pt/4nFs=,iv:tiJ5wnmFXMmLmOo1KrEYwalyF7KTfmGdncDI+R2ZYKQ=,tag:CAHxOicfq5J2gPfOXOU8hQ==,type:bool]
+    export_enabled: ENC[AES256_GCM,data:7qjRDJ8=,iv:1/MhTEIrRYDj760QOIAJcVgQCi8yhIaxaR9RqJCa9qA=,tag:OycvkiVZaNbGwFOmuGk59A==,type:bool]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBDZk5nd01nSG5lNE1iZ0tT
+            Z0Y3UERRdEJSWi9FaERwS21HOWhqT2dGZ1RjClVlMjA5bHB5UnRBbXpLeTZCNTY4
+            WmZzcFptZUhmcmc3YUFYN3ZIVzZ1c00KLS0tICtDRFlQNTBLWHZWQXVPSndGa3pW
+            LzNQNU9uRnZTdkptMWhUNklJV21wTEkK4Bx+1a6/nqkPbrxdlqhVmFXU70SOnz2X
+            b3m2jJxDnkEHDuzyjhgmx//kClPcmw3TuxQHZhCGTkOjWIbRiNPvNw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBpK1c1SXZvR09XZGV6eGtt
+            OTYyb2w4K2QvaGR3bTBEQ3pzaGZLbXlrZUVFCnQ1cUZLZm5NQy9obk1WYXdnNnV5
+            cjFOL3JnYWRtNVlCSU8rQlNxZ0tJaWcKLS0tIFlvZGlWVlByTnBPOUJOZlpXUXR1
+            QkRGNDRNL3dtNTRnQWxsOUdTNHZzZ2cKT/g5EpjAZd9NZL+SjyWnTaPfzMYkU1Nt
+            Raj8q8r60hL3loRhodDGsVuv4JmDohSPAZXq5ybey+qp0HTOl619NA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1gkflnrtnkwqza5p0zyjjd264x66kdxckf3dfnmcq6glhfekx5u5q9erfhc
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBWSlJXY1lpTUZKNmNFS2tm
+            aXNFRkhUUkw5cWQ4YkNqdWJQWHdXVlZDdmprCndqdXdaekZwWGVEM052eWl1NEJi
+            NEdNdC9Pdm5JMFcwNGVNMU83R0c2T1EKLS0tIFpqM3JPNWJkSVB6blRwNnNTYkdY
+            VjFlWkEwd1pCWmlmeG9wY3o5WnRYdzgKSyqJiuJ/wlgobp5OU9GAaIVkOq4c763R
+            qTDRKSl1qJEe7atD91wyxKbrlUCTPkB/Z4CT9l3zMZ4bawZ07QlfVg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
+    lastmodified: "2026-08-20T20:06:24Z"
+    mac: ENC[AES256_GCM,data:GUZuXyZKxm3UCT5Wn3nU+hWP/Gf6DxRb1Q8XxYAbQGWXGEUTprRkt27npz0zmxL1FdcrxfI+mG+jrLvZtT4zbBgvPvZiQwAFMDYNgeX/5EYoyk5KzkmdO+4n/FO9lQFSsNQFRVy74auaA5vKB5EYGCvZS3sYrw1/KOfrGFcl4zg=,iv:6TTtAhle53oERZjDK35NtqXK14FOeIKFZSt3e7eD5tA=,tag:FLLoNIvhr/4yri+yDLFTfA==,type:str]
+    unencrypted_suffix: _unencrypted
+    version: 3.13.2
