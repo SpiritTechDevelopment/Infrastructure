@@ -18,15 +18,18 @@ GitHub -- outbound HTTPS --> runner VPS -- restricted SSH --> management VPS
 ## Security boundary
 
 The runner account intentionally has no `sudo`, Docker membership, Vault
-credentials, fleet SSH identity, or topology decryption key. The runner host
-needs outbound TCP 443 to GitHub and outbound TCP 22 to the management host.
+credentials, or fleet SSH identity. It owns a dedicated age identity used only
+to validate and update encrypted topology; this is distinct from the management
+executor and recovery identities. The runner host needs outbound TCP 443 to
+GitHub and outbound TCP 22 to the management host.
 GitHub does not initiate an inbound connection to the runner. Limit inbound SSH
 on the runner VPS to reviewed operator addresses.
 
-A shared persistent runner is a temporary boundary: a compromised `develop`
-job could persist and observe a later `prod` job. Require environment approval,
-allow deployments only from `main`, and later split the environments or move
-to ephemeral runners.
+A shared persistent runner is a temporary boundary: a compromised trusted job
+can read infrastructure metadata and could persist and observe a later `prod`
+job. It still cannot resolve Vault references. Never expose the identity to a
+pull-request job; allow decryption only for trusted `main` and release workflows,
+and later split the environments or move to ephemeral runners.
 
 ## Install
 
@@ -73,6 +76,17 @@ The script:
 The short-lived registration token is necessarily supplied to GitHub's
 `config.sh` process briefly, but is not written to a file by the bootstrap.
 
+## Create the topology identity
+
+After registration, dispatch `runner-sops-bootstrap`. It downloads the pinned
+SOPS and age releases, verifies their SHA-256 digests, creates the identity in
+the runner account's home, and prints only its public recipient. The operation
+is idempotent and never replaces an existing identity.
+
+Add that public recipient to the topology creation rule in `.sops.yaml`. The
+private file remains local to the runner and must never be copied into a GitHub
+secret, repository artifact, cache, or log.
+
 ## Verify
 
 The GitHub runner page must show `spiritvpn-deploy-1` as **Idle** with the
@@ -106,5 +120,6 @@ PLATFORM_SSH_KNOWN_HOSTS
 
 The management firewall restricts direct SSH to `RUNNER_IP/32`; operators use
 the WireGuard interface created during platform bootstrap, so laptop public addresses are
-not tracked. Never place Vault, SOPS, Xray, or fleet Ansible private keys on
-the runner VPS.
+not tracked. Never place Vault, Xray, fleet Ansible, recovery, or management
+executor private keys on the runner VPS. The dedicated topology identity is
+the only decryption credential assigned to it.

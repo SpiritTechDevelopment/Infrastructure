@@ -312,6 +312,11 @@ Runner должен находиться на отдельном Debian/Ubuntu V
 TCP/443 к GitHub и исходящий TCP/22 к management host. Входящее соединение от
 GitHub не требуется.
 
+Для проверки зашифрованной topology runner получает отдельную локальную age
+identity. Это не identity management executor и не recovery key; приватная
+часть не хранится в GitHub Secrets. Создание выполняет ручной workflow
+`runner-sops-bootstrap`, который печатает только публичный recipient.
+
 ### 1. Получить версию и digest
 
 Откройте в GitHub репозитории **Settings → Actions → Runners → New self-hosted

@@ -387,6 +387,32 @@ all:
         self.assertIn("age-keygen -y", readiness)
         self.assertIn("cmp -s", readiness)
 
+    def test_runner_sops_identity_is_local_and_not_a_github_secret(self) -> None:
+        bootstrap = (REPO_ROOT / "scripts" / "bootstrap-runner-sops.sh").read_text(
+            encoding="utf-8"
+        )
+        workflow = (
+            REPO_ROOT / ".github" / "workflows" / "runner-sops-bootstrap.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("age-identity.txt", bootstrap)
+        self.assertIn("age-recipient.txt", bootstrap)
+        self.assertIn("chmod 0600", bootstrap)
+        self.assertIn("SOPS checksum does not match", bootstrap)
+        self.assertIn("age checksum does not match", bootstrap)
+        self.assertIn("runs-on: [self-hosted, linux, spiritvpn-deploy]", workflow)
+        self.assertNotIn("secrets.", workflow)
+        self.assertNotIn("SOPS_AGE_KEY", workflow)
+
+    def test_control_executor_can_decrypt_encrypted_topology(self) -> None:
+        executor = (
+            REPO_ROOT
+            / "roles"
+            / "platform_executor"
+            / "templates"
+            / "spiritvpn-control-deploy.j2"
+        ).read_text(encoding="utf-8")
+        self.assertIn("SOPS_AGE_KEY_FILE", executor)
+
     def test_github_workflow_cannot_mutate_or_receive_vault_credentials(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "platform-readiness.yml").read_text(
             encoding="utf-8"
