@@ -822,6 +822,46 @@ all:
             "http://127.0.0.1:{{ platform_loki_port }}/ready", collector_tasks
         )
 
+    def test_grafana_datasource_uids_match_the_provisioned_file(self) -> None:
+        """Перезапуск Grafana решается по тому, что она загрузила.
+
+        Роль спрашивает у Grafana список источников и сверяет его с
+        `platform_grafana_datasource_uids`. Список объявлен вторым местом, и
+        разойдясь с шаблоном он молча выключил бы проверку: недостающих
+        источников не окажется никогда, и Grafana перестанет перезапускаться.
+        """
+        collector = REPO_ROOT / "roles" / "platform_observability"
+        # Шаблон открывается `{{ ansible_managed | comment }}` — выражением на
+        # всю строку, которое разворачивается в комментарий, а не в значение.
+        # Подставленный как скаляр, оно сделало бы документ неразбираемым.
+        provisioned = yaml.safe_load(
+            re.sub(
+                r"{{[^\n{}]+}}",
+                "fixture",
+                re.sub(
+                    r"(?m)^{{[^\n{}]+}}$",
+                    "#",
+                    (collector / "templates" / "grafana-datasources.yml.j2").read_text(
+                        encoding="utf-8"
+                    ),
+                ),
+            )
+        )
+        declared = yaml.safe_load(
+            (collector / "defaults" / "main.yml").read_text(encoding="utf-8")
+        )["platform_grafana_datasource_uids"]
+
+        self.assertEqual(
+            sorted(source["uid"] for source in provisioned["datasources"]),
+            sorted(declared),
+        )
+
+        # Перезапуск обязан опираться на наблюдаемое состояние, а не только на
+        # то, менял ли `template` файл в этом самом прогоне.
+        collector_tasks = (collector / "tasks" / "main.yml").read_text(encoding="utf-8")
+        self.assertIn("/api/frontend/settings", collector_tasks)
+        self.assertIn("_platform_grafana_missing_datasources | length > 0", collector_tasks)
+
     def test_one_collector_is_shared_but_each_environment_writes_only_its_own(self) -> None:
         collector = REPO_ROOT / "roles" / "platform_observability"
         skeleton = (collector / "templates" / "prometheus.yml.j2").read_text(encoding="utf-8")

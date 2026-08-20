@@ -395,9 +395,40 @@
   changed_when: true
 
 # Dashboards are re-read by the file provider on its own interval; datasources
-# are read once at startup. Restarting only when provisioning actually changed
-# keeps a redeploy from interrupting whoever is looking at a graph.
-- name: Restart Grafana onto changed provisioning
+# are read once at startup.
+#
+# Отсюда правило: решение о перезапуске принимается по тому, что Grafana
+# загрузила, а не по тому, что роль записала в этом прогоне. Стоило это красной
+# выкатки с зелёным продолжением: прогон упал между записью datasources.yml и
+# этой задачей, файл на хабе появился, Grafana его не прочитала — а в следующий
+# раз `template` отчитался «без изменений», условие дало false, и источник Loki
+# не появился бы уже никогда. Флаг «я поменял файл» описывает прошлое роли,
+# а не настоящее сервиса, и после любого обрыва они расходятся навсегда.
+- name: Ask Grafana which datasources it actually loaded
+  ansible.builtin.uri:
+    url: >-
+      http://{{ platform_grafana_bind_address }}:{{
+      platform_grafana_port }}/api/frontend/settings
+    method: GET
+    timeout: 5
+  register: _platform_grafana_loaded
+  # Недоступная Grafana — это ноль загруженных источников, то есть повод
+  # перезапустить, а не повод падать здесь.
+  failed_when: false
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Note which declared datasources Grafana is missing
+  ansible.builtin.set_fact:
+    _platform_grafana_missing_datasources: >-
+      {{ platform_grafana_datasource_uids | difference(
+           _platform_grafana_loaded.json.datasources | default({})
+           | dict2items | map(attribute='value')
+           | selectattr('uid', 'defined') | map(attribute='uid')
+           | select('string') | list) }}
+  when: not ansible_check_mode
+
+- name: Restart Grafana onto provisioning it has not loaded
   ansible.builtin.command:
     argv:
       - docker
@@ -408,11 +439,22 @@
       - grafana
   when:
     - not ansible_check_mode
+    # Первое условие закрывает и обрыв, и штатное добавление источника. Только
+    # им обойтись нельзя: смена адреса или типа источника оставляет uid на
+    # месте, и по одному наблюдаемому состоянию такая правка не видна.
+    #
     # Удаление прежнего файла — тоже изменение провижининга: без перезапуска
     # Grafana продолжила бы держать источник, прочитанный из уже несуществующего
     # файла, до следующего своего рестарта.
-    - _platform_grafana_provisioning.changed or _platform_grafana_superseded_datasource.changed
-    - not _platform_prometheus_apply.changed
+    #
+    # Оговорки «только если compose ничего не пересоздавал» здесь больше нет:
+    # тот флаг поднимается, когда пересоздан любой сервис, и о Grafana не
+    # говорит ничего. Пересозданный Loki отменял перезапуск Grafana. Лишний
+    # перезапуск только что поднятой Grafana безвреден, пропущенный — нет.
+    - >-
+      _platform_grafana_missing_datasources | length > 0
+      or _platform_grafana_provisioning.changed
+      or _platform_grafana_superseded_datasource.changed
   changed_when: true
 
 - name: Require collector readiness on loopback

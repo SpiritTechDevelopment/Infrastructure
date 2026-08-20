@@ -89,6 +89,13 @@ platform_grafana_admin_password_file: /var/lib/spiritvpn/grafana-admin-password
 # локальному процессу API создания источников данных, то есть исходящие запросы
 # от имени хоста, на котором стоит Vault.
 platform_grafana_anonymous_role: Viewer
+# Идентификаторы источников, которые объявляет grafana-datasources.yml.j2.
+# Перечислены здесь второй раз, потому что по ним проверяется, дочитала ли
+# Grafana провижининг: спрашивать надо о конкретных именах. Разойтись спискам
+# не даёт test_grafana_datasource_uids_match_the_provisioned_file.
+platform_grafana_datasource_uids:
+  - spiritvpn-prometheus
+  - spiritvpn-loki
 
 # Сигнализация. Дашборд показывает, но не будит: пока никто не разбудит,
 # наблюдаемость работает ровно в те минуты, когда оператор сам смотрит.
