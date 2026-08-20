@@ -1,9 +1,20 @@
 extends: default
 
-# SOPS ciphertext is deliberately emitted as long scalar values. Its decrypted
-# structure is validated by scripts/platform-sops.py instead.
+# SOPS ciphertext is deliberately emitted as long scalar values and its YAML
+# indentation is controlled by SOPS, not by hand. Public CI validates these
+# files with scripts/sops-envelope-check.py; trusted CI decrypts and validates
+# their schemas and semantics through fleetctl.
 ignore: |
   inventories/bootstrap/platform.sops.yml
+  desired/common/components.yml
+  desired/common/limits.yml
+  desired/common/networking.yml
+  desired/common/observability.yml
+  desired/common/rollout.yml
+  desired/common/xray.yml
+  desired/environments/develop/topology.sops.yml
+  desired/environments/prod/topology.sops.yml
+  desired/fleet-ids.yml
 
 rules:
   document-start: disable
