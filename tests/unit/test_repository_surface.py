@@ -55,6 +55,9 @@ class RepositorySurfaceTests(unittest.TestCase):
                 "platform-bootstrap-check.py",
                 "platform-bootstrap.sh",
                 "bootstrap-platform.py",
+                # Projects immutable platform images from the canonical SOPS
+                # common desired state instead of role-local defaults.
+                "platform-component-vars.py",
                 "platform-sops.py",
                 "platform-remote.sh",
                 "bootstrap-self-hosted-runner.sh",
