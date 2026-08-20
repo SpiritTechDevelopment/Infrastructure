@@ -7,7 +7,11 @@ creation_rules:
   # envelope visible and encrypt the complete desired-state payload.
   - path_regex: ^desired/environments/(develop|prod)/topology\.sops\.ya?ml$
     encrypted_regex: '^(spec)$'
-    age: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax
+    # Recovery keeps operator access; the management recipient lets only the
+    # executor decrypt environment topology during a fleet deployment.
+    age: >-
+      age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax,
+      age1gkflnrtnkwqza5p0zyjjd264x66kdxckf3dfnmcq6glhfekx5u5q9erfhc
   - path_regex: ^inventories/bootstrap/platform\.sops\.ya?ml$
     encrypted_regex: '^(inventory|known_hosts|vars)$'
     age: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax

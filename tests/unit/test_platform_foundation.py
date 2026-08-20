@@ -108,6 +108,19 @@ class PlatformFoundationTests(unittest.TestCase):
         for forbidden in ("ansible_host", "ssh-ed25519", "REPLACE_WITH", "github-develop"):
             self.assertNotIn(forbidden, ciphertext)
 
+    def test_topology_sops_keeps_recovery_and_executor_recipients(self) -> None:
+        config = yaml.safe_load((REPO_ROOT / ".sops.yaml").read_text(encoding="utf-8"))
+        topology_rule = next(
+            rule
+            for rule in config["creation_rules"]
+            if "topology" in rule["path_regex"]
+        )
+        recipients = [value.strip() for value in topology_rule["age"].split(",")]
+        self.assertEqual(len(recipients), 2)
+        self.assertEqual(len(set(recipients)), 2)
+        for recipient in recipients:
+            self.assertRegex(recipient, r"^age1[0-9a-z]+$")
+
     def test_real_minimal_bootstrap_input_passes(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap"
         result = subprocess.run(

@@ -135,6 +135,31 @@
   when: common_manage_sshd | bool
   notify: Reload sshd
 
+- name: Validate explicitly retired service unit names
+  ansible.builtin.assert:
+    that:
+      - item is match('^[A-Za-z0-9_.@-]+\.service$')
+    fail_msg: "Retired services must be explicit systemd service unit names."
+  loop: "{{ common_retired_services }}"
+  when: deploy_mode in ['bootstrap', 'hardened']
+
+- name: Discover installed services before applying retirement policy
+  ansible.builtin.service_facts:
+  when:
+    - deploy_mode in ['bootstrap', 'hardened']
+    - common_retired_services | length > 0
+
+- name: Stop, disable and mask explicitly retired services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+    masked: true
+  loop: "{{ common_retired_services }}"
+  when:
+    - deploy_mode in ['bootstrap', 'hardened']
+    - item in ansible_facts.services
+
 # nftables firewall. Uses add+delete (not `flush ruleset`) so Docker's ip nat
 # table survives — no `docker restart` needed after a reload. `validate` parses
 # the candidate with `nft -c` before it is placed.

@@ -114,6 +114,12 @@
     common_authorized_keys: "{{ spiritvpn_operator_ssh_public_keys }}"
     common_manage_sshd: true
     common_ssh_port: "{{ spiritvpn_node_plan.infrastructure.networking.ssh.port }}"
+    # NetBird/wt0 predates the declared management overlay and was still active
+    # on one traffic node, where the legacy live firewall fully trusted it.
+    # Traffic nodes use wg0 now, so keep that undeclared access path from
+    # returning after the role reconciles nftables.
+    common_retired_services:
+      - netbird.service
     # First bootstrap still arrives over the public address and must keep its
     # own connection. Steady state arrives through WireGuard and closes public
     # SSH by admitting only the declared management network.
