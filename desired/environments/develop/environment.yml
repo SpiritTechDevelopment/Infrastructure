@@ -81,10 +81,10 @@ spec:
       # bot-migrate падает на `alembic upgrade head`. Дальше это поле правит
       # автоматика.
       release:
-        source_git_sha: b93bb37b68ff7b64167ff72f34662a293ba5d73a
+        source_git_sha: 575649b42b315b4494cf103b875b3eb93e7120fd
         image:
           repository: ghcr.io/spirittechdevelopment/spiritvpn-bot
-          digest: sha256:9c4ad6faf7a6cd68120e393bdc29443ed7ab307935a0a2f2ed61362b449e3d29
+          digest: sha256:751732675675102e090ed6a851e08006aee9f5626702268b6418a509e58f91ea
       postgres:
         database: spiritvpn_bot
         owner_user: spiritvpn_bot_owner
