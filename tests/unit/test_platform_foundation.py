@@ -1318,7 +1318,7 @@ all:
 
 
 class AutomaticDesiredStateDeployTests(unittest.TestCase):
-    """The push-triggered path may deploy develop, and only develop.
+    """Successful main CI may deploy develop, and only develop.
 
     Реактивная выкатка вызывает control-deploy и fleet-deploy напрямую в режиме
     apply. Гейта одобрения за ними нет: GitHub Environments недоступны на плане
@@ -1358,16 +1358,30 @@ class AutomaticDesiredStateDeployTests(unittest.TestCase):
         self.assertIn("initial: false", caller)
         self.assertNotIn("initial: true", caller)
 
-    def test_automatic_deploy_waits_for_ci_on_the_same_commit(self) -> None:
+    def test_automatic_deploy_is_triggered_by_successful_ci_for_the_same_commit(self) -> None:
         caller = self.load("desired-state-deploy.yml")
-        self.assertEqual(caller["permissions"]["actions"], "read")
-        self.assertIn("gate-ci", caller["jobs"])
-        self.assertIn("gate-ci", caller["jobs"]["detect"]["needs"])
-        gate = caller["jobs"]["gate-ci"]
-        script = gate["steps"][0]["run"]
-        self.assertIn("actions/workflows/ci.yml/runs", script)
-        self.assertIn("head_sha=$SOURCE_GIT_SHA", script)
-        self.assertIn('test "$conclusion" = success', script)
+        trigger = caller["on"]["workflow_run"]
+        self.assertEqual(trigger["workflows"], ["ci"])
+        self.assertEqual(trigger["types"], ["completed"])
+        self.assertEqual(trigger["branches"], ["main"])
+
+        detect = caller["jobs"]["detect"]
+        self.assertIn("workflow_run.conclusion == 'success'", detect["if"])
+        self.assertIn("workflow_run.event == 'push'", detect["if"])
+        checkout = detect["steps"][0]
+        self.assertEqual(
+            checkout["with"]["ref"],
+            "${{ github.event.workflow_run.head_sha }}",
+        )
+        current_main_gate = detect["steps"][1]["run"]
+        self.assertIn("refs/remotes/origin/main", current_main_gate)
+        self.assertIn('= "$SOURCE_GIT_SHA"', current_main_gate)
+
+        for job in ("deploy-platform", "deploy-control", "deploy-fleet"):
+            self.assertEqual(
+                caller["jobs"][job]["with"]["source_git_sha"],
+                "${{ github.event.workflow_run.head_sha }}",
+            )
 
     def test_the_absent_approval_gate_is_not_claimed_to_exist(self) -> None:
         """The reason prod is excluded must stay true.

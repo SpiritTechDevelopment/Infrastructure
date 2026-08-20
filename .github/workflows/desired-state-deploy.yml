@@ -1,35 +1,18 @@
 name: desired-state-deploy
 
-# Единственный триггер выкатки — появление изменения окружения в main. Неважно,
-# кто его положил: авто-слияние после release-bump, ревьюер или оператор руками.
-# Источником всегда остаётся коммит, поэтому правка digest'а вручную
-# раскатывается ровно так же, как автоматическая, и расхождения между Git и
-# работающей системой не возникает ни на одном пути.
-#
-# Фильтр отрицательный, и это главное решение здесь. Список включаемых путей
-# устаревает молча: появляется новая роль, новый скрипт, новый каталог — и
-# изменение в нём не выкатывается, о чём никто не узнает. Именно так и вышло с
-# `nodes/`, `fleets/`, `instances/`: они не попадали под `desired/environments/*/
-# environment.yml`, и добавление ноды не вызывало ничего. Со списком исключений
-# ошибка идёт в обратную сторону — лишний холостой прогон с `changed=0`.
-#
-# Здесь перечисляется только то, что заведомо не описывает работающую систему.
-# Второго такого списка нет: всё, что `detect` не опознал как принадлежащее
-# конкретной среде, считается общим изменением и выкатывает все три контура.
+# Выкатка начинается только после успешного CI точного коммита main. Это
+# level-triggered reconcile: следующий зелёный commit применяет всё актуальное
+# состояние, даже если предыдущая выкатка была остановлена красным CI. Поэтому
+# workflow намеренно запускается и после изменений самого CI — именно такой
+# fix обязан закрывать накопившийся drift, а не ждать следующего релиза.
 on:
-  push:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - docs/**
-      - tests/**
-      - examples/**
-      # Workflow GitHub читает из main напрямую; выкатывать их некуда.
-      - .github/**
 
 permissions:
   contents: read
-  actions: read
 
 # Своя группа поверх групп вызываемых workflow. Без неё два пуша подряд дают
 # два перекрывающихся прогона, и порядок platform → control → fleet перестаёт
@@ -39,38 +22,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # This workflow and ci are both started by the same push. Deployment must not
-  # win that race: only the successful ci run for this exact commit authorises
-  # classification and mutation below.
-  gate-ci:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Wait for CI on the exact source commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_GIT_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          for attempt in {1..40}; do
-            result=$(gh api \
-              "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SOURCE_GIT_SHA&event=push&per_page=10" \
-              --jq '.workflow_runs | sort_by(.created_at) | last | [.status, .conclusion] | @tsv')
-            status=${result%%$'\t'*}
-            conclusion=${result#*$'\t'}
-            if [ "$status" = completed ]; then
-              test "$conclusion" = success
-              echo "ci passed for $SOURCE_GIT_SHA"
-              exit 0
-            fi
-            echo "ci for $SOURCE_GIT_SHA is ${status:-not-created}; waiting ($attempt/40)"
-            sleep 15
-          done
-          echo "ci did not complete successfully for $SOURCE_GIT_SHA" >&2
-          exit 1
-
   detect:
-    needs: [gate-ci]
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       platform: ${{ steps.split.outputs.platform }}
@@ -79,7 +36,18 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
+
+      # A manually rerun old CI must never roll main back. The successful CI
+      # SHA is accepted only while it is still the exact branch head.
+      - name: Require the successful CI commit to remain current main
+        env:
+          SOURCE_GIT_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          test "$(git rev-parse refs/remotes/origin/main)" = "$SOURCE_GIT_SHA"
 
       # Изменение относится к конкретной среде только если среда написана в
       # самом пути. Всё остальное — роли, playbooks, компилятор, контракты,
@@ -90,10 +58,12 @@ jobs:
       - name: Split changed environments by area
         id: split
         env:
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
+          AFTER: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
+          if test -z "${BEFORE:-}"; then
+            BEFORE="$(git rev-parse "$AFTER^" 2>/dev/null || printf '%040d' 0)"
+          fi
           platform_list="$RUNNER_TEMP/platform"
           control_list="$RUNNER_TEMP/control"
           fleet_list="$RUNNER_TEMP/fleet"
@@ -211,7 +181,7 @@ jobs:
     uses: ./.github/workflows/platform-deploy.yml
     with:
       environment: ${{ matrix.environment }}
-      source_git_sha: ${{ github.sha }}
+      source_git_sha: ${{ github.event.workflow_run.head_sha }}
       mode: apply
     secrets: inherit
 
@@ -227,7 +197,7 @@ jobs:
     uses: ./.github/workflows/control-deploy.yml
     with:
       environment: ${{ matrix.environment }}
-      source_git_sha: ${{ github.sha }}
+      source_git_sha: ${{ github.event.workflow_run.head_sha }}
       mode: apply
     secrets: inherit
 
@@ -252,7 +222,7 @@ jobs:
     uses: ./.github/workflows/fleet-deploy.yml
     with:
       environment: ${{ matrix.environment }}
-      source_git_sha: ${{ github.sha }}
+      source_git_sha: ${{ github.event.workflow_run.head_sha }}
       mode: apply
       initial: false
       resume: false

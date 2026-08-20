@@ -9,10 +9,11 @@ name: release-bump
 # бы против устаревшей базы, а следующий рутинный прогон вернул бы старую
 # версию из desired state и молча откатил среду.
 #
-# Этот workflow только доводит изменение до main. Выкатку запускает
-# desired-state-deploy по факту появления коммита — потому что источником истины
-# является main, а не то, что здесь посчитали. Благодаря этому ручная правка
-# digest'а оператором раскатывается тем же путём, что и автоматическая.
+# Этот workflow только доводит изменение до main. После успешного CI точного
+# коммита desired-state-deploy reconciles состояние — потому что источником
+# истины является проверенный main, а не то, что здесь посчитали. Благодаря
+# этому ручная правка digest'а оператором раскатывается тем же путём, что и
+# автоматическая, а исправление CI повторяет ранее заблокированный apply.
 on:
   repository_dispatch:
     types: [control-release, agent-release, bot-release]
@@ -160,7 +161,7 @@ jobs:
       # develop едет в main сразу — коммит здесь нужен машине, а не ревьюеру.
       # prod останавливается на pull request: продвижение версии в прод есть
       # решение человека, а не следствие успешной сборки. Слить его нужно
-      # вручную; выкатку запустит уже само появление коммита в main.
+      # вручную; выкатку запустит успешный CI коммита после слияния в main.
       - name: Land the release
         env:
           GH_TOKEN: ${{ secrets.INFRA_PUSH_TOKEN }}
@@ -179,6 +180,9 @@ jobs:
             git checkout -b "$branch"
             git commit -am "$message"
             git push --force-with-lease origin "$branch"
+            body="Образ опубликован и закреплён по digest."
+            body+=" Слияние переносит версию в среду ${ENVIRONMENT};"
+            body+=" успешный CI точного коммита main запускает desired-state-deploy."
             gh pr create --base main --head "$branch" --title "$message" \
-              --body "Образ опубликован и закреплён по digest. Слияние переносит версию в среду ${ENVIRONMENT}; выкатку запустит desired-state-deploy по появлению коммита в main."
+              --body "$body"
           fi
