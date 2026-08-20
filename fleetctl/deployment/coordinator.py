@@ -8,7 +8,7 @@ import json
 import os
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -40,6 +40,27 @@ from .revisions import ManifestRevisionAllocator
 
 class DeploymentError(Exception):
     pass
+
+
+# These inputs can change the rendered files or reconciliation behaviour even
+# when desired/ is byte-for-byte unchanged. The semantic desired-state planner
+# cannot see them, so a deployment must explicitly converge every current node.
+NODE_RECONCILE_PATH_PREFIXES = (
+    "contracts/desired-state/",
+    "fleetctl/",
+    "playbooks/deploy/",
+    "playbooks/operations/",
+    "roles/common/",
+    "roles/compiled_node_plan/",
+    "roles/compiled_runtime/",
+    "roles/docker/",
+    "roles/nginx_mask/",
+    "roles/node_agent/",
+    "roles/node_exporter/",
+    "roles/node_limits/",
+    "roles/xray/",
+)
+NODE_RECONCILE_PATHS = frozenset({"ansible.cfg", "requirements-ansible.txt"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +206,20 @@ class DeploymentCoordinator:
                 baseline_git_sha=baseline_git_sha,
                 initial_deployment=baseline_git_sha is None,
             )
-            self._complete_step(record, record_path, "build_impact_plan", f"{len(plan.changes)} change(s)")
+            runtime_paths: tuple[str, ...] = ()
+            if baseline_git_sha is not None:
+                runtime_paths = _node_reconcile_paths(
+                    self.repository.changed_paths(baseline_git_sha, source_git_sha)
+                )
+                if runtime_paths:
+                    plan = _force_current_node_reconcile(plan, current, runtime_paths)
+            record["node_reconcile_paths"] = list(runtime_paths)
+            plan_diagnostic = f"{len(plan.changes)} change(s)"
+            if runtime_paths:
+                plan_diagnostic += (
+                    f"; runtime inputs changed, reconciling {len(current.instances)} current node(s)"
+                )
+            self._complete_step(record, record_path, "build_impact_plan", plan_diagnostic)
 
             reports = [ManualProvisioningAdapter().preflight(item) for item in current.instances]
             failed_instances = [report.instance_id for report in reports if not report.passed]
@@ -882,3 +916,31 @@ class DeploymentCoordinator:
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _node_reconcile_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        path
+        for path in paths
+        if path in NODE_RECONCILE_PATHS
+        or any(path.startswith(prefix) for prefix in NODE_RECONCILE_PATH_PREFIXES)
+    )
+
+
+def _force_current_node_reconcile(
+    plan: ImpactPlan,
+    current: DesiredState,
+    paths: tuple[str, ...],
+) -> ImpactPlan:
+    instance_ids = {instance.object_id for instance in current.instances}
+    affected = {key: set(values) for key, values in plan.affected.items()}
+    affected["configure"].update(instance_ids)
+    affected["node_runtime"].update(instance_ids)
+    changes = (*plan.changes, {"type": "NODE_RUNTIME_INPUTS_CHANGED", "paths": list(paths)})
+    return replace(
+        plan,
+        changes=tuple(
+            sorted(changes, key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True))
+        ),
+        affected={key: tuple(sorted(values)) for key, values in affected.items()},
+    )

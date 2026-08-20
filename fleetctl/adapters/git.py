@@ -67,6 +67,30 @@ class GitRepository:
             raise GitAdapterError(f"deployment baseline ref is ambiguous: {ref}")
         return self.resolve_commit(ref)
 
+    def changed_paths(self, baseline: str, source: str) -> tuple[str, ...]:
+        """Return the tracked paths changed between two reviewed commits."""
+
+        baseline_commit = self.resolve_commit(baseline)
+        source_commit = self.resolve_commit(source)
+        result = self._run(
+            "diff",
+            "--name-only",
+            "-z",
+            baseline_commit,
+            source_commit,
+            "--",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise GitAdapterError(
+                f"cannot compare deployment source {source_commit} with baseline {baseline_commit}"
+            )
+        try:
+            paths = result.stdout.decode("utf-8").split("\0")
+        except UnicodeDecodeError as exc:
+            raise GitAdapterError("Git returned a non-UTF-8 changed path") from exc
+        return tuple(sorted(path for path in paths if path))
+
     def assert_desired_matches_commit(self, commit: str) -> None:
         commit = self.resolve_commit(commit)
         difference = self._run(

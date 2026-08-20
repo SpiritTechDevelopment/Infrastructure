@@ -545,6 +545,61 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
         }
         self.assertTrue(all("no affected nodes" in diagnostic for diagnostic in node_steps.values()))
 
+    def test_runtime_code_change_reconciles_every_current_node(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            template = repository.root / "roles" / "xray" / "templates" / "config.json.j2"
+            template.parent.mkdir(parents=True)
+            template.write_text("old runtime\n", encoding="utf-8")
+            repository.git("add", "roles/xray/templates/config.json.j2")
+            repository.git("commit", "-qm", "add runtime input")
+            baseline = repository.head()
+            repository.git("update-ref", "refs/deployments/develop", baseline)
+            template.write_text("new runtime\n", encoding="utf-8")
+            repository.git("add", "roles/xray/templates/config.json.j2")
+            repository.git("commit", "-qm", "change runtime input")
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            coordinator = DeploymentCoordinator(repository.root)
+            calls: dict[str, tuple[str, ...]] = {}
+
+            def capture(_inventory, playbook, _variables, *, limit, **_keywords):
+                calls[playbook.name] = limit
+
+            with mock.patch.object(coordinator, "_run_ansible", side_effect=capture):
+                record = coordinator.run(
+                    DeploymentOptions(
+                        environment="develop",
+                        apply=True,
+                        bootstrap_vars=variables["bootstrap.yml"],
+                        compiled_secrets=variables["secrets.yml"],
+                        readiness_vars=variables["readiness.yml"],
+                    )
+                )
+            plan = json.loads(
+                (repository.root / "build" / "develop" / "impact-plan.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+        expected = ("develop-entry-nl-01", "develop-exit-de-01")
+        self.assertEqual(calls["configure.yml"], expected)
+        self.assertEqual(calls["readiness.yml"], expected)
+        self.assertNotIn("bootstrap.yml", calls)
+        self.assertNotIn("csr.yml", calls)
+        self.assertEqual(
+            record["node_reconcile_paths"],
+            ["roles/xray/templates/config.json.j2"],
+        )
+        self.assertIn(
+            "NODE_RUNTIME_INPUTS_CHANGED",
+            {change["type"] for change in plan["changes"]},
+        )
+        self.assertEqual(tuple(plan["affected"]["configure"]), expected)
+
     def test_resume_does_not_rerun_a_completed_bootstrap_stage(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = self.prepare_repository(Path(temporary))
