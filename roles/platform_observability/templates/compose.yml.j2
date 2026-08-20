@@ -92,12 +92,13 @@ services:
     volumes:
       - {{ platform_loki_dir }}/config.yml:/etc/loki/config.yml:ro
       - {{ platform_loki_state_dir }}:/loki
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:{{ platform_loki_port }}/ready >/dev/null || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
+    # Пробы здесь нет намеренно, и это свойство образа, а не недосмотр.
+    # grafana/loki собран на gcr.io/distroless/static: внутри лежит один бинарь
+    # loki и сертификаты — ни шелла, ни wget, ни curl. Любая проба вида
+    # CMD-SHELL проваливается ещё до обращения к /ready, контейнер навсегда
+    # остаётся starting, и `up --wait` падает по таймауту при полностью живом
+    # Loki. Готовность проверяет задача роли «Require the log store to be
+    # ready»: она обращается к тому же /ready с хоста, где есть чем.
 
   alloy:
     image: {{ platform_alloy_image }}
@@ -120,9 +121,13 @@ services:
       # обрабатываемых строк, то есть ещё одну поверхность с теми же данными.
       - --server.http.listen-addr=127.0.0.1:12345
       - /etc/alloy/config.alloy
+    # service_started, а не service_healthy: у Loki нет пробы, и ждать по ней
+    # нечего. Порядок запуска сохраняется, а разрыв между «процесс поднялся» и
+    # «ингестер принимает» закрывает сам шипер — loki.write повторяет неудачные
+    # отправки с отступом, и первые секунды отказов ему ничего не стоят.
     depends_on:
       loki:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - {{ platform_alloy_dir }}/config.alloy:/etc/alloy/config.alloy:ro
       - {{ platform_alloy_state_dir }}:/var/lib/alloy

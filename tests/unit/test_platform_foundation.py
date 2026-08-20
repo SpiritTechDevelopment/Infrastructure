@@ -788,6 +788,40 @@ all:
         )
         self.assertIn("observability.ports.agent_metrics", node_plan)
 
+    def test_loki_is_not_probed_from_inside_a_distroless_image(self) -> None:
+        """Регрессия, стоившая красной выкатки.
+
+        У Loki стояла проба `CMD-SHELL` с wget. Образ grafana/loki собран на
+        gcr.io/distroless/static: в нём нет ни шелла, ни wget — только бинарь
+        loki. Проба падала при каждом запуске, контейнер навсегда оставался
+        `starting`, и `up --wait` валился с «application not healthy» при
+        совершенно живом Loki, который в это время спокойно компактил таблицы.
+
+        Отсюда правило: пробу выполняет тот, у кого есть чем. Готовность Loki
+        проверяется с хоста задачей роли, а не изнутри контейнера.
+        """
+        collector = REPO_ROOT / "roles" / "platform_observability"
+        compose = yaml.safe_load(
+            re.sub(
+                r"{{[^\n{}]+}}",
+                "fixture",
+                (collector / "templates" / "compose.yml.j2").read_text(encoding="utf-8"),
+            )
+        )
+        services = compose["services"]
+
+        self.assertNotIn("healthcheck", services["loki"])
+        # Ждать по несуществующей пробе нечего: гейт был бы вечным.
+        self.assertEqual(
+            services["alloy"]["depends_on"]["loki"]["condition"], "service_started"
+        )
+        # Проверка, заменившая пробу, обязана остаться.
+        collector_tasks = (collector / "tasks" / "main.yml").read_text(encoding="utf-8")
+        self.assertIn("Require the log store to be ready", collector_tasks)
+        self.assertIn(
+            "http://127.0.0.1:{{ platform_loki_port }}/ready", collector_tasks
+        )
+
     def test_one_collector_is_shared_but_each_environment_writes_only_its_own(self) -> None:
         collector = REPO_ROOT / "roles" / "platform_observability"
         skeleton = (collector / "templates" / "prometheus.yml.j2").read_text(encoding="utf-8")

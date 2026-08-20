@@ -324,8 +324,8 @@
       - grafana
       - alertmanager
       # Loki перечислен до alloy, но порядок здесь ничего не решает: его
-      # задаёт depends_on с condition: service_healthy. Шипер, стартовавший
-      # раньше хранилища, копил бы отказы записи вместо логов.
+      # задаёт depends_on. Готовность хранилища проверяется ниже отдельной
+      # задачей — пробы у контейнера нет, см. комментарий в compose.yml.j2.
       - loki
       - alloy
   register: _platform_prometheus_apply
