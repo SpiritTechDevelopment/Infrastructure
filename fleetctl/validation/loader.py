@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -27,12 +28,14 @@ from .issues import ValidationIssue
 
 
 API_VERSION = "spiritvpn.io/v1alpha1"
-KINDS = ("Environment", "Fleet", "LogicalNode", "Instance")
+OBJECT_KINDS = ("Environment", "Fleet", "LogicalNode", "Instance")
+TOPOLOGY_KIND = "EnvironmentTopology"
 SCHEMA_FILES = {
     "Environment": "environment.schema.json",
     "Fleet": "fleet.schema.json",
     "LogicalNode": "logical-node.schema.json",
     "Instance": "instance.schema.json",
+    TOPOLOGY_KIND: "topology.schema.json",
 }
 COMMON_SCHEMA_FILES = {
     "components": "components.schema.json",
@@ -118,14 +121,94 @@ def load_environment_objects(
     if not environment_root.is_dir():
         return [], [ValidationIssue.at(environment_root, "ENVIRONMENT_MISSING", "environment directory does not exist")]
 
+    standalone: list[tuple[dict[str, Any], Path]] = []
+    topologies: list[tuple[dict[str, Any], Path]] = []
     paths = sorted((*environment_root.rglob("*.yml"), *environment_root.rglob("*.yaml")))
     for path in paths:
         document = _load_yaml_mapping(path, issues)
         if document is None:
             continue
         kind = document.get("kind")
-        if kind not in KINDS:
+        if kind == TOPOLOGY_KIND:
+            topologies.append((document, path))
+        elif kind in OBJECT_KINDS:
+            standalone.append((document, path))
+        else:
             issues.append(ValidationIssue.at(path, "UNKNOWN_KIND", f"unsupported kind {kind!r}"))
+    if len(topologies) > 1:
+        issues.append(
+            ValidationIssue.at(
+                environment_root,
+                "TOPOLOGY_COUNT",
+                f"expected at most one {TOPOLOGY_KIND} document, found {len(topologies)}",
+            )
+        )
+    if topologies and standalone:
+        issues.append(
+            ValidationIssue.at(
+                environment_root,
+                "TOPOLOGY_MIXED",
+                "an environment must use either topology.yml or standalone objects, never both",
+            )
+        )
+
+    documents: list[tuple[dict[str, Any], Path, bool]] = [
+        (document, path, True) for document, path in standalone
+    ]
+    for topology, path in topologies:
+        validator = validators.get(TOPOLOGY_KIND)
+        if validator is None:
+            issues.append(
+                ValidationIssue.at(
+                    path,
+                    "SCHEMA_UNAVAILABLE",
+                    f"schema for {TOPOLOGY_KIND} is unavailable",
+                )
+            )
+            continue
+        schema_errors = sorted(
+            validator.iter_errors(topology),
+            key=lambda error: list(error.absolute_path),
+        )
+        for error in schema_errors:
+            location = ".".join(str(part) for part in error.absolute_path) or "$"
+            issues.append(ValidationIssue.at(path, "SCHEMA", f"{location}: {error.message}"))
+        if schema_errors:
+            continue
+        if path.name not in ("topology.yml", "topology.yaml", "topology.sops.yml", "topology.sops.yaml"):
+            issues.append(
+                ValidationIssue.at(
+                    path,
+                    "FILENAME",
+                    f"{TOPOLOGY_KIND} must be stored as topology.yml or topology.sops.yml",
+                )
+            )
+            continue
+        topology_id = topology["metadata"]["id"]
+        if topology_id != environment_root.name:
+            issues.append(
+                ValidationIssue.at(
+                    path,
+                    "TOPOLOGY_ID",
+                    f"topology ID must match directory name {environment_root.name!r}",
+                )
+            )
+            continue
+        documents.extend(
+            (embedded, path, False)
+            for embedded in topology["spec"]["objects"]
+        )
+
+    for document, path, require_filename in documents:
+        kind = document.get("kind")
+        if kind not in OBJECT_KINDS:
+            issues.append(
+                ValidationIssue.at(
+                    path,
+                    "UNKNOWN_KIND",
+                    f"unsupported topology object kind {kind!r}",
+                )
+            )
             continue
         validator = validators.get(kind)
         if validator is None:
@@ -156,7 +239,7 @@ def load_environment_objects(
 
         object_id = document["metadata"]["id"]
         expected_filename = "environment.yml" if kind == "Environment" else f"{object_id}.yml"
-        if path.name != expected_filename:
+        if require_filename and path.name != expected_filename:
             issues.append(
                 ValidationIssue.at(
                     path,
@@ -197,6 +280,27 @@ def _load_yaml_mapping(path: Path, issues: list[ValidationIssue]) -> dict[str, A
     except (OSError, yaml.YAMLError) as exc:
         issues.append(ValidationIssue.at(path, "YAML", str(exc)))
         return None
+    if isinstance(document, dict) and "sops" in document:
+        try:
+            decrypted = subprocess.run(
+                ["sops", "--decrypt", str(path)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+        except OSError as exc:
+            issues.append(ValidationIssue.at(path, "SOPS_DECRYPT", str(exc)))
+            return None
+        if decrypted.returncode != 0:
+            diagnostic = decrypted.stderr.strip().splitlines()
+            message = diagnostic[-1] if diagnostic else "sops failed without a diagnostic"
+            issues.append(ValidationIssue.at(path, "SOPS_DECRYPT", message))
+            return None
+        try:
+            document = yaml.safe_load(decrypted.stdout)
+        except yaml.YAMLError as exc:
+            issues.append(ValidationIssue.at(path, "YAML", f"decrypted document: {exc}"))
+            return None
     if not isinstance(document, dict):
         issues.append(ValidationIssue.at(path, "DOCUMENT", "document must be a YAML mapping"))
         return None

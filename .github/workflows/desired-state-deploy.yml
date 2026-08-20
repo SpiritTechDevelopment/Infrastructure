@@ -29,6 +29,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Своя группа поверх групп вызываемых workflow. Без неё два пуша подряд дают
 # два перекрывающихся прогона, и порядок platform → control → fleet перестаёт
@@ -38,7 +39,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # This workflow and ci are both started by the same push. Deployment must not
+  # win that race: only the successful ci run for this exact commit authorises
+  # classification and mutation below.
+  gate-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for CI on the exact source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in {1..40}; do
+            result=$(gh api \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SOURCE_GIT_SHA&event=push&per_page=10" \
+              --jq '.workflow_runs | sort_by(.created_at) | last | [.status, .conclusion] | @tsv')
+            status=${result%%$'\t'*}
+            conclusion=${result#*$'\t'}
+            if [ "$status" = completed ]; then
+              test "$conclusion" = success
+              echo "ci passed for $SOURCE_GIT_SHA"
+              exit 0
+            fi
+            echo "ci for $SOURCE_GIT_SHA is ${status:-not-created}; waiting ($attempt/40)"
+            sleep 15
+          done
+          echo "ci did not complete successfully for $SOURCE_GIT_SHA" >&2
+          exit 1
+
   detect:
+    needs: [gate-ci]
     runs-on: ubuntu-latest
     outputs:
       platform: ${{ steps.split.outputs.platform }}
@@ -90,6 +122,15 @@ jobs:
               fi
 
               case "$file" in
+                # A SOPS topology cannot be safely split by inspecting fields
+                # on GitHub-hosted CI. Treat it conservatively as the complete
+                # environment contract; downstream impact planning still
+                # limits actual node work.
+                */topology.yml|*/topology.yaml|*/topology.sops.yml|*/topology.sops.yaml)
+                  echo "$environment" >> "$platform_list"
+                  echo "$environment" >> "$control_list"
+                  echo "$environment" >> "$fleet_list"
+                  ;;
                 # Релиз бэкенда и релиз агента живут в одном файле: первый в
                 # spec.control, второй в spec.common_overrides. По имени файла
                 # их не различить, поэтому сравниваются поддеревья. Control не

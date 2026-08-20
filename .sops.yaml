@@ -2,6 +2,12 @@
 # ciphertext. The age recipient is public; matching private identities belong
 # to reviewed operators and recovery storage, never to this repository.
 creation_rules:
+  # Environment topology is sensitive infrastructure metadata, even though its
+  # secret-bearing fields are only Vault references. Keep the structural
+  # envelope visible and encrypt the complete desired-state payload.
+  - path_regex: ^desired/environments/(develop|prod)/topology\.sops\.ya?ml$
+    encrypted_regex: '^(spec)$'
+    age: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax
   - path_regex: ^inventories/bootstrap/platform\.sops\.ya?ml$
     encrypted_regex: '^(inventory|known_hosts|vars)$'
     age: age1pkr5xnu5cynfq3lap0sqkh4euhgzcknhhfvpluj6tds38qmu6dlqxv84ax

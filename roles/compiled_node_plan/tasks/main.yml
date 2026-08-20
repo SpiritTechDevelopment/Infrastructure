@@ -114,6 +114,12 @@
     common_authorized_keys: "{{ spiritvpn_operator_ssh_public_keys }}"
     common_manage_sshd: true
     common_ssh_port: "{{ spiritvpn_node_plan.infrastructure.networking.ssh.port }}"
+    # First bootstrap still arrives over the public address and must keep its
+    # own connection. Steady state arrives through WireGuard and closes public
+    # SSH by admitting only the declared management network.
+    ssh_allowed_cidrs: >-
+      {{ [] if spiritvpn_deploy_mode == 'bootstrap'
+         else [spiritvpn_node_plan.instance.management_network] }}
     common_manage_firewall: true
     common_enable_fail2ban: true
     common_manage_sysctl: true

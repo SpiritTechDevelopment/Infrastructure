@@ -118,6 +118,23 @@
   when: common_manage_sshd | bool
   notify: Reload sshd
 
+- name: Validate explicitly retired sshd drop-in names
+  ansible.builtin.assert:
+    that:
+      - item is match('^[A-Za-z0-9_.-]+\.conf$')
+      - item not in ['00-spirit-hardening.conf']
+    fail_msg: "Retired sshd drop-ins must be safe basenames and may not name the managed file."
+  loop: "{{ common_retired_sshd_dropins }}"
+  when: common_manage_sshd | bool
+
+- name: Remove explicitly retired sshd drop-ins
+  ansible.builtin.file:
+    path: "/etc/ssh/sshd_config.d/{{ item }}"
+    state: absent
+  loop: "{{ common_retired_sshd_dropins }}"
+  when: common_manage_sshd | bool
+  notify: Reload sshd
+
 # nftables firewall. Uses add+delete (not `flush ruleset`) so Docker's ip nat
 # table survives — no `docker restart` needed after a reload. `validate` parses
 # the candidate with `nft -c` before it is placed.
@@ -147,12 +164,22 @@
     validate: "nft -c -f %s"
   when:
     - common_manage_firewall | bool
-  notify: Reload nftables
 
-- name: Enable nftables service (persist across reboot)
+- name: Start and enable nftables service
   ansible.builtin.service:
     name: nftables
+    state: started
     enabled: true
+  when:
+    - common_manage_firewall | bool
+
+# A handler alone is insufficient reconciliation: if /etc/nftables.conf is
+# already correct but the kernel table was changed by hand, the template task
+# is unchanged and no handler runs. Re-applying this role-owned table is one
+# nftables transaction and leaves Docker-owned tables intact.
+- name: Reconcile the live nftables ruleset on every hardened run
+  ansible.builtin.command: nft -f /etc/nftables.conf
+  changed_when: false
   when:
     - common_manage_firewall | bool
 

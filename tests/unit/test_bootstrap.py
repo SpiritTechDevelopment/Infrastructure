@@ -331,6 +331,21 @@ class SshPortHandoverTests(unittest.TestCase):
     def test_steady_state_closes_the_default_port(self) -> None:
         self.assertEqual(self.render_ports("hardened", 232), [232])
 
+    def test_steady_state_restricts_ssh_to_the_management_overlay(self) -> None:
+        mapping = compiled_node_facts()
+        expression = mapping["ssh_allowed_cidrs"]
+        environment = Environment()
+        bootstrap = environment.from_string(expression).render(
+            spiritvpn_deploy_mode="bootstrap",
+            spiritvpn_node_plan={"instance": {"management_network": "10.80.0.0/16"}},
+        )
+        hardened = environment.from_string(expression).render(
+            spiritvpn_deploy_mode="hardened",
+            spiritvpn_node_plan={"instance": {"management_network": "10.80.0.0/16"}},
+        )
+        self.assertEqual(yaml.safe_load(bootstrap), [])
+        self.assertEqual(yaml.safe_load(hardened), ["10.80.0.0/16"])
+
     def test_undeclared_port_never_duplicates_the_default(self) -> None:
         # A node that declares nothing must not render `{ 22, 22 }` into nft,
         # which nftables rejects as a duplicate set element.
@@ -344,6 +359,41 @@ class SshPortHandoverTests(unittest.TestCase):
         # controller has no known_hosts entry for is a different way to fail.
         self.assertNotIn("reset_connection", playbook)
         self.assertNotIn("ansible_port", playbook)
+
+    def test_known_bootstrap_escape_hatch_is_retired_in_steady_state(self) -> None:
+        defaults = yaml.safe_load(
+            (REPO_ROOT / "roles" / "common" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        tasks = yaml.safe_load(
+            (REPO_ROOT / "roles" / "common" / "tasks" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn("99-temp-bootstrap.conf", defaults["common_retired_sshd_dropins"])
+        removal = next(
+            task for task in tasks if task.get("name") == "Remove explicitly retired sshd drop-ins"
+        )
+        self.assertEqual(removal["ansible.builtin.file"]["state"], "absent")
+        self.assertEqual(removal["notify"], "Reload sshd")
+
+    def test_live_nftables_is_reconciled_even_when_the_file_did_not_change(self) -> None:
+        tasks = yaml.safe_load(
+            (REPO_ROOT / "roles" / "common" / "tasks" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        reconcile = next(
+            task
+            for task in tasks
+            if task.get("name") == "Reconcile the live nftables ruleset on every hardened run"
+        )
+        self.assertEqual(reconcile["ansible.builtin.command"], "nft -f /etc/nftables.conf")
+        self.assertFalse(reconcile["changed_when"])
+        service = next(task for task in tasks if task.get("name") == "Start and enable nftables service")
+        self.assertEqual(service["ansible.builtin.service"]["state"], "started")
+        self.assertTrue(service["ansible.builtin.service"]["enabled"])
 
 
 class BridgeCredentialGuardTests(unittest.TestCase):

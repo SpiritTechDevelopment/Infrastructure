@@ -26,11 +26,17 @@ common_enable_auditd: false
 # without declaring a port, and silently moving its sshd would be the most
 # expensive possible mistake. Compiled traffic nodes set it from desired state.
 common_ssh_port: ""
+# Bootstrap escape hatches that this role created or explicitly adopted. They
+# are removed once the managed drop-in is ready; arbitrary sshd fragments are
+# never pruned from a host without first being named here.
+common_retired_sshd_dropins:
+  - 99-temp-bootstrap.conf
 
 # --- Firewall (nftables) — rendered only when common_manage_firewall is true.
 # Safe defaults: empty lists render a minimal ruleset, and an empty
-# ssh_allowed_cidrs falls back to SSH-from-anywhere so enabling the firewall
-# without setting admin sources cannot lock you out. Set per host/group.
+# ssh_allowed_cidrs falls back to SSH-from-anywhere during first bootstrap so
+# enabling the firewall cannot lock out the active connection. Compiled
+# steady-state plans must override it with the management network.
 # The firewall and fail2ban must follow the port the role is moving sshd to, not
 # the port the current connection came in on — during first bootstrap those
 # differ (connection on 22, sshd headed for common_ssh_port).

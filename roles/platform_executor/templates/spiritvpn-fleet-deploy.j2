@@ -101,6 +101,7 @@ test -z "$(git -C "$worktree" status --short)"
 
 python="{{ platform_executor_dir }}/venv/bin/python"
 export PATH="{{ platform_executor_dir }}/venv/bin:$PATH"
+export SOPS_AGE_KEY_FILE="{{ platform_executor_sops_identity_file }}"
 arguments=(
   -m fleetctl.cli --root "$worktree" deploy
   --environment "$environment"

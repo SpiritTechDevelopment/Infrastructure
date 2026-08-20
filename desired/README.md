@@ -31,10 +31,26 @@ Compare it with an explicit previously deployed desired-state directory:
 make fleet-plan ENVIRONMENT=develop BASELINE=path/to/desired
 ```
 
-`develop` declares the live fleet: one entry in Russia and the two exits it
-bridges to. `prod` is still an intentionally empty placeholder, containing
+`develop` declares the live fleet: one entry in Russia and one exit in Romania.
+`prod` is still an intentionally empty placeholder, containing
 neither a fleet nor a control release. A complete synthetic fleet and control
 stack live under `tests/fixtures/valid/`.
+
+An environment may be represented either by the current per-object files or by
+one `EnvironmentTopology` document named `topology.yml` (eventually
+`topology.sops.yml`). The two layouts compile to identical runtime artifacts and
+may not be mixed. Migration of the live environments waits for the management
+executor to receive a reviewed SOPS decryption identity; Git continues to carry
+only Vault references, never secret values.
+
+The management executor creates that age identity locally with mode `0600` and
+publishes only its recipient into a separate root-readable file. The private
+identity is neither returned to CI nor committed to Git; deployment processes
+receive only its file path through `SOPS_AGE_KEY_FILE`.
+
+`fleetctl` decrypts a SOPS document to process memory and never writes plaintext
+beside it. A missing or invalid age identity is a validation failure, not a
+reason to accept the encrypted placeholders as desired state.
 
 Three components are declared through `mirror.gcr.io` rather than their
 canonical registries. Docker Hub and quay.io are unreachable from the network

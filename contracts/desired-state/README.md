@@ -2,7 +2,10 @@
 
 JSON Schemas in this directory define the structural contract for
 `Environment`, `Fleet`, `LogicalNode`, and `Instance` objects with
-`apiVersion: spiritvpn.io/v1alpha1`. Six additional schemas validate the
+`apiVersion: spiritvpn.io/v1alpha1`. `EnvironmentTopology` is the migration
+container that keeps those exact object contracts while allowing one environment
+to live in one `topology.yml` or `topology.sops.yml`; mixing a bundle with the
+legacy per-object layout is rejected. Six additional schemas validate the
 singleton files under `desired/common/`:
 
 - `components.yml` — image repository, human-readable tag, and immutable digest;

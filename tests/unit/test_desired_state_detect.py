@@ -186,6 +186,19 @@ class DesiredStateDetectTest(unittest.TestCase):
             self.detect(self.base, head), platform=["develop"], control=[], fleet=[]
         )
 
+    def test_single_topology_document_reaches_every_environment_contour(self) -> None:
+        self.write(
+            "desired/environments/develop/topology.sops.yml",
+            "apiVersion: spiritvpn.io/v1alpha1\nkind: EnvironmentTopology\n",
+        )
+        head = self.commit("change the complete topology")
+        self.assert_areas(
+            self.detect(self.base, head),
+            platform=["develop"],
+            control=["develop"],
+            fleet=["develop"],
+        )
+
     # Разделение по поддеревьям сохраняется: релиз бэкенда не передеплоивает ноды.
     def test_a_backend_release_reaches_control_only(self) -> None:
         self.write(

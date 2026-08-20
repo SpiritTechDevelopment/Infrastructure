@@ -342,6 +342,38 @@ all:
         self.assertIn("platform_executor_python_executable", tasks)
         self.assertIn("Remove an incompatible executor Python environment", tasks)
 
+    def test_platform_executor_owns_its_sops_age_identity(self) -> None:
+        defaults = (
+            REPO_ROOT / "roles" / "platform_executor" / "defaults" / "main.yml"
+        ).read_text(encoding="utf-8")
+        tasks = (
+            REPO_ROOT / "roles" / "platform_executor" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        fleet_executor = (
+            REPO_ROOT
+            / "roles"
+            / "platform_executor"
+            / "templates"
+            / "spiritvpn-fleet-deploy.j2"
+        ).read_text(encoding="utf-8")
+        readiness = (
+            REPO_ROOT
+            / "roles"
+            / "platform_executor"
+            / "templates"
+            / "spiritvpn-platform-readiness.j2"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("platform_executor_sops_version: \"3.13.3\"", defaults)
+        self.assertIn("sha256:e5bec3346a873ae91d871550f3e698c1", defaults)
+        self.assertIn("age-keygen", tasks)
+        self.assertIn("creates: \"{{ platform_executor_sops_identity_file }}\"", tasks)
+        self.assertIn('mode: "0600"', tasks)
+        self.assertNotIn("src: \"{{ platform_executor_sops_identity_file }}\"", tasks)
+        self.assertIn("SOPS_AGE_KEY_FILE", fleet_executor)
+        self.assertIn("age-keygen -y", readiness)
+        self.assertIn("cmp -s", readiness)
+
     def test_github_workflow_cannot_mutate_or_receive_vault_credentials(self) -> None:
         workflow = (REPO_ROOT / ".github" / "workflows" / "platform-readiness.yml").read_text(
             encoding="utf-8"
@@ -1287,6 +1319,17 @@ class AutomaticDesiredStateDeployTests(unittest.TestCase):
         # Первая раскатка среды остаётся решением человека.
         self.assertIn("initial: false", caller)
         self.assertNotIn("initial: true", caller)
+
+    def test_automatic_deploy_waits_for_ci_on_the_same_commit(self) -> None:
+        caller = self.load("desired-state-deploy.yml")
+        self.assertEqual(caller["permissions"]["actions"], "read")
+        self.assertIn("gate-ci", caller["jobs"])
+        self.assertIn("gate-ci", caller["jobs"]["detect"]["needs"])
+        gate = caller["jobs"]["gate-ci"]
+        script = gate["steps"][0]["run"]
+        self.assertIn("actions/workflows/ci.yml/runs", script)
+        self.assertIn("head_sha=$SOURCE_GIT_SHA", script)
+        self.assertIn('test "$conclusion" = success', script)
 
     def test_the_absent_approval_gate_is_not_claimed_to_exist(self) -> None:
         """The reason prod is excluded must stay true.

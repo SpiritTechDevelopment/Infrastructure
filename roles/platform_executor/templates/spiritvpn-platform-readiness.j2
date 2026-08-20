@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+test "$(stat -c '%a:%U:%G' '{{ platform_executor_sops_identity_file }}')" = 600:root:root
+test "$(stat -c '%a:%U:%G' '{{ platform_executor_sops_recipient_file }}')" = 600:root:root
+"{{ platform_executor_sops_path }}" --version >/dev/null
+age-keygen -y "{{ platform_executor_sops_identity_file }}" \
+  | cmp -s - "{{ platform_executor_sops_recipient_file }}"
+
 exec docker compose -f "{{ platform_vault_dir }}/compose.yml" exec -T \
   -e "VAULT_ADDR=https://127.0.0.1:{{ platform_vault_api_port }}" \
   -e "VAULT_CACERT=/vault/tls/vault-ca.crt" \

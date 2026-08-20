@@ -24,10 +24,28 @@
 
 - name: Install protected executor prerequisites
   ansible.builtin.apt:
-    name: "{{ ['git', 'python3-pip', 'util-linux'] + platform_executor_python_apt_packages }}"
+    name: "{{ ['age', 'git', 'python3-pip', 'util-linux'] + platform_executor_python_apt_packages }}"
     state: present
     update_cache: true
   when: ansible_os_family == "Debian"
+
+- name: Require the reviewed SOPS build for this executor architecture
+  ansible.builtin.assert:
+    that:
+      - ansible_architecture == 'x86_64'
+      - platform_executor_sops_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - platform_executor_sops_url is match('^https://github\.com/getsops/sops/releases/download/')
+      - platform_executor_sops_checksum is match('^sha256:[0-9a-f]{64}$')
+    fail_msg: "The management executor requires a reviewed, checksum-pinned amd64 SOPS build."
+
+- name: Install the checksum-pinned SOPS binary
+  ansible.builtin.get_url:
+    url: "{{ platform_executor_sops_url }}"
+    dest: "{{ platform_executor_sops_path }}"
+    checksum: "{{ platform_executor_sops_checksum }}"
+    owner: root
+    group: root
+    mode: "0755"
 
 - name: Create protected executor directories
   ansible.builtin.file:
@@ -45,6 +63,48 @@
     - "{{ platform_runtime_config_dir }}"
     - "{{ platform_executor_config_dir }}/develop"
     - "{{ platform_executor_config_dir }}/prod"
+    - "{{ platform_executor_sops_identity_dir }}"
+
+- name: Generate the management executor age identity once
+  ansible.builtin.command:
+    argv:
+      - age-keygen
+      - -o
+      - "{{ platform_executor_sops_identity_file }}"
+    creates: "{{ platform_executor_sops_identity_file }}"
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Enforce protection of the management executor age identity
+  ansible.builtin.file:
+    path: "{{ platform_executor_sops_identity_file }}"
+    state: file
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Derive the public management executor age recipient
+  ansible.builtin.command:
+    argv:
+      - age-keygen
+      - -y
+      - "{{ platform_executor_sops_identity_file }}"
+  register: _platform_executor_sops_recipient
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Persist the public management executor age recipient
+  ansible.builtin.copy:
+    content: "{{ _platform_executor_sops_recipient.stdout | trim }}\n"
+    dest: "{{ platform_executor_sops_recipient_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: not ansible_check_mode
 
 - name: Remove the retired staging executor configuration
   ansible.builtin.file:

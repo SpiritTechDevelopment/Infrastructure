@@ -3,13 +3,16 @@ from __future__ import annotations
 import contextlib
 import io
 import shutil
+import subprocess
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import yaml
 
 from fleetctl.cli import main
+from fleetctl.compiler import render_files
 from fleetctl.validation import DesiredStateInvalid, validate_environment
 
 
@@ -17,6 +20,26 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class DesiredStateValidationTests(unittest.TestCase):
+    def topology_bundle(self, desired_root: Path) -> Path:
+        environment_root = desired_root / "environments" / "develop"
+        paths = sorted(
+            path
+            for path in environment_root.rglob("*.yml")
+            if path.name not in ("topology.yml", "topology.sops.yml")
+        )
+        documents = [yaml.safe_load(path.read_text(encoding="utf-8")) for path in paths]
+        for path in paths:
+            path.unlink()
+        topology = {
+            "apiVersion": "spiritvpn.io/v1alpha1",
+            "kind": "EnvironmentTopology",
+            "metadata": {"id": "develop"},
+            "spec": {"objects": documents},
+        }
+        target = environment_root / "topology.yml"
+        target.write_text(yaml.safe_dump(topology, sort_keys=False), encoding="utf-8")
+        return target
+
     def validate_mutated_fixture(self, relative_path: str, mutate: object) -> set[str]:
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -31,7 +54,7 @@ class DesiredStateValidationTests(unittest.TestCase):
             return {issue.code for issue in raised.exception.issues}
 
     def test_repository_environments_are_valid(self) -> None:
-        # develop declares the live fleet: one entry in Russia and two exits it
+        # develop declares the live fleet: one entry in Russia and one exit it
         # bridges to. prod is still an empty placeholder, so the assertion that
         # both environments validate has to carry two different shapes.
         for environment, fleets in (("develop", 1), ("prod", 0)):
@@ -74,6 +97,128 @@ class DesiredStateValidationTests(unittest.TestCase):
         self.assertEqual(state.fleet_ids["develop-fleet-eu"], 1)
         profile = state.common.limits.bandwidth_profiles["vps-1g"]
         self.assertEqual(profile.egress_limit_mbps, 900)
+
+    def test_topology_bundle_preserves_existing_fleet_compilation(self) -> None:
+        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+        legacy = validate_environment(REPO_ROOT, "develop", desired_root=source)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(source, desired_root)
+            self.topology_bundle(desired_root)
+            bundled = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+
+        self.assertEqual(render_files(bundled), render_files(legacy))
+
+    def test_topology_bundle_cannot_be_mixed_with_standalone_objects(self) -> None:
+        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(source, desired_root)
+            environment_root = desired_root / "environments" / "develop"
+            documents = [
+                yaml.safe_load(path.read_text(encoding="utf-8"))
+                for path in sorted(environment_root.rglob("*.yml"))
+            ]
+            topology = {
+                "apiVersion": "spiritvpn.io/v1alpha1",
+                "kind": "EnvironmentTopology",
+                "metadata": {"id": "develop"},
+                "spec": {"objects": documents},
+            }
+            (environment_root / "topology.yml").write_text(
+                yaml.safe_dump(topology, sort_keys=False),
+                encoding="utf-8",
+            )
+            with self.assertRaises(DesiredStateInvalid) as raised:
+                validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+
+        self.assertIn("TOPOLOGY_MIXED", {issue.code for issue in raised.exception.issues})
+
+    def test_topology_bundle_validates_every_embedded_object(self) -> None:
+        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(source, desired_root)
+            target = self.topology_bundle(desired_root)
+            topology = yaml.safe_load(target.read_text(encoding="utf-8"))
+            node = next(
+                item for item in topology["spec"]["objects"] if item["kind"] == "LogicalNode"
+            )
+            node["spec"]["public"]["port"] = 70000
+            target.write_text(yaml.safe_dump(topology, sort_keys=False), encoding="utf-8")
+            with self.assertRaises(DesiredStateInvalid) as raised:
+                validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+
+        self.assertIn("SCHEMA", {issue.code for issue in raised.exception.issues})
+
+    def test_sops_topology_is_decrypted_only_in_memory(self) -> None:
+        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+        legacy = validate_environment(REPO_ROOT, "develop", desired_root=source)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(source, desired_root)
+            target = self.topology_bundle(desired_root)
+            plaintext = target.read_text(encoding="utf-8")
+            encrypted_path = target.with_name("topology.sops.yml")
+            target.rename(encrypted_path)
+            encrypted_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "apiVersion": "spiritvpn.io/v1alpha1",
+                        "kind": "EnvironmentTopology",
+                        "metadata": {"id": "develop"},
+                        "spec": "ENC[AES256_GCM,data:fixture]",
+                        "sops": {"version": "3.9.4"},
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            completed = subprocess.CompletedProcess(
+                ["sops", "--decrypt", str(encrypted_path)],
+                0,
+                stdout=plaintext,
+                stderr="",
+            )
+            with unittest.mock.patch(
+                "fleetctl.validation.loader.subprocess.run",
+                return_value=completed,
+            ) as decrypt:
+                bundled = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+
+        decrypt.assert_called_once_with(
+            ["sops", "--decrypt", str(encrypted_path)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(render_files(bundled), render_files(legacy))
+
+    def test_sops_decryption_failure_is_fail_closed(self) -> None:
+        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(source, desired_root)
+            target = self.topology_bundle(desired_root)
+            encrypted_path = target.with_name("topology.sops.yml")
+            target.rename(encrypted_path)
+            encrypted_path.write_text("sops: {}\n", encoding="utf-8")
+            completed = subprocess.CompletedProcess(
+                ["sops", "--decrypt", str(encrypted_path)],
+                1,
+                stdout="",
+                stderr="age identity is unavailable",
+            )
+            with unittest.mock.patch(
+                "fleetctl.validation.loader.subprocess.run",
+                return_value=completed,
+            ), self.assertRaises(DesiredStateInvalid) as raised:
+                validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+
+        self.assertEqual(
+            {issue.code for issue in raised.exception.issues},
+            {"ENVIRONMENT_COUNT", "SOPS_DECRYPT"},
+        )
 
     def test_node_without_fleet_membership_is_valid_for_decommission(self) -> None:
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
