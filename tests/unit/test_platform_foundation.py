@@ -822,6 +822,54 @@ all:
             "http://127.0.0.1:{{ platform_loki_port }}/ready", collector_tasks
         )
 
+    def test_control_containers_may_reach_the_backend_on_the_hub(self) -> None:
+        """Регрессия, стоившая отказов на оплаченных заказах.
+
+        Бэкенд опубликован на management-адресе хаба, а бот живёт в контейнере
+        на мосту. Его пакет приходит в цепочку input с моста и не совпадал там
+        ни с одним правилом: цепочка принимала только lo и wg0. Бот получал
+        таймаут при полностью живом бэкенде, который в это же время отвечал
+        `grpc_code: OK` на вызовы с самого хоста.
+
+        Порт наружу обязан совпадать с портом из `backend_endpoint` желаемого
+        состояния, а forward_ports — с портом внутри контейнера, иначе правило
+        разрешает не то, что нужно, и не перестаёт быть зелёным.
+        """
+        rules = {}
+        for name in ("bootstrap", "steady"):
+            play = yaml.safe_load(
+                (REPO_ROOT / "playbooks" / "platform" / f"{name}.yml").read_text(
+                    encoding="utf-8"
+                )
+            )[0]
+            rules[name] = play["vars"]["common_restricted_tcp_rules"]
+
+        # Расхождение между bootstrap и steady означало бы хаб, у которого
+        # доступ к бэкенду то появляется, то пропадает.
+        self.assertEqual(rules["bootstrap"], rules["steady"])
+        self.assertEqual(len(rules["steady"]), 1)
+        rule = rules["steady"][0]
+
+        endpoint_ports = set()
+        for environment in ("develop", "prod"):
+            declared = yaml.safe_load(
+                (
+                    REPO_ROOT / "desired" / "environments" / environment / "environment.yml"
+                ).read_text(encoding="utf-8")
+            )
+            endpoint = declared["spec"]["backend_endpoint"]
+            endpoint_ports.add(int(endpoint.rsplit(":", 1)[1]))
+        self.assertEqual(set(rule["ports"]), endpoint_ports)
+
+        container_port = re.search(
+            r'"backend_container_port":\s*(\d+)',
+            (REPO_ROOT / "fleetctl" / "compiler" / "control.py").read_text(
+                encoding="utf-8"
+            ),
+        )
+        self.assertIsNotNone(container_port)
+        self.assertEqual(rule["forward_ports"], [int(container_port.group(1))])
+
     def test_grafana_datasource_uids_match_the_provisioned_file(self) -> None:
         """Перезапуск Grafana решается по тому, что она загрузила.
 

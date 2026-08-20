@@ -21,6 +21,12 @@
     # То же, что в steady.yml: расхождение между bootstrap и steady означало бы
     # хаб, у которого выход из контейнеров то появляется, то пропадает.
     common_container_egress_interfaces: ["docker0", "br-*"]
+    # То же и по той же причине, что в steady.yml: обоснование там.
+    common_restricted_tcp_rules:
+      - ports: [9443]
+        forward_ports: [8443]
+        cidrs: ["172.16.0.0/12"]
+        interface: "br-*"
     ssh_allowed_cidrs: "{{ platform_ssh_allowed_cidrs }}"
     common_fail2ban_ignoreip: >-
       127.0.0.1/8 ::1 {{ platform_fail2ban_ignore_cidrs | default([]) | join(' ') }}
