@@ -122,6 +122,23 @@ class PlatformFoundationTests(unittest.TestCase):
         for recipient in recipients:
             self.assertRegex(recipient, r"^age1[0-9a-z]+$")
 
+        platform_rule = next(
+            rule
+            for rule in config["creation_rules"]
+            if "inventories/bootstrap/platform" in rule["path_regex"]
+        )
+        platform_recipients = [value.strip() for value in platform_rule["age"].split(",")]
+        self.assertEqual(len(platform_recipients), 2)
+        platform_envelope = yaml.safe_load(
+            (REPO_ROOT / "inventories" / "bootstrap" / "platform.sops.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            {item["recipient"] for item in platform_envelope["sops"]["age"]},
+            set(platform_recipients),
+        )
+
     def test_real_minimal_bootstrap_input_passes(self) -> None:
         fixture = REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap"
         result = subprocess.run(
@@ -372,6 +389,13 @@ all:
             / "templates"
             / "spiritvpn-fleet-deploy.j2"
         ).read_text(encoding="utf-8")
+        platform_executor = (
+            REPO_ROOT
+            / "roles"
+            / "platform_executor"
+            / "templates"
+            / "spiritvpn-platform-deploy.j2"
+        ).read_text(encoding="utf-8")
         readiness = (
             REPO_ROOT
             / "roles"
@@ -387,6 +411,12 @@ all:
         self.assertIn('mode: "0600"', tasks)
         self.assertNotIn("src: \"{{ platform_executor_sops_identity_file }}\"", tasks)
         self.assertIn("SOPS_AGE_KEY_FILE", fleet_executor)
+        self.assertIn("SOPS_AGE_KEY_FILE", platform_executor)
+        self.assertIn("materialize-runtime", platform_executor)
+        self.assertIn("inventories/bootstrap/platform.sops.yml", platform_executor)
+        self.assertIn("--require-applied-runtime", platform_executor)
+        self.assertIn('--extra-vars "@$platform_vars"', platform_executor)
+        self.assertNotIn('--extra-vars "@{{ platform_runtime_vars_file }}"', platform_executor)
         self.assertIn("age-keygen -y", readiness)
         self.assertIn("cmp -s", readiness)
 
@@ -1421,6 +1451,72 @@ BUNDLE_VARIABLES = {
     "platform_alertmanager_telegram_chat_id": "-100500",
     "platform_alertmanager_telegram_thread_id": "",
 }
+
+
+class PlatformRuntimeProjectionTests(unittest.TestCase):
+    def load_module(self) -> object:
+        path = REPO_ROOT / "scripts" / "platform-sops.py"
+        spec = importlib.util.spec_from_file_location("spiritvpn_platform_projection", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_runtime_projection_is_private_and_rejects_unapplied_access_changes(self) -> None:
+        module = self.load_module()
+        inventory = yaml.safe_load(
+            (REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap" / "platform.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        module.decrypt_bundle = lambda path: (
+            copy.deepcopy(inventory),
+            "unused known hosts\n",
+            copy.deepcopy(BUNDLE_VARIABLES),
+        )
+        expected = copy.deepcopy(BUNDLE_VARIABLES)
+        expected["platform_wireguard_public_endpoint"] = "1.1.1.1:51820"
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            applied = root / "applied.yml"
+            applied.write_text(yaml.safe_dump(expected), encoding="utf-8")
+            output = root / "projected.yml"
+            module.materialize_runtime_variables(
+                Path("ignored.sops.yml"),
+                output,
+                listen_port=51820,
+                applied_runtime=applied,
+            )
+            self.assertEqual(yaml.safe_load(output.read_text(encoding="utf-8")), expected)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+            applied_document = copy.deepcopy(expected)
+            applied_document["platform_ssh_allowed_cidrs"] = ["10.82.0.0/16"]
+            applied.write_text(yaml.safe_dump(applied_document), encoding="utf-8")
+            refused = root / "refused.yml"
+            with self.assertRaises(module.PlatformBundleError) as raised:
+                module.materialize_runtime_variables(
+                    Path("ignored.sops.yml"),
+                    refused,
+                    listen_port=51820,
+                    applied_runtime=applied,
+                )
+            self.assertIn("explicitly applied access contract", str(raised.exception))
+            self.assertFalse(refused.exists())
+
+    def test_fleet_bootstrap_input_is_reconciled_in_steady_state(self) -> None:
+        tasks = (
+            REPO_ROOT / "roles" / "platform_executor" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        start = tasks.index(
+            "Reconcile environment fleet bootstrap inputs from reviewed platform state"
+        )
+        end = tasks.index("Preserve environment-local control deployment settings", start)
+        task = tasks[start:end]
+        self.assertNotIn("force: false", task)
+        self.assertNotIn("deploy_mode == 'bootstrap'", task)
+        self.assertIn("spiritvpn_agent_certificate_chains", task)
 
 
 class _RecordedRun:

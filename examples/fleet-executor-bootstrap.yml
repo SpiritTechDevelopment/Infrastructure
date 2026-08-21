@@ -1,6 +1,7 @@
 ---
-# Install as /etc/spiritvpn/deploy/<environment>/bootstrap.yml on the management
-# executor. This file contains public/operator inputs, not secret:// values.
+# Shape reference for the generated executor input. Do not install or edit this
+# file on the management host: platform reconciliation owns the live copy from
+# the reviewed SOPS platform bundle and the hub's local WireGuard public key.
 spiritvpn_operator_ssh_public_keys:
   - ssh-ed25519 REPLACE_WITH_REVIEWED_FLEET_OPERATOR_PUBLIC_KEY
 bootstrap_wireguard_hub_endpoint: REPLACE_WITH_PUBLIC_HOST_OR_IP:51820

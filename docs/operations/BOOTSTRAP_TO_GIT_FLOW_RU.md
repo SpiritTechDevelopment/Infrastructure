@@ -86,14 +86,16 @@ branch -> pull request -> checks -> merge в main
 
 В workflow указывается полный SHA merge-коммита. Workflow проверяет, что SHA
 достижим из `main`, и передаёт на management только точный Git bundle. Root-
-исполнитель принимает только разрешённую команду, проверяет bundle и запускает
-локальный `playbooks/platform/steady.yml`. Переменные доступа берутся из файла
-`/etc/spiritvpn/platform/runtime-vars.yml`, созданного bootstrap с mode `0600`.
+исполнитель принимает только разрешённую команду, проверяет bundle, расшифровывает
+`inventories/bootstrap/platform.sops.yml` из этого же SHA и запускает локальный
+`playbooks/platform/steady.yml`. Файл
+`/etc/spiritvpn/platform/runtime-vars.yml` хранит применённый оператором access
+contract: apply разрешён только при его точном совпадении с Git.
 
-Изменение зашифрованного bootstrap bundle — редкое исключение. Оно проходит PR,
-но применяется оператором повторным `fleet-platform-bootstrap`, потому что
-меняет SSH/host-key/access boundary. Обычный `platform-deploy` этот ciphertext
-намеренно не расшифровывает.
+Изменение зашифрованного bootstrap bundle проходит PR, но access boundary
+применяется оператором повторным `fleet-platform-refresh`. До этого обычный
+`platform-deploy check` может показать план, а `apply` остановится: SSH и
+WireGuard-доступ не меняются автоматически только из-за merge.
 
 Поток для двух флотов независим:
 

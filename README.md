@@ -1043,12 +1043,19 @@ secret://kv/develop/bridges/develop-entry-nl.to-develop-exit-de#service_uuid
 На management host для каждой среды нужны:
 
 ```text
-/etc/spiritvpn/deploy/develop/bootstrap.yml
 /etc/spiritvpn/deploy/develop/readiness.yml
-/etc/spiritvpn/deploy/develop/known_hosts
 /etc/spiritvpn/deploy/develop/vault-approle/{role-id,secret-id,secret-id-accessor}
 /etc/spiritvpn/deploy/develop/ca/develop/{ca.crt,ca.key}
 ```
+
+`bootstrap.yml` в этот список не входит: platform reconciliation каждый раз
+строит его из точного `inventories/bootstrap/platform.sops.yml` применяемого
+Git SHA и локального public key management WireGuard. Ручная правка будет
+перезаписана. Certificate chains новых агентов coordinator выпускает во
+временный защищённый файл во время bootstrap и не сохраняет как desired state.
+
+`known_hosts` также не является входным файлом executor: он компилируется из
+SOPS topology вместе с inventory для точного Git SHA.
 
 `ca/` — корень CA среды. Он нужен здесь потому, что приватный ключ агента
 генерируется на ноде и никогда её не покидает: подписать CSR может только тот,
@@ -1059,23 +1066,19 @@ per-environment намеренно — исполнитель `develop` не д�
 машины оператора как root-owned `0600`; без него apply с новыми нодами
 останавливается до того, как тронет хоть одну машину.
 
-`known_hosts` должен содержать host key **и** для публичного bootstrap-адреса
-на порту 22, **и** для management address на объявленном `networking.ssh.port`
-— во второй форме это `[10.80.2.11]:232`. Фазы ходят на разные порты, и
-неполный файл обнаружится только на середине выкатки.
-
-Platform bootstrap автоматически создаёт базовый `bootstrap.yml` с public key и
-endpoint management WireGuard hub. `vault-approle/` создаётся командой:
+`vault-approle/` создаётся командой:
 
 ```bash
 sudo /usr/local/sbin/spiritvpn-vault-operator configure develop
 ```
 
-`known_hosts` и `readiness.yml` оператор устанавливает как root-owned файлы с
-mode `0600`. Шаблоны:
+`readiness.yml` оператор пока устанавливает как root-owned файл с mode `0600`.
+Шаблон:
 
-- [`examples/fleet-executor-bootstrap.yml`](examples/fleet-executor-bootstrap.yml);
 - [`examples/fleet-executor-readiness.yml`](examples/fleet-executor-readiness.yml).
+
+[`examples/fleet-executor-bootstrap.yml`](examples/fleet-executor-bootstrap.yml)
+остаётся только справочником формы автоматически создаваемого файла.
 
 Пример передачи шаблонов после platform bootstrap:
 
@@ -1087,18 +1090,11 @@ scp \
 ssh -t deploy@MANAGEMENT_WIREGUARD_IP \
   'sudo install -o root -g root -m 0600 \
     /tmp/fleet-executor-readiness.yml \
-    /etc/spiritvpn/deploy/develop/readiness.yml && \
-   (sudo test -e /etc/spiritvpn/deploy/develop/known_hosts || \
-    sudo install -o root -g root -m 0600 /dev/null \
-      /etc/spiritvpn/deploy/develop/known_hosts) && \
-   sudoedit /etc/spiritvpn/deploy/develop/bootstrap.yml && \
-   sudoedit /etc/spiritvpn/deploy/develop/known_hosts'
+    /etc/spiritvpn/deploy/develop/readiness.yml'
 ```
 
-Замените placeholder в `readiness.yml`. Не перезаписывайте автоматически
-созданные hub endpoint/public key значениями из bootstrap-примера:
-`bootstrap.yml` уже создан platform bootstrap, его нужно только дополнить
-certificate chains через `sudoedit`.
+Замените placeholder в `readiness.yml`. Других рукописных public/operator
+входов fleet bootstrap не использует.
 
 ### Шаг 9. Проверить и отрендерить
 

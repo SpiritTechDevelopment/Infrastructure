@@ -646,9 +646,11 @@ IP ноутбука не является входным параметром.
 
 ### Шаг 3. Подготовить executor
 
-Platform bootstrap автоматически создаёт первоначальный root-owned
-`bootstrap.yml` с endpoint и public hub key. Оператор дополняет certificate
-chains после получения CSR. На management VPS используются:
+Platform reconciliation создаёт и при каждом прогоне сверяет root-owned
+`bootstrap.yml` с endpoint, operator SSH keys и public hub key. Первые два
+значения берутся из точного SOPS bundle в Git, последний — производное локальное
+значение management WireGuard. Certificate chains coordinator выпускает во
+временный защищённый файл после получения CSR. На management VPS используются:
 
 ```text
 /etc/spiritvpn/deploy/develop/bootstrap.yml

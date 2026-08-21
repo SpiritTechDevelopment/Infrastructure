@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import copy
 import ipaddress
 import os
 import re
@@ -231,6 +232,68 @@ def _write_private(path: Path, content: str) -> None:
         raise
 
 
+def _platform_public_host(inventory: dict[str, Any]) -> str:
+    try:
+        hosts = inventory["all"]["children"]["spiritvpn_platform_bootstrap"]["hosts"]
+    except (KeyError, TypeError) as exc:
+        raise PlatformBundleError("platform inventory has an unexpected structure") from exc
+    if not isinstance(hosts, dict) or len(hosts) != 1:
+        raise PlatformBundleError("platform inventory must contain exactly one host")
+    hostvars = next(iter(hosts.values()))
+    if not isinstance(hostvars, dict):
+        raise PlatformBundleError("platform host variables are invalid")
+    public_host = hostvars.get("ansible_host")
+    if not isinstance(public_host, str) or not public_host:
+        raise PlatformBundleError("platform inventory has no public management host")
+    return public_host
+
+
+def _wireguard_endpoint(public_host: str, listen_port: int) -> str:
+    if not 1 <= listen_port <= 65535:
+        raise PlatformBundleError("management WireGuard listen port is invalid")
+    try:
+        address = ipaddress.ip_address(public_host)
+    except ValueError:
+        if re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?", public_host) is None:
+            raise PlatformBundleError("platform inventory public host is invalid")
+        endpoint_host = public_host
+    else:
+        endpoint_host = f"[{address}]" if address.version == 6 else str(address)
+    return f"{endpoint_host}:{listen_port}"
+
+
+def materialize_runtime_variables(
+    bundle: Path,
+    output: Path,
+    *,
+    listen_port: int,
+    applied_runtime: Path | None,
+) -> None:
+    inventory, _known_hosts, variables = decrypt_bundle(bundle)
+    desired = copy.deepcopy(variables)
+    desired["platform_wireguard_public_endpoint"] = _wireguard_endpoint(
+        _platform_public_host(inventory), listen_port
+    )
+
+    if applied_runtime is not None:
+        try:
+            applied = yaml.safe_load(applied_runtime.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            raise PlatformBundleError(
+                "persisted management runtime configuration is unreadable"
+            ) from exc
+        if not isinstance(applied, dict) or applied != desired:
+            raise PlatformBundleError(
+                "reviewed platform bundle differs from the explicitly applied access "
+                "contract; run the guarded platform refresh before apply"
+            )
+
+    _write_private(
+        output,
+        yaml.safe_dump(desired, allow_unicode=True, sort_keys=True),
+    )
+
+
 def _run(command: list[str], *, environment: dict[str, str] | None = None) -> None:
     result = subprocess.run(command, cwd=REPOSITORY_ROOT, env=environment, check=False)
     if result.returncode != 0:
@@ -326,11 +389,41 @@ def execute(mode: str, bundle: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("check", "bootstrap-check"))
+    parser.add_argument("mode", choices=("check", "bootstrap-check", "materialize-runtime"))
     parser.add_argument("--bundle", required=True, type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--wireguard-listen-port", type=int)
+    parser.add_argument("--require-applied-runtime", type=Path)
     args = parser.parse_args()
     try:
-        execute(args.mode, args.bundle.resolve())
+        if args.mode == "materialize-runtime":
+            if args.output is None or args.wireguard_listen_port is None:
+                raise PlatformBundleError(
+                    "materialize-runtime requires --output and --wireguard-listen-port"
+                )
+            materialize_runtime_variables(
+                args.bundle.resolve(),
+                args.output.resolve(),
+                listen_port=args.wireguard_listen_port,
+                applied_runtime=(
+                    args.require_applied_runtime.resolve()
+                    if args.require_applied_runtime is not None
+                    else None
+                ),
+            )
+        else:
+            if any(
+                value is not None
+                for value in (
+                    args.output,
+                    args.wireguard_listen_port,
+                    args.require_applied_runtime,
+                )
+            ):
+                raise PlatformBundleError(
+                    "runtime materialization options require materialize-runtime mode"
+                )
+            execute(args.mode, args.bundle.resolve())
     except (OSError, PlatformBundleError) as exc:
         print(f"platform bundle failed: {exc}", file=sys.stderr)
         return 2

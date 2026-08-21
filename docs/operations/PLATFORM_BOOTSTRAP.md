@@ -138,8 +138,10 @@ config it did not write, one that points at a different host than the bundle
 describes, or an interface that is down. It applies the same playbook the second
 phase applies, but as `deploy_mode: hardened`, so the hub does not fall back to
 the wider bootstrap port set. The hub rewrites
-`/etc/spiritvpn/platform/runtime-vars.yml`, and the next `platform-deploy` run
-reconciles the steady state from it.
+`/etc/spiritvpn/platform/runtime-vars.yml` as the record of the explicitly
+applied access contract. A later `platform-deploy` decrypts the exact bundle
+from its reviewed Git SHA and refuses apply if that contract does not match.
+The file is therefore an approval boundary, not a second desired-state source.
 
 A new key must be added in two places or it silently goes nowhere:
 `EXPECTED_VARIABLE_KEYS` in `scripts/platform-sops.py`, which validates the
@@ -220,24 +222,29 @@ ssh -t deploy@MANAGEMENT_HOST \
 Repeat for every desired-state reference. `put` refuses cross-environment paths
 and empty values.
 
-## 5. Install non-secret executor inputs
+## 5. Install the remaining protected executor inputs
 
-Create these root-owned files on the management host:
+Platform reconciliation owns this root-owned file and rewrites it from the
+reviewed SOPS bundle plus the hub's local WireGuard public key:
 
 ```text
 /etc/spiritvpn/deploy/develop/bootstrap.yml
-/etc/spiritvpn/deploy/develop/readiness.yml
-/etc/spiritvpn/deploy/develop/known_hosts
 ```
 
-Use `examples/fleet-executor-bootstrap.yml` and
-`examples/fleet-executor-readiness.yml` as starting points. `known_hosts` must
-contain independently verified keys for every public bootstrap address and
-management address used by Ansible — including the port, because the phases do
-not share one: bootstrap connects to the public address on 22, the steady phase
-to the management address on the declared `networking.ssh.port` (written
-`[10.80.2.11]:232`). The executor sets `StrictHostKeyChecking=yes`; it never
-invokes `ssh-keyscan`.
+Do not install or edit it manually. Agent certificate chains are generated in
+a temporary protected file by the coordinator when it signs a new node CSR.
+
+The only remaining operator-provided readiness input is:
+
+```text
+/etc/spiritvpn/deploy/develop/readiness.yml
+```
+
+Use `examples/fleet-executor-readiness.yml` as the starting point.
+`examples/fleet-executor-bootstrap.yml` documents the generated shape only.
+`known_hosts` is compiled from each environment's SOPS topology for the exact
+Git SHA; the executor sets `StrictHostKeyChecking=yes` and never invokes
+`ssh-keyscan`.
 
 The environment CA root is a protected input too, because the coordinator signs
 agent CSRs where it runs:

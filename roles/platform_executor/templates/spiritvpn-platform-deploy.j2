@@ -20,6 +20,7 @@ bundle="$(mktemp "$executor_dir/incoming/platform.XXXXXXXX.bundle")"
 worktree="$(mktemp -d "$executor_dir/incoming/platform.XXXXXXXX.worktree")"
 vars_dir="$(mktemp -d "$executor_dir/incoming/platform.XXXXXXXX.vars")"
 component_vars="$vars_dir/components.yml"
+platform_vars="$vars_dir/platform.yml"
 cleanup() {
   rm -f -- "$bundle"
   rm -rf -- "$worktree"
@@ -65,13 +66,25 @@ git clone --no-checkout --shared "$repository" "$worktree" >/dev/null
 git -C "$worktree" checkout --detach "$source_git_sha" >/dev/null
 test -z "$(git -C "$worktree" status --short)"
 
-test -s "{{ platform_runtime_vars_file }}" || {
-  printf '%s\n' 'missing protected management runtime configuration' >&2
-  exit 66
-}
+export SOPS_AGE_KEY_FILE="{{ platform_executor_sops_identity_file }}"
+python="{{ platform_executor_dir }}/venv/bin/python"
 
-SOPS_AGE_KEY_FILE="{{ platform_executor_sops_identity_file }}" \
-  "{{ platform_executor_dir }}/venv/bin/python" \
+runtime_arguments=(
+  "$worktree/scripts/platform-sops.py" materialize-runtime
+  --bundle "$worktree/inventories/bootstrap/platform.sops.yml"
+  --output "$platform_vars"
+  --wireguard-listen-port "{{ platform_wireguard_listen_port }}"
+)
+if test "$mode" = apply; then
+  test -s "{{ platform_runtime_vars_file }}" || {
+    printf '%s\n' 'missing explicitly applied management access contract' >&2
+    exit 66
+  }
+  runtime_arguments+=(--require-applied-runtime "{{ platform_runtime_vars_file }}")
+fi
+"$python" "${runtime_arguments[@]}"
+
+"$python" \
   "$worktree/scripts/platform-component-vars.py" \
   --components "$worktree/desired/common/components.yml" \
   --schema "$worktree/contracts/desired-state/components.schema.json" \
@@ -81,7 +94,7 @@ arguments=(
   -i localhost,
   --connection local
   "$worktree/playbooks/platform/steady.yml"
-  --extra-vars "@{{ platform_runtime_vars_file }}"
+  --extra-vars "@$platform_vars"
   --extra-vars "@$component_vars"
 )
 if test "$mode" = check; then

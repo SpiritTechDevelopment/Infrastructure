@@ -227,7 +227,7 @@
     src: "{{ platform_wireguard_public_key_path }}"
   register: _platform_executor_wireguard_public_key
 
-- name: Create initial environment fleet bootstrap inputs
+- name: Reconcile environment fleet bootstrap inputs from reviewed platform state
   ansible.builtin.copy:
     content: |
       {{ {
@@ -241,11 +241,9 @@
     owner: root
     group: root
     mode: "0600"
-    force: false
   loop: "{{ platform_wireguard_hub_addresses | dict2items }}"
   no_log: true
   diff: false
-  when: deploy_mode == 'bootstrap'
 
 - name: Preserve environment-local control deployment settings
   ansible.builtin.copy:
