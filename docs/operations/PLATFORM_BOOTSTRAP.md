@@ -151,6 +151,13 @@ public endpoint; a unit test fails if either side outgrows the other. Management
 WireGuard interface, environment networks, listen port and MTU belong to this
 encrypted contract and deliberately have no usable role fallback.
 
+The same contract may declare management runner peers. A runner with an empty
+public key is pending and does not change the hub. Once its locally generated
+public key is reviewed into SOPS, the platform role owns that peer in the base
+configuration and removes only the matching legacy dynamic fragment. The
+temporary runner plan is projected from a clean exact-SHA checkout and must
+never be committed in plaintext.
+
 ## 3. Vault ceremony
 
 The bootstrap installs `/usr/local/sbin/spiritvpn-vault-operator`. It is the

@@ -12,6 +12,7 @@
       - platform_wireguard_mtu | int >= 1280
       - platform_wireguard_mtu | int <= 9000
       - platform_wireguard_operator_peers | length > 0
+      - platform_wireguard_runner_peers is sequence
     fail_msg: >-
       Clean-host bootstrap requires explicit management addresses and at least
       one reviewed operator WireGuard public peer.
@@ -27,6 +28,24 @@
   loop: "{{ platform_wireguard_operator_peers }}"
   loop_control:
     label: "{{ item.id | default('invalid-peer') }}"
+
+- name: Validate declared management runner peers
+  ansible.builtin.assert:
+    that:
+      - item.id is match('^[a-z0-9][a-z0-9-]{0,62}$')
+      - item.environment in ['develop', 'prod']
+      - item.interface is match('^[A-Za-z0-9_.-]{1,15}$')
+      - item.address is match('^[0-9.]+/32$')
+      - item.public_key == '' or item.public_key is match('^[A-Za-z0-9+/]{43}=$')
+      - item.persistent_keepalive_seconds | int >= 1
+      - item.persistent_keepalive_seconds | int <= 65535
+      - platform_wireguard_hub_public_key is match('^[A-Za-z0-9+/]{43}=$')
+    fail_msg: >-
+      Each runner peer requires a Git-owned environment, interface, address,
+      keepalive and pinned hub key; an empty runner key means pending enrollment.
+  loop: "{{ platform_wireguard_runner_peers }}"
+  loop_control:
+    label: "{{ item.id | default('invalid-runner-peer') }}"
 
 - name: Install WireGuard tooling on the management host
   ansible.builtin.apt:
@@ -52,6 +71,16 @@
   ansible.builtin.file:
     path: "{{ platform_wireguard_peer_dir }}/staging"
     state: absent
+
+- name: Remove legacy dynamic fragments now owned by the runner contract
+  ansible.builtin.file:
+    path: >-
+      {{ platform_wireguard_peer_dir }}/{{ item.environment }}/{{ item.id }}.conf
+    state: absent
+  loop: "{{ platform_wireguard_runner_peers }}"
+  loop_control:
+    label: "{{ item.environment }}/{{ item.id }}"
+  when: item.public_key | length > 0
 
 - name: Generate the management WireGuard private key locally once
   ansible.builtin.shell: |

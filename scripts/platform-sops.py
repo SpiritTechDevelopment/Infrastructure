@@ -34,10 +34,17 @@ EXPECTED_VARIABLE_KEYS = {
     "platform_vault_tls_server_name",
     "platform_wireguard_environment_networks",
     "platform_wireguard_hub_addresses",
+    "platform_wireguard_hub_public_key",
     "platform_wireguard_interface",
     "platform_wireguard_listen_port",
     "platform_wireguard_mtu",
     "platform_wireguard_operator_peers",
+    "platform_wireguard_runner_peers",
+}
+
+TRANSITIONAL_RUNTIME_DEFAULTS = {
+    "platform_wireguard_hub_public_key": "",
+    "platform_wireguard_runner_peers": [],
 }
 
 
@@ -86,6 +93,18 @@ def _validate_ssh_public_key(value: Any, field: str) -> None:
         base64.b64decode(fields[1], validate=True)
     except (ValueError, binascii.Error) as exc:
         raise PlatformBundleError(f"{field} contains invalid SSH public-key data") from exc
+
+
+def _validate_wireguard_public_key(value: Any, field: str, *, allow_pending: bool) -> None:
+    if allow_pending and value == "":
+        return
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9+/]{43}=", value):
+        raise PlatformBundleError(f"{field} is invalid")
+    try:
+        if len(base64.b64decode(value, validate=True)) != 32:
+            raise ValueError
+    except (ValueError, binascii.Error) as exc:
+        raise PlatformBundleError(f"{field} data is invalid") from exc
 
 
 def validate_variables(variables: dict[str, Any]) -> None:
@@ -175,6 +194,7 @@ def validate_variables(variables: dict[str, Any]) -> None:
         raise PlatformBundleError("platform_wireguard_operator_peers must be a non-empty list")
     peer_ids: set[str] = set()
     peer_addresses: set[ipaddress.IPv4Address] = set()
+    peer_public_keys: set[str] = set()
     for peer in operator_peers:
         if not isinstance(peer, dict) or set(peer) != {"id", "public_key", "allowed_ips"}:
             raise PlatformBundleError("each operator WireGuard peer has an invalid shape")
@@ -185,13 +205,14 @@ def validate_variables(variables: dict[str, Any]) -> None:
             raise PlatformBundleError("operator WireGuard peer IDs must be unique")
         peer_ids.add(peer_id)
         public_key = peer["public_key"]
-        if not isinstance(public_key, str) or not re.fullmatch(r"[A-Za-z0-9+/]{43}=", public_key):
-            raise PlatformBundleError("operator WireGuard public key is invalid")
-        try:
-            if len(base64.b64decode(public_key, validate=True)) != 32:
-                raise ValueError
-        except (ValueError, binascii.Error) as exc:
-            raise PlatformBundleError("operator WireGuard public key data is invalid") from exc
+        _validate_wireguard_public_key(
+            public_key,
+            "operator WireGuard public key",
+            allow_pending=False,
+        )
+        if public_key in peer_public_keys:
+            raise PlatformBundleError("WireGuard public keys must be unique")
+        peer_public_keys.add(public_key)
         _validate_cidrs(peer["allowed_ips"], "operator WireGuard allowed_ips", require_one=True)
         for value in peer["allowed_ips"]:
             network = ipaddress.ip_network(value)
@@ -203,6 +224,89 @@ def validate_variables(variables: dict[str, Any]) -> None:
             if address in {hub.ip for hub in hub_interfaces.values()} or address in peer_addresses:
                 raise PlatformBundleError("operator WireGuard addresses must be unique and not use a hub address")
             peer_addresses.add(address)
+
+    hub_public_key = variables["platform_wireguard_hub_public_key"]
+    runner_peers = variables["platform_wireguard_runner_peers"]
+    if not isinstance(runner_peers, list):
+        raise PlatformBundleError("platform_wireguard_runner_peers must be a list")
+    if runner_peers:
+        _validate_wireguard_public_key(
+            hub_public_key,
+            "management hub WireGuard public key",
+            allow_pending=False,
+        )
+    elif hub_public_key != "":
+        _validate_wireguard_public_key(
+            hub_public_key,
+            "management hub WireGuard public key",
+            allow_pending=False,
+        )
+    if hub_public_key:
+        if hub_public_key in peer_public_keys:
+            raise PlatformBundleError("management hub key must differ from every peer key")
+        peer_public_keys.add(hub_public_key)
+    for peer in runner_peers:
+        if not isinstance(peer, dict) or set(peer) != {
+            "address",
+            "environment",
+            "id",
+            "interface",
+            "persistent_keepalive_seconds",
+            "public_key",
+        }:
+            raise PlatformBundleError("each runner WireGuard peer has an invalid shape")
+        peer_id = peer["id"]
+        if not isinstance(peer_id, str) or not re.fullmatch(
+            r"[a-z0-9][a-z0-9-]{0,62}", peer_id
+        ):
+            raise PlatformBundleError("runner WireGuard peer ID is invalid")
+        if peer_id in peer_ids:
+            raise PlatformBundleError("WireGuard peer IDs must be unique")
+        peer_ids.add(peer_id)
+        environment = peer["environment"]
+        if environment not in {"develop", "prod"}:
+            raise PlatformBundleError("runner WireGuard environment is invalid")
+        interface_name = peer["interface"]
+        if not isinstance(interface_name, str) or re.fullmatch(
+            r"[A-Za-z0-9_.-]{1,15}", interface_name
+        ) is None:
+            raise PlatformBundleError("runner WireGuard interface is invalid")
+        try:
+            runner = ipaddress.ip_interface(peer["address"])
+        except (TypeError, ValueError) as exc:
+            raise PlatformBundleError("runner WireGuard address is invalid") from exc
+        if runner.version != 4 or runner.network.prefixlen != 32:
+            raise PlatformBundleError("runner WireGuard address must be an IPv4 /32")
+        environment_network = ipaddress.ip_network(environment_networks[environment])
+        high_operator_range = ipaddress.ip_network(
+            f"{environment_network.network_address + 65280}/24"
+        )
+        if (
+            runner.ip not in high_operator_range
+            or runner.ip in {hub.ip for hub in hub_interfaces.values()}
+            or runner.ip in peer_addresses
+        ):
+            raise PlatformBundleError(
+                "runner WireGuard address must be unique in the environment operator range"
+            )
+        peer_addresses.add(runner.ip)
+        runner_public_key = peer["public_key"]
+        _validate_wireguard_public_key(
+            runner_public_key,
+            "runner WireGuard public key",
+            allow_pending=True,
+        )
+        if runner_public_key:
+            if runner_public_key in peer_public_keys:
+                raise PlatformBundleError("WireGuard public keys must be unique")
+            peer_public_keys.add(runner_public_key)
+        keepalive = peer["persistent_keepalive_seconds"]
+        if (
+            not isinstance(keepalive, int)
+            or isinstance(keepalive, bool)
+            or not 1 <= keepalive <= 65535
+        ):
+            raise PlatformBundleError("runner WireGuard keepalive is invalid")
     if not isinstance(variables["platform_vault_node_id"], str) or not re.fullmatch(
         r"[a-z0-9][a-z0-9-]{0,62}", variables["platform_vault_node_id"]
     ):
@@ -332,6 +436,10 @@ def materialize_runtime_variables(
             raise PlatformBundleError(
                 "persisted management runtime configuration is unreadable"
             ) from exc
+        if isinstance(applied, dict):
+            for key, default in TRANSITIONAL_RUNTIME_DEFAULTS.items():
+                if key not in applied and desired[key] == default:
+                    applied[key] = copy.deepcopy(default)
         if not isinstance(applied, dict) or applied != desired:
             raise PlatformBundleError(
                 "reviewed platform bundle differs from the explicitly applied access "
@@ -342,6 +450,81 @@ def materialize_runtime_variables(
         output,
         yaml.safe_dump(desired, allow_unicode=True, sort_keys=True),
     )
+
+
+def materialize_runner_plan(
+    bundle: Path,
+    output: Path,
+    *,
+    runner_id: str,
+    source_git_sha: str,
+) -> None:
+    inventory, _known_hosts, variables = decrypt_bundle(bundle)
+    matches = [
+        peer
+        for peer in variables["platform_wireguard_runner_peers"]
+        if peer["id"] == runner_id
+    ]
+    if len(matches) != 1:
+        raise PlatformBundleError("runner is not uniquely declared in the platform contract")
+    peer = matches[0]
+    environment = peer["environment"]
+    hub_interface = ipaddress.ip_interface(
+        variables["platform_wireguard_hub_addresses"][environment]
+    )
+    plan = {
+        "schema_version": 1,
+        "source_git_sha": source_git_sha,
+        "runner": {
+            "address": peer["address"],
+            "environment": environment,
+            "id": peer["id"],
+            "interface": peer["interface"],
+            "public_key": peer["public_key"],
+        },
+        "hub": {
+            "endpoint": _wireguard_endpoint(
+                _platform_public_host(inventory),
+                variables["platform_wireguard_listen_port"],
+            ),
+            "overlay_address": str(hub_interface.ip),
+            "public_key": variables["platform_wireguard_hub_public_key"],
+        },
+        "environment_network": variables["platform_wireguard_environment_networks"][
+            environment
+        ],
+        "persistent_keepalive_seconds": peer["persistent_keepalive_seconds"],
+    }
+    _write_private(
+        output,
+        yaml.safe_dump(plan, allow_unicode=True, sort_keys=True),
+    )
+
+
+def _require_clean_exact_source(source_git_sha: str) -> None:
+    if re.fullmatch(r"[0-9a-f]{40}", source_git_sha) is None:
+        raise PlatformBundleError("runner plan requires a full Git commit SHA")
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPOSITORY_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=REPOSITORY_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if (
+        head.returncode != 0
+        or status.returncode != 0
+        or head.stdout.strip() != source_git_sha
+        or status.stdout
+    ):
+        raise PlatformBundleError("runner plan requires the clean exact-SHA checkout")
 
 
 def _run(command: list[str], *, environment: dict[str, str] | None = None) -> None:
@@ -439,18 +622,25 @@ def execute(mode: str, bundle: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("check", "bootstrap-check", "materialize-runtime"))
+    parser.add_argument(
+        "mode",
+        choices=("check", "bootstrap-check", "materialize-runtime", "runner-plan"),
+    )
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--output", type=Path)
     # Accepted during the rollout from the executor installed before the listen
     # port became Git-owned. It is comparison-only and never drives projection.
     parser.add_argument("--wireguard-listen-port", type=int)
     parser.add_argument("--require-applied-runtime", type=Path)
+    parser.add_argument("--runner-id")
+    parser.add_argument("--source-git-sha")
     args = parser.parse_args()
     try:
         if args.mode == "materialize-runtime":
             if args.output is None:
                 raise PlatformBundleError("materialize-runtime requires --output")
+            if args.runner_id is not None or args.source_git_sha is not None:
+                raise PlatformBundleError("runner options require runner-plan mode")
             materialize_runtime_variables(
                 args.bundle.resolve(),
                 args.output.resolve(),
@@ -461,6 +651,20 @@ def main() -> int:
                     else None
                 ),
             )
+        elif args.mode == "runner-plan":
+            if args.output is None or args.runner_id is None or args.source_git_sha is None:
+                raise PlatformBundleError(
+                    "runner-plan requires --output, --runner-id and --source-git-sha"
+                )
+            if args.wireguard_listen_port is not None or args.require_applied_runtime is not None:
+                raise PlatformBundleError("runtime options cannot be used with runner-plan")
+            _require_clean_exact_source(args.source_git_sha)
+            materialize_runner_plan(
+                args.bundle.resolve(),
+                args.output.resolve(),
+                runner_id=args.runner_id,
+                source_git_sha=args.source_git_sha,
+            )
         else:
             if any(
                 value is not None
@@ -468,6 +672,8 @@ def main() -> int:
                     args.output,
                     args.wireguard_listen_port,
                     args.require_applied_runtime,
+                    args.runner_id,
+                    args.source_git_sha,
                 )
             ):
                 raise PlatformBundleError(

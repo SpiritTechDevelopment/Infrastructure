@@ -1501,6 +1501,7 @@ BUNDLE_VARIABLES = {
     "platform_vault_tls_server_name": "vault.internal",
     "platform_wireguard_interface": "wg0",
     "platform_wireguard_hub_addresses": {"develop": "10.80.0.1/16", "prod": "10.82.0.1/16"},
+    "platform_wireguard_hub_public_key": "",
     "platform_wireguard_environment_networks": {
         "develop": "10.80.0.0/16",
         "prod": "10.82.0.0/16",
@@ -1510,6 +1511,7 @@ BUNDLE_VARIABLES = {
     "platform_wireguard_operator_peers": [
         {"id": "operator", "public_key": PEER_PUBLIC_KEY, "allowed_ips": ["10.80.0.9/32"]}
     ],
+    "platform_wireguard_runner_peers": [],
     # Именно эта тройка и завела задачу в тупик: значения есть в бандле, но на
     # захардененный хаб их до сих пор доносили руками.
     "platform_alertmanager_telegram_bot_token": "12345:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -1578,6 +1580,81 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
                 )
             self.assertIn("installed executor listen port", str(legacy_raised.exception))
             self.assertFalse(legacy_refused.exists())
+
+            legacy_applied = copy.deepcopy(expected)
+            legacy_applied.pop("platform_wireguard_hub_public_key")
+            legacy_applied.pop("platform_wireguard_runner_peers")
+            applied.write_text(yaml.safe_dump(legacy_applied), encoding="utf-8")
+            transitioned = root / "transitioned.yml"
+            module.materialize_runtime_variables(
+                Path("ignored.sops.yml"),
+                transitioned,
+                applied_runtime=applied,
+            )
+            self.assertEqual(
+                yaml.safe_load(transitioned.read_text(encoding="utf-8")),
+                expected,
+            )
+
+    def test_runner_plan_is_private_exact_sha_projection(self) -> None:
+        module = self.load_module()
+        inventory = yaml.safe_load(
+            (REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap" / "platform.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        variables = copy.deepcopy(BUNDLE_VARIABLES)
+        variables["platform_wireguard_hub_public_key"] = HUB_PUBLIC_KEY
+        variables["platform_wireguard_runner_peers"] = [
+            {
+                "address": "10.80.255.240/32",
+                "environment": "develop",
+                "id": "ci-runner",
+                "interface": "wg-spirit",
+                "persistent_keepalive_seconds": 25,
+                "public_key": "",
+            }
+        ]
+        module.validate_variables(variables)
+        module.decrypt_bundle = lambda path: (
+            copy.deepcopy(inventory),
+            "unused known hosts\n",
+            copy.deepcopy(variables),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "runner-plan.yml"
+            module.materialize_runner_plan(
+                Path("ignored.sops.yml"),
+                output,
+                runner_id="ci-runner",
+                source_git_sha="a" * 40,
+            )
+            plan = yaml.safe_load(output.read_text(encoding="utf-8"))
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(plan["source_git_sha"], "a" * 40)
+            self.assertEqual(plan["runner"]["id"], "ci-runner")
+            self.assertEqual(plan["runner"]["public_key"], "")
+            self.assertEqual(plan["hub"]["public_key"], HUB_PUBLIC_KEY)
+            self.assertNotIn("mtu", plan)
+
+    def test_runner_overlay_script_consumes_only_the_projected_contract(self) -> None:
+        script = (REPO_ROOT / "scripts" / "enroll-runner-overlay.sh").read_text(
+            encoding="utf-8"
+        )
+        base = (
+            REPO_ROOT / "roles" / "platform_wireguard" / "templates" / "base.conf.j2"
+        ).read_text(encoding="utf-8")
+        tasks = (
+            REPO_ROOT / "roles" / "platform_wireguard" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--plan", script)
+        self.assertIn("--mode check|apply", script)
+        self.assertNotIn("--hub-endpoint", script)
+        self.assertNotIn("wireguard-peer reconcile", script)
+        self.assertNotRegex(script, r"10\.[0-9]+\.[0-9]+\.[0-9]+")
+        self.assertIn("platform_wireguard_runner_peers", base)
+        self.assertIn("Remove legacy dynamic fragments now owned by the runner contract", tasks)
 
     def test_fleet_bootstrap_input_is_reconciled_in_steady_state(self) -> None:
         tasks = (
@@ -1828,6 +1905,8 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
         self.assertEqual(defaults["platform_wireguard_environment_networks"], {})
         self.assertEqual(defaults["platform_wireguard_listen_port"], 0)
         self.assertEqual(defaults["platform_wireguard_mtu"], 0)
+        self.assertEqual(defaults["platform_wireguard_hub_public_key"], "")
+        self.assertEqual(defaults["platform_wireguard_runner_peers"], [])
 
 
 if __name__ == "__main__":

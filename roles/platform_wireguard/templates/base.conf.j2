@@ -10,3 +10,10 @@ PublicKey = {{ peer.public_key }}
 AllowedIPs = {{ peer.allowed_ips | join(', ') }}
 
 {% endfor %}
+{% for peer in platform_wireguard_runner_peers if peer.public_key %}
+[Peer]
+# runner:{{ peer.environment }}/{{ peer.id }}
+PublicKey = {{ peer.public_key }}
+AllowedIPs = {{ peer.address }}
+
+{% endfor %}

@@ -6,6 +6,10 @@ platform_wireguard_environment_networks: {}
 platform_wireguard_listen_port: 0
 platform_wireguard_mtu: 0
 platform_wireguard_operator_peers: []
+# Supplied by the SOPS platform contract. Empty means no runner enrollment has
+# been approved; the role must not infer either key from live host state.
+platform_wireguard_hub_public_key: ""
+platform_wireguard_runner_peers: []
 platform_wireguard_public_endpoint: ""
 platform_wireguard_state_dir: /etc/spiritvpn/platform/wireguard
 platform_wireguard_peer_dir: /etc/spiritvpn/platform/wireguard/peers

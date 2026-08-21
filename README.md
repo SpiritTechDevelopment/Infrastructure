@@ -463,6 +463,12 @@ digest, материализуют временные Ansible variables с mode 
 формируют из одного набора полей полный runtime contract; несовпадающий
 сохранённый contract останавливает обычный apply до Ansible.
 
+Runner peer проходит двухфазный enrollment из того же encrypted contract:
+pending declaration создаёт только runner-local identity, а hub начинает
+принимать peer после явного добавления public key в SOPS и guarded platform
+refresh. [`enroll-runner-overlay.sh`](scripts/enroll-runner-overlay.sh) принимает
+только временный exact-SHA plan и больше не меняет hub ручной командой.
+
 Низкоуровневый entrypoint, используемый сценарием:
 
 ```bash
@@ -1421,6 +1427,7 @@ root-ключ.
 - operator WireGuard private key создаётся на устройстве оператора;
 - private key management WireGuard создаётся непосредственно на management VPS;
 - private keys fleet WireGuard и PKI создаются непосредственно на fleet-нодах;
+- private key runner WireGuard создаётся и остаётся на runner;
 - Vault transport private key создаётся на management VPS.
 
 В Git попадают только public keys либо ссылки на секреты.

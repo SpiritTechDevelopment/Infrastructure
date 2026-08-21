@@ -87,6 +87,58 @@ Add that public recipient to the topology creation rule in `.sops.yaml`. The
 private file remains local to the runner and must never be copied into a GitHub
 secret, repository artifact, cache, or log.
 
+## Enroll the management overlay from Git
+
+The runner WireGuard peer is part of the encrypted platform contract, not a
+dynamic peer created by a command copied to the hub. In
+`inventories/bootstrap/platform.sops.yml`, pin the reviewed hub public key and
+add one `platform_wireguard_runner_peers` item containing the logical runner ID,
+environment, local interface, operator-range `/32`, keepalive and an initially
+empty `public_key`. This is an explicit enrollment ceremony; audit output must
+never populate these fields automatically.
+
+Commit the pending declaration. From that clean exact-SHA checkout, materialize
+a temporary private plan:
+
+```bash
+umask 077
+python3 scripts/platform-sops.py runner-plan \
+  --bundle inventories/bootstrap/platform.sops.yml \
+  --runner-id RUNNER_ID \
+  --source-git-sha "$(git rev-parse HEAD)" \
+  --output /tmp/spiritvpn-runner-plan.yml
+```
+
+The plan contains operational addresses and pins. Never commit it or attach it
+to a workflow artifact. Transfer it and the reviewed enrollment script from the
+same SHA to the runner over the operator channel; keep the plan mode `0600`,
+then run:
+
+```bash
+sudo scripts/enroll-runner-overlay.sh \
+  --plan /tmp/spiritvpn-runner-plan.yml \
+  --mode check
+```
+
+For an already enrolled runner, `check` accepts only an exact semantic match
+and prints its public key while the declaration is pending. For a new runner,
+use `--mode apply`; it generates the private key locally and never sends it to
+Git or the hub. Put only the printed public key into the same encrypted runner
+declaration and commit it.
+
+Apply that access-boundary change with the guarded operator refresh. The
+platform role renders the runner into the Git-owned base configuration and
+removes only a same-ID legacy dynamic fragment. It does not import arbitrary
+peer files:
+
+```bash
+scripts/platform-bootstrap.sh --reuse-tunnel --apply
+```
+
+Generate a fresh plan from the committed SHA and repeat `--mode check`. Remove
+every temporary plaintext plan after use. Future check runs are read-only and
+also require the runner service and interface to be active.
+
 ## Verify
 
 The GitHub runner page must show `spiritvpn-deploy-1` as **Idle** with the

@@ -1,38 +1,24 @@
 #!/usr/bin/env bash
-#
-# Join a self-hosted GitHub Actions runner to the management WireGuard overlay.
-#
-# The runner reaches the management hub only through this overlay: Vault, the
-# github-deploy SSH endpoint and every management address live there and nowhere
-# on the public interface. Until the runner is a peer, control-deploy cannot
-# talk to the hub at all.
-#
-# This runs ON THE RUNNER. It follows the same rule as every other machine in
-# this system (roles/bootstrap_wireguard, roles/platform_wireguard): the private
-# key is generated here and never leaves. Only the public key travels to the
-# hub, printed at the end as a ready-to-run command for an operator to execute
-# there. Nothing in this script needs, or is given, the hub's private key.
-#
-# The runner is a management-plane peer, not a traffic node, so it takes an
-# address from the operator range of the environment network (…255.x), well
-# clear of the node slots (…1.x / …2.x). The hub side is registered with the
-# existing bounded peer command, whose validation this script mirrors so a bad
-# value fails here rather than after a copy-paste to the hub.
-
+# Apply or verify a runner-local WireGuard config from an exact-SHA platform plan.
 set -euo pipefail
 umask 077
 
 usage() {
   cat >&2 <<'USAGE'
-usage: enroll-runner-overlay.sh \
-         --hub-public-key <base64>        # /etc/wireguard/wg0.pub on the hub
-         --hub-endpoint <host:port>       # public address, e.g. 192.0.2.1:51820
-         --hub-overlay-address <ipv4>     # the hub address the runner will SSH to, e.g. 10.80.0.1
-         --runner-address <ipv4/32>       # a free operator-range /32, e.g. 10.80.255.240/32
-         [--runner-id <id>]               # peer label on the hub (default: ci-runner)
-         [--interface <name>]             # local WG interface (default: wg-spirit)
+usage: enroll-runner-overlay.sh --plan <private-runner-plan.yml> [--mode check|apply]
 
-Run as root on the runner. Prints the single command to run on the hub.
+The plan must be generated from a clean committed checkout:
+
+  python3 scripts/platform-sops.py runner-plan \
+    --bundle inventories/bootstrap/platform.sops.yml \
+    --runner-id <logical-runner-id> \
+    --source-git-sha "$(git rev-parse HEAD)" \
+    --output /tmp/runner-plan.yml
+
+Run this script as root on the runner. Check is read-only. Apply creates a new
+runner-local private key only when no config exists and the Git declaration is
+still pending (its public_key is empty). An existing differing config is never
+overwritten automatically.
 USAGE
   exit 64
 }
@@ -42,117 +28,244 @@ fail() {
   exit 1
 }
 
-hub_public_key=""
-hub_endpoint=""
-hub_overlay_address=""
-runner_address=""
-runner_id="ci-runner"
-interface="wg-spirit"
-
+plan=""
+mode=check
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --hub-public-key) hub_public_key="${2:-}"; shift 2 ;;
-    --hub-endpoint) hub_endpoint="${2:-}"; shift 2 ;;
-    --hub-overlay-address) hub_overlay_address="${2:-}"; shift 2 ;;
-    --runner-address) runner_address="${2:-}"; shift 2 ;;
-    --runner-id) runner_id="${2:-}"; shift 2 ;;
-    --interface) interface="${2:-}"; shift 2 ;;
+    --plan) plan="${2:-}"; shift 2 ;;
+    --mode) mode="${2:-}"; shift 2 ;;
     -h|--help) usage ;;
-    *) printf 'unknown argument: %s\n' "$1" >&2; usage ;;
+    *) usage ;;
   esac
 done
 
-[[ "$EUID" -eq 0 ]] || fail "root is required to write /etc/wireguard and bring the interface up"
-[[ -n "$hub_public_key" && -n "$hub_endpoint" && -n "$hub_overlay_address" && -n "$runner_address" ]] || usage
+[[ "$EUID" -eq 0 ]] || fail "root is required to inspect the protected WireGuard config"
+[[ "$mode" =~ ^(check|apply)$ ]] || usage
+[[ -n "$plan" && -f "$plan" && ! -L "$plan" ]] || fail "plan must be a regular file"
+plan_mode="$(stat -c '%a' "$plan")"
+(( (8#$plan_mode & 8#077) == 0 )) || fail "plan must not be readable by group or others"
+for command_name in python3 wg systemctl install cmp stat mktemp; do
+  command -v "$command_name" >/dev/null 2>&1 || fail "required command is unavailable: $command_name"
+done
 
-# Same shapes the hub enforces, checked here so a typo fails before it reaches
-# the hub. A WireGuard key is 32 bytes in base64: 43 characters and one '='.
-[[ "$hub_public_key" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "hub public key is not a WireGuard key"
-[[ "$interface" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || fail "invalid interface name"
-[[ "$runner_id" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || fail "runner id must match ^[a-z0-9][a-z0-9-]{0,62}$"
-[[ "$hub_endpoint" =~ ^[0-9.]+:[0-9]{1,5}$ ]] || fail "hub endpoint must be host:port"
-[[ "$hub_overlay_address" =~ ^[0-9.]+$ ]] || fail "hub overlay address must be a bare IPv4"
-[[ "$runner_address" =~ ^[0-9.]+/32$ ]] || fail "runner address must be a single /32, e.g. 10.80.255.240/32"
-
-# The overlay networks, mirrored from platform_wireguard defaults. The runner's
-# address has to live inside one of them, and the hub address it targets has to
-# be that same network's hub host (…0.1), or return traffic would never route.
-python3 - "$runner_address" "$hub_overlay_address" <<'PY' || fail "runner address is not a valid operator-range /32 for the hub's network"
+mapfile -d '' contract < <(
+python3 - "$plan" <<'PY'
+import base64
+import binascii
 import ipaddress
+import re
 import sys
+from pathlib import Path
 
-networks = {
-    "develop": ipaddress.ip_network("10.80.0.0/16"),
-    "prod": ipaddress.ip_network("10.82.0.0/16"),
-}
-runner = ipaddress.ip_interface(sys.argv[1])
-hub = ipaddress.ip_address(sys.argv[2])
-if runner.version != 4 or runner.network.prefixlen != 32:
-    raise SystemExit(1)
-for network in networks.values():
-    if runner.ip in network and hub in network:
-        if runner.ip == network.network_address or runner.ip == (network.network_address + 1):
-            raise SystemExit(1)  # never the network address or the hub itself
-        break
-else:
-    raise SystemExit(1)  # runner and hub must share one environment network
+import yaml
+
+
+def fail() -> None:
+    raise SystemExit(64)
+
+
+try:
+    document = yaml.safe_load(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, yaml.YAMLError):
+    fail()
+if not isinstance(document, dict) or set(document) != {
+    "environment_network",
+    "hub",
+    "persistent_keepalive_seconds",
+    "runner",
+    "schema_version",
+    "source_git_sha",
+}:
+    fail()
+if document["schema_version"] != 1 or not re.fullmatch(
+    r"[0-9a-f]{40}", str(document["source_git_sha"])
+):
+    fail()
+runner = document["runner"]
+hub = document["hub"]
+if not isinstance(runner, dict) or set(runner) != {
+    "address",
+    "environment",
+    "id",
+    "interface",
+    "public_key",
+}:
+    fail()
+if not isinstance(hub, dict) or set(hub) != {
+    "endpoint",
+    "overlay_address",
+    "public_key",
+}:
+    fail()
+if runner["environment"] not in {"develop", "prod"}:
+    fail()
+if not isinstance(runner["id"], str) or not re.fullmatch(
+    r"[a-z0-9][a-z0-9-]{0,62}", runner["id"]
+):
+    fail()
+if not isinstance(runner["interface"], str) or not re.fullmatch(
+    r"[A-Za-z0-9_.-]{1,15}", runner["interface"]
+):
+    fail()
+try:
+    runner_address = ipaddress.ip_interface(runner["address"])
+    hub_address = ipaddress.ip_address(hub["overlay_address"])
+    environment_network = ipaddress.ip_network(document["environment_network"], strict=True)
+except (TypeError, ValueError):
+    fail()
+if (
+    runner_address.version != 4
+    or runner_address.network.prefixlen != 32
+    or hub_address.version != 4
+    or environment_network.version != 4
+    or runner_address.ip not in environment_network
+    or hub_address not in environment_network
+    or runner_address.ip == hub_address
+):
+    fail()
+
+
+def wireguard_key(value: object, *, pending: bool) -> str:
+    if pending and value == "":
+        return ""
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9+/]{43}=", value):
+        fail()
+    try:
+        if len(base64.b64decode(value, validate=True)) != 32:
+            fail()
+    except (ValueError, binascii.Error):
+        fail()
+    return value
+
+
+runner_public_key = wireguard_key(runner["public_key"], pending=True)
+hub_public_key = wireguard_key(hub["public_key"], pending=False)
+endpoint = hub["endpoint"]
+if not isinstance(endpoint, str) or not re.fullmatch(
+    r"(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):[0-9]{1,5}", endpoint
+):
+    fail()
+keepalive = document["persistent_keepalive_seconds"]
+if not isinstance(keepalive, int) or isinstance(keepalive, bool) or not 1 <= keepalive <= 65535:
+    fail()
+
+values = (
+    runner["id"],
+    runner["environment"],
+    runner["interface"],
+    str(runner_address),
+    runner_public_key,
+    hub_public_key,
+    endpoint,
+    str(hub_address),
+    str(environment_network),
+    str(keepalive),
+    document["source_git_sha"],
+)
+for value in values:
+    sys.stdout.buffer.write(value.encode("utf-8") + b"\0")
 PY
+)
 
-command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1 \
-  || fail "wireguard-tools is missing; install it first (apt-get install -y wireguard-tools)"
+[[ "${#contract[@]}" -eq 11 ]] || fail "Git-owned runner plan is incomplete"
+runner_id="${contract[0]}"
+environment="${contract[1]}"
+interface="${contract[2]}"
+runner_address="${contract[3]}"
+expected_runner_public_key="${contract[4]}"
+hub_public_key="${contract[5]}"
+hub_endpoint="${contract[6]}"
+hub_overlay_address="${contract[7]}"
+environment_network="${contract[8]}"
+keepalive="${contract[9]}"
+source_git_sha="${contract[10]}"
 
 config_path="/etc/wireguard/${interface}.conf"
+
+render_candidate() {
+  local private_key="$1"
+  local target="$2"
+  {
+    printf '%s\n' '[Interface]'
+    printf '# spiritvpn runner: %s\n' "$runner_id"
+    printf 'Address = %s\n' "$runner_address"
+    printf 'PrivateKey = %s\n' "$private_key"
+    printf '\n'
+    printf '%s\n' '[Peer]'
+    printf '# management hub\n'
+    printf 'PublicKey = %s\n' "$hub_public_key"
+    printf 'Endpoint = %s\n' "$hub_endpoint"
+    printf 'AllowedIPs = %s/32\n' "$hub_overlay_address"
+    printf 'PersistentKeepalive = %s\n' "$keepalive"
+  } > "$target"
+  chmod 0600 "$target"
+}
+
+private_key=""
 if [[ -e "$config_path" ]]; then
-  fail "$config_path already exists; remove it deliberately before re-enrolling"
+  [[ -f "$config_path" && ! -L "$config_path" ]] \
+    || fail "existing WireGuard config is not a safe regular file"
+  [[ "$(stat -c '%u:%a' "$config_path")" == "0:600" ]] \
+    || fail "existing WireGuard config must be root-owned mode 0600"
+  private_key="$(
+python3 - "$config_path" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+matches = re.findall(
+    r"(?m)^\s*PrivateKey\s*=\s*([A-Za-z0-9+/]{43}=)\s*$",
+    Path(sys.argv[1]).read_text(encoding="utf-8"),
+)
+if len(matches) != 1:
+    raise SystemExit(64)
+print(matches[0])
+PY
+)" || fail "existing WireGuard config has no single private key"
+else
+  [[ "$mode" == apply ]] || fail "runner WireGuard config is absent"
+  [[ -z "$expected_runner_public_key" ]] || fail \
+    "Git declares a runner key but its matching local private key is absent"
+  private_key="$(wg genkey)"
 fi
 
-install -d -o root -g root -m 0700 /etc/wireguard
+actual_runner_public_key="$(printf '%s' "$private_key" | wg pubkey)"
+if [[ -n "$expected_runner_public_key" && \
+      "$actual_runner_public_key" != "$expected_runner_public_key" ]]; then
+  fail "local runner identity differs from the Git-owned public key"
+fi
 
-# The private key is created here and stays here. Only its public half is ever
-# printed, and only to hand to the hub.
-private_key="$(wg genkey)"
-public_key="$(printf '%s' "$private_key" | wg pubkey)"
+temporary="$(mktemp "/tmp/spiritvpn-runner-${interface}.candidate.XXXXXX")"
+cleanup() {
+  rm -f -- "$temporary"
+}
+trap cleanup EXIT
+render_candidate "$private_key" "$temporary"
+private_key=""
 
-temporary="$(mktemp "${config_path}.tmp.XXXXXX")"
-trap 'rm -f "$temporary"' EXIT
-{
-  printf '%s\n' '[Interface]'
-  printf '# spiritvpn runner: %s\n' "$runner_id"
-  printf 'Address = %s\n' "$runner_address"
-  printf 'PrivateKey = %s\n' "$private_key"
-  printf '\n'
-  printf '%s\n' '[Peer]'
-  printf '# management hub\n'
-  printf 'PublicKey = %s\n' "$hub_public_key"
-  printf 'Endpoint = %s\n' "$hub_endpoint"
-  # Only the hub address the runner actually talks to is routed into the tunnel:
-  # the overlay is a path to the hub, not a default route.
-  printf 'AllowedIPs = %s/32\n' "$hub_overlay_address"
-  # The hub learns the runner's public address from its handshakes rather than
-  # from a static Endpoint, so the runner — very likely behind NAT — must keep
-  # the mapping warm from its side.
-  printf 'PersistentKeepalive = 25\n'
-} > "$temporary"
-install -o root -g root -m 0600 "$temporary" "$config_path"
+if [[ -e "$config_path" ]]; then
+  cmp --silent "$temporary" "$config_path" || fail \
+    "existing runner config differs from the exact Git-owned plan; refusing overwrite"
+elif [[ "$mode" == apply ]]; then
+  install -d -o root -g root -m 0700 /etc/wireguard
+  install -o root -g root -m 0600 "$temporary" "$config_path"
+fi
 
-systemctl enable --now "wg-quick@${interface}" >/dev/null 2>&1 \
-  || fail "wg-quick@${interface} did not start; inspect: systemctl status wg-quick@${interface}"
+if [[ "$mode" == apply ]]; then
+  systemctl enable --now "wg-quick@${interface}.service" >/dev/null 2>&1 \
+    || fail "runner WireGuard service did not start"
+else
+  systemctl is-enabled --quiet "wg-quick@${interface}.service" \
+    || fail "runner WireGuard service is not enabled"
+  systemctl is-active --quiet "wg-quick@${interface}.service" \
+    || fail "runner WireGuard service is not active"
+fi
+wg show "$interface" >/dev/null 2>&1 || fail "runner WireGuard interface is unavailable"
 
-runner_ip="${runner_address%/32}"
-cat <<REPORT
-
-Runner overlay interface ${interface} is up.
-  runner address : ${runner_address}
-  hub target     : ${hub_overlay_address} via ${hub_endpoint}
-  public key     : ${public_key}
-
-The handshake stays incomplete until the hub accepts this peer. Run ON THE HUB:
-
-  sudo /usr/local/sbin/spiritvpn-wireguard-peer reconcile develop ${runner_id} ${runner_address} ${public_key}
-
-Then verify from the runner:
-
-  wg show ${interface} latest-handshakes
-  ssh -o BatchMode=yes -i ~/.config/spiritvpn/keys/github-develop \\
-      github-deploy@${hub_overlay_address} platform-readiness
-REPORT
+if [[ -z "$expected_runner_public_key" ]]; then
+  printf '%s\n' 'runner identity is pending in the encrypted platform contract'
+  printf 'runner_public_key=%s\n' "$actual_runner_public_key"
+  printf '%s\n' 'Add this public key to the declared runner peer, commit it, then run the guarded platform refresh.'
+else
+  printf 'runner overlay %s: match (%s)\n' "$runner_id" "$mode"
+fi
