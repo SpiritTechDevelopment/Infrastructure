@@ -117,8 +117,11 @@ backend build -> immutable backend+migrate digests -> infrastructure PR
 `control-deploy` выполняется на management VPS, читает секреты только из
 loopback Vault и не требует прямого SSH к backend. Для новой версии migrations
 запускаются один раз перед backend; повторный apply того же release сходится без
-повторной миграции. NodeAgent digest меняется через infrastructure PR и
-применяется обычным `fleet-deploy` только к затронутым нодам.
+повторной миграции. Внешний backup adapter объявляется в SOPS topology,
+компилируется в `control-plan.json` и перед apply сравнивается с локальным
+approval marker; несовпадение останавливает прогон до Ansible. NodeAgent digest
+меняется через infrastructure PR и применяется обычным `fleet-deploy` только к
+затронутым нодам.
 
 `fleetctl` вычисляет `impact-plan`. Bootstrap запускается только для новых
 инстансов; configure и readiness — только для `affected` инстансов. Если desired

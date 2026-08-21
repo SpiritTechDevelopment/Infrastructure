@@ -180,6 +180,27 @@ def _validate_environment(environment: Environment, issues: list[ValidationIssue
                 "prod control deployment must require a pre-migration backup",
             )
         )
+    backup_command = control.external_backup_command_argv
+    if backup_command and (
+        not backup_command[0].startswith("/")
+        or any(argument != argument.strip() or "\n" in argument for argument in backup_command)
+    ):
+        issues.append(
+            ValidationIssue.at(
+                environment.source,
+                "CONTROL_BACKUP_COMMAND",
+                "external backup argv must start with an absolute executable and contain "
+                "only trimmed single-line arguments",
+            )
+        )
+    if control.backup_required and not backup_command:
+        issues.append(
+            ValidationIssue.at(
+                environment.source,
+                "CONTROL_BACKUP_COMMAND",
+                "a required control backup must declare an external backup command",
+            )
+        )
     for reference in control.secret_refs.values():
         if not reference.startswith(f"secret://kv/{env}/control/"):
             issues.append(

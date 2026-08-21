@@ -30,6 +30,7 @@ spec:
       owner_user: spiritvpn_owner
       runtime_user: spiritvpn_runtime
       backup_required: false
+      external_backup_command_argv: []
     secrets:
       postgres_owner_password_ref: secret://kv/develop/control/postgres#owner_password
       postgres_runtime_password_ref: secret://kv/develop/control/postgres#runtime_password

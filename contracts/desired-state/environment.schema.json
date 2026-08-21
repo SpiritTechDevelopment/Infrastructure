@@ -59,7 +59,12 @@
                 "database": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
                 "owner_user": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
                 "runtime_user": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
-                "backup_required": {"type": "boolean"}
+                "backup_required": {"type": "boolean"},
+                "external_backup_command_argv": {
+                  "type": "array",
+                  "maxItems": 32,
+                  "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+                }
               }
             },
             "secrets": {

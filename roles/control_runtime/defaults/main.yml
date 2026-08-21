@@ -10,7 +10,6 @@ control_backend_gid: "10001"
 # secrets directory is 0750 and must be traversable by exactly this gid.
 control_bot_uid: "10001"
 control_bot_gid: "10001"
-control_external_backup_command_argv: []
 control_compose_pull_policy: missing
 # Потолок на логи одного контейнера: max-size × max-file.
 control_log_max_size: 10m

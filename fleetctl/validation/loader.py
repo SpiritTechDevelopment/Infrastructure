@@ -328,6 +328,9 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                     postgres_owner_user=control_spec["postgres"]["owner_user"],
                     postgres_runtime_user=control_spec["postgres"]["runtime_user"],
                     backup_required=control_spec["postgres"]["backup_required"],
+                    external_backup_command_argv=tuple(
+                        control_spec["postgres"].get("external_backup_command_argv", [])
+                    ),
                     secret_refs=dict(control_spec["secrets"]),
                     customer_access_writers=tuple(
                         control_spec["authorization"]["customer_access_writers"]

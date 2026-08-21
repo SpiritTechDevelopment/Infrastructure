@@ -295,15 +295,17 @@ control references exist in Vault, dispatch `control-deploy` for the same exact
 infrastructure SHA: first `mode=check`, then `mode=apply`. The management host
 locally reconciles the environment-specific PostgreSQL, migrations and backend;
 no direct backend SSH is involved. For an existing production database, put a
-reviewed external backup command argv in root-owned
-`/etc/spiritvpn/deploy/prod/control.yml` before a changed release.
+reviewed absolute external backup command argv in the SOPS-encrypted
+`Environment.spec.control.postgres.external_backup_command_argv`. Check renders
+that Git-owned policy without requiring a local file. Apply additionally
+requires the root-owned `/etc/spiritvpn/deploy/prod/control.yml` approval marker
+to contain the exact same argv; a mismatch stops before Ansible or migrations.
 
-`inventories/bootstrap/platform.sops.yml` is intentionally not consumed by
-that steady-state command. If operator keys, the runner address, management
-address, or pinned host key change, merge the encrypted bundle change normally
-and then repeat the operator-controlled `fleet-platform-bootstrap-check` and
-`fleet-platform-bootstrap` procedure. This prevents a routine component
-upgrade from silently changing the access boundary.
+`platform-deploy` decrypts `inventories/bootstrap/platform.sops.yml` from the
+exact reviewed SHA. Access-boundary changes still require the guarded
+operator-controlled `fleet-platform-refresh`: apply compares Git with the
+explicitly applied runtime contract and stops on a mismatch. This prevents a
+routine component upgrade from silently changing SSH or WireGuard access.
 
 After readiness succeeds, run `fleet-deploy` with a full SHA already reachable
 from `main`. Start with `mode=dry-run`; choose `mode=apply` only after reviewing

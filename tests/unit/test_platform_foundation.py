@@ -583,16 +583,74 @@ all:
             'bundle verify "$bundle"',
             "--scope control",
             "control-plan.json",
+            "control-contract-check.py",
+            "--require-applied",
             "playbooks/control/deploy.yml",
             "refs/control-deployments/$environment",
         ):
             self.assertIn(required, executor)
+        self.assertNotIn('--extra-vars "@$config_dir/control.yml"', executor)
         self.assertIn("control_plan.backend.image", compose)
         self.assertIn("control_plan.backend.migration_image", compose)
         self.assertIn("control_plan.postgres.image", compose)
         self.assertIn("Refuse an implicit PostgreSQL major-version upgrade", tasks)
         self.assertNotIn("--force-recreate", tasks)
         self.assertNotIn("compose\n      - down", tasks)
+
+    def test_control_backup_contract_is_git_owned_and_local_drift_fails_closed(self) -> None:
+        path = REPO_ROOT / "scripts" / "control-contract-check.py"
+        spec = importlib.util.spec_from_file_location("spiritvpn_control_contract", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = root / "control-plan.json"
+            plan.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "postgres": {
+                            "external_backup_command_argv": [
+                                "/usr/local/sbin/reviewed-backup",
+                                "develop",
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            applied = root / "control.yml"
+            applied.write_text(
+                yaml.safe_dump(
+                    {
+                        "control_external_backup_command_argv": [
+                            "/usr/local/sbin/reviewed-backup",
+                            "develop",
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            module.require_applied_contract(plan, applied)
+
+            applied.write_text(
+                yaml.safe_dump({"control_external_backup_command_argv": []}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(module.ControlContractError) as raised:
+                module.require_applied_contract(plan, applied)
+            self.assertIn("explicitly applied approval", str(raised.exception))
+
+        defaults = (
+            REPO_ROOT / "roles" / "control_runtime" / "defaults" / "main.yml"
+        ).read_text(encoding="utf-8")
+        tasks = (
+            REPO_ROOT / "roles" / "control_runtime" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("control_external_backup_command_argv", defaults)
+        self.assertIn("control_plan.postgres.external_backup_command_argv", tasks)
 
     def test_backend_runs_as_the_group_its_secrets_are_prepared_for(self) -> None:
         """The role chowns /secrets to a gid the container must actually hold.
@@ -1512,7 +1570,7 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
         start = tasks.index(
             "Reconcile environment fleet bootstrap inputs from reviewed platform state"
         )
-        end = tasks.index("Preserve environment-local control deployment settings", start)
+        end = tasks.index("Initialize the explicit control deployment approval contract", start)
         task = tasks[start:end]
         self.assertNotIn("force: false", task)
         self.assertNotIn("deploy_mode == 'bootstrap'", task)

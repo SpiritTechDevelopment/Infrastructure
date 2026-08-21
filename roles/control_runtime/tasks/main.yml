@@ -368,7 +368,7 @@
 - name: Require an external prod backup adapter before a changed release
   ansible.builtin.assert:
     that:
-      - control_external_backup_command_argv | length > 0
+      - control_plan.postgres.external_backup_command_argv | length > 0
     fail_msg: >-
       Prod migrations require a reviewed external backup command; a dump on the
       shared management VPS is not an independent backup.
@@ -442,13 +442,13 @@
 
 - name: Run the reviewed external backup adapter
   ansible.builtin.command:
-    argv: "{{ control_external_backup_command_argv }}"
+    argv: "{{ control_plan.postgres.external_backup_command_argv }}"
   when:
     - not ansible_check_mode
     - _control_release_changed | bool
     - _control_postgres_state.stat.exists
     - control_plan.postgres.backup_required | bool
-    - control_external_backup_command_argv | length > 0
+    - control_plan.postgres.external_backup_command_argv | length > 0
   no_log: true
 
 - name: Apply migrations from the matching backend release

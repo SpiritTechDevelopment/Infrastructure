@@ -66,6 +66,7 @@ class ControlPlane:
     postgres_owner_user: str
     postgres_runtime_user: str
     backup_required: bool
+    external_backup_command_argv: tuple[str, ...]
     secret_refs: dict[str, str]
     customer_access_writers: tuple[str, ...]
     customer_access_readers: tuple[str, ...]

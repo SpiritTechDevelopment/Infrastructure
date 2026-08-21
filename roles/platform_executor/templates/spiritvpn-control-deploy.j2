@@ -66,7 +66,7 @@ git clone --no-checkout --shared "$repository" "$worktree" >/dev/null
 git -C "$worktree" checkout --detach "$source_git_sha" >/dev/null
 test -z "$(git -C "$worktree" status --short)"
 
-for required in control.yml vault-approle/role-id vault-approle/secret-id; do
+for required in vault-approle/role-id vault-approle/secret-id; do
   test -s "$config_dir/$required" || {
     printf '%s\n' "missing protected control executor input: $config_dir/$required" >&2
     exit 66
@@ -90,6 +90,19 @@ test -s "$build_dir/monitoring-targets.json" || {
   exit 66
 }
 
+contract_arguments=(
+  "$worktree/scripts/control-contract-check.py"
+  --control-plan "$build_dir/control-plan.json"
+)
+if test "$mode" = apply; then
+  test -s "$config_dir/control.yml" || {
+    printf '%s\n' "missing explicit control approval: $config_dir/control.yml" >&2
+    exit 66
+  }
+  contract_arguments+=(--require-applied "$config_dir/control.yml")
+fi
+"$python" "${contract_arguments[@]}"
+
 "$python" "$worktree/scripts/vault-secret-resolver.py" \
   --root "$worktree" \
   --environment "$environment" \
@@ -107,7 +120,6 @@ arguments=(
   --extra-vars "control_plan_file=$build_dir/control-plan.json"
   --extra-vars "monitoring_targets_file=$build_dir/monitoring-targets.json"
   --extra-vars "@$secrets_file"
-  --extra-vars "@$config_dir/control.yml"
 )
 if test "$mode" = check; then
   arguments+=(--check --diff)

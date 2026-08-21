@@ -306,6 +306,24 @@ class DesiredStateValidationTests(unittest.TestCase):
         )
         self.assertIn("COMMON_OVERRIDE", codes)
 
+    def test_external_backup_command_must_be_a_bounded_absolute_argv(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["control"]["postgres"]["external_backup_command_argv"] = [
+                "relative-adapter",
+                " untrimmed ",
+            ]
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("CONTROL_BACKUP_COMMAND", codes)
+
+    def test_required_backup_must_name_an_external_adapter(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["control"]["postgres"]["backup_required"] = True
+            document["spec"]["control"]["postgres"]["external_backup_command_argv"] = []
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("CONTROL_BACKUP_COMMAND", codes)
+
     def test_bot_may_not_take_over_the_backend_database(self) -> None:
         """Один инстанс, два арендатора.
 

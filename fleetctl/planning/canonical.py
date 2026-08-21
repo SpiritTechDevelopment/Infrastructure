@@ -99,6 +99,7 @@ def _control_values(state: DesiredState) -> dict[str, Any] | None:
         "postgres_owner_user": control.postgres_owner_user,
         "postgres_runtime_user": control.postgres_runtime_user,
         "backup_required": control.backup_required,
+        "external_backup_command_argv": list(control.external_backup_command_argv),
         "secret_refs": dict(sorted(control.secret_refs.items())),
         "customer_access_writers": list(control.customer_access_writers),
         "customer_access_readers": list(control.customer_access_readers),

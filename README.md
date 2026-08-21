@@ -683,6 +683,9 @@ spec:
       owner_user: spiritvpn_owner
       runtime_user: spiritvpn_runtime
       backup_required: false # для prod должно быть true
+      # Для prod — абсолютный argv проверенного внешнего backup adapter.
+      # Credentials adapter получает из Vault или собственного root-only файла.
+      external_backup_command_argv: []
     secrets:
       postgres_owner_password_ref: secret://kv/develop/control/postgres#owner_password
       postgres_runtime_password_ref: secret://kv/develop/control/postgres#runtime_password
@@ -1348,12 +1351,18 @@ Management executor сам получает control-секреты из Vault. �
 отдельному backend host, потому что stack локален management VPS. Apply:
 
 1. проверяет точный Git bundle и рендерит `control-plan.json`;
-2. поднимает pinned PostgreSQL;
-3. при изменении release создаёт pre-migration dump (для `prod` дополнительно
+2. сравнивает Git-owned backup policy с явно одобренным локальным contract;
+3. поднимает pinned PostgreSQL;
+4. при изменении release создаёт pre-migration dump (для `prod` дополнительно
    требует настроенный внешний backup adapter);
-4. запускает pinned migration image;
-5. приводит restricted runtime DB role и backend к desired state;
-6. ждёт `/health/ready` и только после этого записывает successful release.
+5. запускает pinned migration image;
+6. приводит restricted runtime DB role и backend к desired state;
+7. ждёт `/health/ready` и только после этого записывает successful release.
+
+Adapter argv принадлежит SOPS topology и попадает в Ansible только через
+compiled `control-plan.json`. Локальный `control.yml` больше не является
+источником значения: перед apply он служит approval marker и обязан точно
+совпасть с Git. Check не требует marker и ничего не изменяет.
 
 Повторный apply того же release не запускает миграции заново и не использует
 `--force-recreate`. Неявная смена major version существующего PostgreSQL

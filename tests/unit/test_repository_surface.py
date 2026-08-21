@@ -58,6 +58,9 @@ class RepositorySurfaceTests(unittest.TestCase):
                 # Projects immutable platform images from the canonical SOPS
                 # common desired state instead of role-local defaults.
                 "platform-component-vars.py",
+                # Compares the exact-SHA compiled backup policy with the
+                # explicitly approved local contract without printing argv.
+                "control-contract-check.py",
                 "platform-sops.py",
                 "platform-remote.sh",
                 "bootstrap-self-hosted-runner.sh",

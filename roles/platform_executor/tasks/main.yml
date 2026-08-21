@@ -245,7 +245,7 @@
   no_log: true
   diff: false
 
-- name: Preserve environment-local control deployment settings
+- name: Initialize the explicit control deployment approval contract
   ansible.builtin.copy:
     content: |
       {{ {

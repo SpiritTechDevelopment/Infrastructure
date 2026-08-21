@@ -64,6 +64,7 @@ def compile_control_plan(state: DesiredState) -> dict[str, Any] | None:
             "owner_user": control.postgres_owner_user,
             "runtime_user": control.postgres_runtime_user,
             "backup_required": control.backup_required,
+            "external_backup_command_argv": list(control.external_backup_command_argv),
         },
         "observability": _observability_projection(state),
         "secret_refs": dict(sorted(control.secret_refs.items())),

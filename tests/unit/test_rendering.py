@@ -47,6 +47,7 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("@sha256:", plan["backend"]["image"])
         self.assertIn("@sha256:", plan["backend"]["migration_image"])
         self.assertIn("@sha256:", plan["postgres"]["image"])
+        self.assertEqual(plan["postgres"]["external_backup_command_argv"], [])
         self.assertTrue(
             all(reference.startswith("secret://") for reference in plan["secret_refs"].values())
         )
