@@ -317,21 +317,44 @@ identity. Это не identity management executor и не recovery key; при�
 часть не хранится в GitHub Secrets. Создание выполняет ручной workflow
 `runner-sops-bootstrap`, который печатает только публичный recipient.
 
-### 1. Получить версию и digest
+### 1. Создать private host plan из Git
 
-Откройте в GitHub репозитории **Settings → Actions → Runners → New self-hosted
-runner → Linux**. Возьмите оттуда точную версию и SHA256 архива для архитектуры
-VPS. Скрипт намеренно не использует плавающий `latest`.
-
-### 2. Передать bootstrap-скрипт
+Имя, repository, labels, архитектура, layout, update policy и проверенный
+bootstrap release runner описаны в SOPS-зашифрованном `platform_runner`.
+Ручными аргументами они больше не передаются:
 
 ```bash
-scp scripts/bootstrap-self-hosted-runner.sh root@RUNNER_IP:/root/
+umask 077
+python3 scripts/platform-sops.py runner-host-plan \
+  --bundle inventories/bootstrap/platform.sops.yml \
+  --source-git-sha "$(git rev-parse HEAD)" \
+  --output /tmp/spiritvpn-runner-host-plan.json
 ```
 
-### 3. Зарегистрировать runner
+### 2. Передать plan и скрипт того же SHA
 
-Короткоживущий registration token передаётся по pipe и не сохраняется в файл:
+```bash
+scp \
+  scripts/bootstrap-self-hosted-runner.sh \
+  /tmp/spiritvpn-runner-host-plan.json \
+  root@RUNNER_HOST:/tmp/
+```
+
+Plan имеет mode `0600` и содержит digest скрипта. Для существующего runner
+сначала выполняется только read-only проверка:
+
+```bash
+ssh root@RUNNER_HOST \
+  'chmod 0600 /tmp/spiritvpn-runner-host-plan.json && \
+   /tmp/bootstrap-self-hosted-runner.sh \
+     --plan /tmp/spiritvpn-runner-host-plan.json \
+     --mode check'
+```
+
+### 3. Зарегистрировать новый runner
+
+Только для ещё не зарегистрированного хоста короткоживущий registration token
+передаётся по pipe и не сохраняется в файл:
 
 ```bash
 set -o pipefail
@@ -339,13 +362,10 @@ gh api \
   --method POST \
   repos/OWNER/REPOSITORY/actions/runners/registration-token \
   --jq .token |
-ssh root@RUNNER_IP \
-  '/root/bootstrap-self-hosted-runner.sh \
-    --repository-url https://github.com/OWNER/REPOSITORY \
-    --runner-version X.Y.Z \
-    --runner-sha256 64_HEX_CHARACTERS \
-    --runner-name spiritvpn-deploy-1 \
-    --labels spiritvpn-deploy'
+ssh root@RUNNER_HOST \
+  '/tmp/bootstrap-self-hosted-runner.sh \
+    --plan /tmp/spiritvpn-runner-host-plan.json \
+    --mode apply'
 ```
 
 ### 4. Проверить runner
@@ -363,10 +383,11 @@ id github-runner
 
 ### Как добавить второй runner?
 
-Повторите процедуру на другом VPS с уникальным `--runner-name` и тем же label
-`spiritvpn-deploy`. GitHub сможет назначить deployment job любому свободному
-runner с этим label. Добавьте public IP нового runner как отдельный `/32` в
-`platform_ssh_allowed_cidrs`, затем повторно примените management bootstrap.
+Сначала добавьте отдельную Git-owned runner declaration с уникальным именем и
+явными labels, затем создайте plan из закоммиченного SHA. Сетевой доступ
+добавляется только через SOPS-зашифрованный runner overlay contract; public IP
+не импортируется из обнаруженного состояния и не добавляется вручную в SSH
+allowlist.
 
 Одинаковый label не разделяет среды. Для строгого разделения `develop` и `prod`
 нужны разные labels и изменение `runs-on` в workflows. Один общий persistent

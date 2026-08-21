@@ -143,13 +143,15 @@ applied access contract. A later `platform-deploy` decrypts the exact bundle
 from its reviewed Git SHA and refuses apply if that contract does not match.
 The file is therefore an approval boundary, not a second desired-state source.
 
-A new key must be added in two places or it silently goes nowhere:
-`EXPECTED_VARIABLE_KEYS` in `scripts/platform-sops.py`, which validates the
-bundle, and the persisted allow-list in `roles/platform_executor`, which decides
-what the hub writes down. These sets must match exactly apart from the derived
-public endpoint; a unit test fails if either side outgrows the other. Management
-WireGuard interface, environment networks, listen port and MTU belong to this
-encrypted contract and deliberately have no usable role fallback.
+A new management-runtime key must be added in two places or it silently goes
+nowhere: `RUNTIME_VARIABLE_KEYS` in `scripts/platform-sops.py` and the persisted
+allow-list in `roles/platform_executor`. These sets must match exactly apart
+from the derived public endpoint; a unit test fails if either side outgrows the
+other. Runner-host bootstrap data is deliberately outside that projection: it
+is materialized only into a private exact-SHA operator plan and never delivered
+to the management hub. Management WireGuard interface, environment networks,
+listen port and MTU belong to the encrypted runtime contract and deliberately
+have no usable role fallback.
 
 The same contract may declare management runner peers. A runner with an empty
 public key is pending and does not change the hub. Once its locally generated

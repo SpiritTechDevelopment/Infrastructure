@@ -44,7 +44,7 @@ done
 [[ -n "$plan" && -f "$plan" && ! -L "$plan" ]] || fail "plan must be a regular file"
 plan_mode="$(stat -c '%a' "$plan")"
 (( (8#$plan_mode & 8#077) == 0 )) || fail "plan must not be readable by group or others"
-for command_name in python3 wg systemctl install cmp stat mktemp; do
+for command_name in python3 wg systemctl install cmp stat mktemp sha256sum readlink awk; do
   command -v "$command_name" >/dev/null 2>&1 || fail "required command is unavailable: $command_name"
 done
 
@@ -69,6 +69,7 @@ try:
 except (OSError, yaml.YAMLError):
     fail()
 if not isinstance(document, dict) or set(document) != {
+    "artifacts",
     "environment_network",
     "hub",
     "persistent_keepalive_seconds",
@@ -80,6 +81,12 @@ if not isinstance(document, dict) or set(document) != {
 if document["schema_version"] != 1 or not re.fullmatch(
     r"[0-9a-f]{40}", str(document["source_git_sha"])
 ):
+    fail()
+artifacts = document["artifacts"]
+if not isinstance(artifacts, dict) or set(artifacts) != {"enrollment_script_sha256"}:
+    fail()
+script_sha256 = artifacts["enrollment_script_sha256"]
+if not isinstance(script_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", script_sha256):
     fail()
 runner = document["runner"]
 hub = document["hub"]
@@ -150,6 +157,7 @@ if not isinstance(keepalive, int) or isinstance(keepalive, bool) or not 1 <= kee
     fail()
 
 values = (
+    script_sha256,
     runner["id"],
     runner["environment"],
     runner["interface"],
@@ -167,18 +175,24 @@ for value in values:
 PY
 )
 
-[[ "${#contract[@]}" -eq 11 ]] || fail "Git-owned runner plan is incomplete"
-runner_id="${contract[0]}"
-environment="${contract[1]}"
-interface="${contract[2]}"
-runner_address="${contract[3]}"
-expected_runner_public_key="${contract[4]}"
-hub_public_key="${contract[5]}"
-hub_endpoint="${contract[6]}"
-hub_overlay_address="${contract[7]}"
-environment_network="${contract[8]}"
-keepalive="${contract[9]}"
-source_git_sha="${contract[10]}"
+[[ "${#contract[@]}" -eq 12 ]] || fail "Git-owned runner plan is incomplete"
+expected_script_sha256="${contract[0]}"
+runner_id="${contract[1]}"
+environment="${contract[2]}"
+interface="${contract[3]}"
+runner_address="${contract[4]}"
+expected_runner_public_key="${contract[5]}"
+hub_public_key="${contract[6]}"
+hub_endpoint="${contract[7]}"
+hub_overlay_address="${contract[8]}"
+environment_network="${contract[9]}"
+keepalive="${contract[10]}"
+source_git_sha="${contract[11]}"
+
+script_path="$(readlink -f "$0")"
+actual_script_sha256="$(sha256sum "$script_path" | awk '{print $1}')"
+[[ "$actual_script_sha256" == "$expected_script_sha256" ]] \
+  || fail "enrollment script does not belong to the plan's exact Git revision"
 
 config_path="/etc/wireguard/${interface}.conf"
 

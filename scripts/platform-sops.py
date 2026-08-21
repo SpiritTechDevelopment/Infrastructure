@@ -7,7 +7,9 @@ import argparse
 import base64
 import binascii
 import copy
+import hashlib
 import ipaddress
+import json
 import os
 import re
 import shutil
@@ -29,6 +31,7 @@ EXPECTED_VARIABLE_KEYS = {
     "platform_fail2ban_ignore_cidrs",
     "platform_github_ssh_keys",
     "platform_operator_ssh_public_keys",
+    "platform_runner",
     "platform_ssh_allowed_cidrs",
     "platform_vault_node_id",
     "platform_vault_tls_server_name",
@@ -41,6 +44,8 @@ EXPECTED_VARIABLE_KEYS = {
     "platform_wireguard_operator_peers",
     "platform_wireguard_runner_peers",
 }
+
+RUNTIME_VARIABLE_KEYS = EXPECTED_VARIABLE_KEYS - {"platform_runner"}
 
 TRANSITIONAL_RUNTIME_DEFAULTS = {
     "platform_wireguard_hub_public_key": "",
@@ -115,6 +120,64 @@ def validate_variables(variables: dict[str, Any]) -> None:
         raise PlatformBundleError("platform_operator_ssh_public_keys must be a non-empty list")
     for key in operators:
         _validate_ssh_public_key(key, "platform_operator_ssh_public_keys")
+
+    runner = variables["platform_runner"]
+    runner_keys = {
+        "architecture",
+        "bootstrap_sha256",
+        "bootstrap_version",
+        "home",
+        "install_dir",
+        "labels",
+        "name",
+        "repository_url",
+        "update_policy",
+        "user",
+        "work_dir",
+    }
+    if not isinstance(runner, dict) or set(runner) != runner_keys:
+        raise PlatformBundleError("platform_runner has an invalid shape")
+    if runner["architecture"] not in {"x64", "arm64"}:
+        raise PlatformBundleError("platform_runner architecture is invalid")
+    if not isinstance(runner["bootstrap_version"], str) or re.fullmatch(
+        r"[0-9]+\.[0-9]+\.[0-9]+", runner["bootstrap_version"]
+    ) is None:
+        raise PlatformBundleError("platform_runner bootstrap_version is invalid")
+    if not isinstance(runner["bootstrap_sha256"], str) or re.fullmatch(
+        r"[0-9a-f]{64}", runner["bootstrap_sha256"]
+    ) is None:
+        raise PlatformBundleError("platform_runner bootstrap_sha256 is invalid")
+    if not isinstance(runner["repository_url"], str) or re.fullmatch(
+        r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?",
+        runner["repository_url"],
+    ) is None:
+        raise PlatformBundleError("platform_runner repository_url is invalid")
+    if not isinstance(runner["name"], str) or re.fullmatch(
+        r"[A-Za-z0-9._-]{1,64}", runner["name"]
+    ) is None:
+        raise PlatformBundleError("platform_runner name is invalid")
+    labels = runner["labels"]
+    if (
+        not isinstance(labels, list)
+        or not labels
+        or len(labels) != len(set(labels))
+        or any(
+            not isinstance(label, str)
+            or re.fullmatch(r"[A-Za-z0-9._-]{1,64}", label) is None
+            for label in labels
+        )
+    ):
+        raise PlatformBundleError("platform_runner labels must be valid and unique")
+    if runner["update_policy"] != "github-managed":
+        raise PlatformBundleError("platform_runner update_policy is unsupported")
+    fixed_layout = {
+        "user": "github-runner",
+        "home": "/var/lib/github-runner",
+        "install_dir": "/opt/actions-runner",
+        "work_dir": "_work",
+    }
+    if any(runner[key] != value for key, value in fixed_layout.items()):
+        raise PlatformBundleError("platform_runner filesystem layout is unsupported")
 
     github_keys = variables["platform_github_ssh_keys"]
     if not isinstance(github_keys, list) or not github_keys:
@@ -424,7 +487,10 @@ def materialize_runtime_variables(
         raise PlatformBundleError(
             "installed executor listen port differs from the Git-owned platform contract"
         )
-    desired = copy.deepcopy(variables)
+    desired = {
+        key: copy.deepcopy(variables[key])
+        for key in RUNTIME_VARIABLE_KEYS
+    }
     desired["platform_wireguard_public_endpoint"] = _wireguard_endpoint(
         _platform_public_host(inventory), variables["platform_wireguard_listen_port"]
     )
@@ -475,6 +541,11 @@ def materialize_runner_plan(
     plan = {
         "schema_version": 1,
         "source_git_sha": source_git_sha,
+        "artifacts": {
+            "enrollment_script_sha256": hashlib.sha256(
+                (REPOSITORY_ROOT / "scripts" / "enroll-runner-overlay.sh").read_bytes()
+            ).hexdigest(),
+        },
         "runner": {
             "address": peer["address"],
             "environment": environment,
@@ -498,6 +569,29 @@ def materialize_runner_plan(
     _write_private(
         output,
         yaml.safe_dump(plan, allow_unicode=True, sort_keys=True),
+    )
+
+
+def materialize_runner_host_plan(
+    bundle: Path,
+    output: Path,
+    *,
+    source_git_sha: str,
+) -> None:
+    _inventory, _known_hosts, variables = decrypt_bundle(bundle)
+    plan = {
+        "schema_version": 1,
+        "source_git_sha": source_git_sha,
+        "artifacts": {
+            "bootstrap_script_sha256": hashlib.sha256(
+                (REPOSITORY_ROOT / "scripts" / "bootstrap-self-hosted-runner.sh").read_bytes()
+            ).hexdigest(),
+        },
+        "runner": copy.deepcopy(variables["platform_runner"]),
+    }
+    _write_private(
+        output,
+        json.dumps(plan, indent=2, sort_keys=True) + "\n",
     )
 
 
@@ -624,7 +718,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "mode",
-        choices=("check", "bootstrap-check", "materialize-runtime", "runner-plan"),
+        choices=(
+            "check",
+            "bootstrap-check",
+            "materialize-runtime",
+            "runner-host-plan",
+            "runner-plan",
+        ),
     )
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--output", type=Path)
@@ -663,6 +763,25 @@ def main() -> int:
                 args.bundle.resolve(),
                 args.output.resolve(),
                 runner_id=args.runner_id,
+                source_git_sha=args.source_git_sha,
+            )
+        elif args.mode == "runner-host-plan":
+            if args.output is None or args.source_git_sha is None:
+                raise PlatformBundleError(
+                    "runner-host-plan requires --output and --source-git-sha"
+                )
+            if (
+                args.runner_id is not None
+                or args.wireguard_listen_port is not None
+                or args.require_applied_runtime is not None
+            ):
+                raise PlatformBundleError(
+                    "overlay or runtime options cannot be used with runner-host-plan"
+                )
+            _require_clean_exact_source(args.source_git_sha)
+            materialize_runner_host_plan(
+                args.bundle.resolve(),
+                args.output.resolve(),
                 source_git_sha=args.source_git_sha,
             )
         else:

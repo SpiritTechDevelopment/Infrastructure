@@ -449,7 +449,10 @@ def execute(
         internal_inventory_path = protected / "internal-inventory.yml"
         internal_known_hosts_path = protected / "internal-known-hosts"
         runtime_variables_path = protected / "runtime-vars.yml"
-        runtime_variables = copy.deepcopy(variables)
+        runtime_variables = {
+            key: copy.deepcopy(variables[key])
+            for key in platform_sops.RUNTIME_VARIABLE_KEYS
+        }
         runtime_variables["platform_wireguard_public_endpoint"] = public_endpoint
         _write_private(
             internal_inventory_path,

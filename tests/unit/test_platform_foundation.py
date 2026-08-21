@@ -1497,6 +1497,19 @@ BUNDLE_VARIABLES = {
     "platform_github_ssh_keys": [{"environment": "develop", "public_key": "ssh-ed25519 AAAA gh"}],
     "platform_ssh_allowed_cidrs": ["10.80.0.0/16"],
     "platform_fail2ban_ignore_cidrs": [],
+    "platform_runner": {
+        "architecture": "x64",
+        "bootstrap_sha256": "04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d",
+        "bootstrap_version": "2.336.0",
+        "home": "/var/lib/github-runner",
+        "install_dir": "/opt/actions-runner",
+        "labels": ["spiritvpn-deploy"],
+        "name": "spiritvpn-deploy-1",
+        "repository_url": "https://github.com/SpiritTechDevelopment/Infrastructure",
+        "update_policy": "github-managed",
+        "user": "github-runner",
+        "work_dir": "_work",
+    },
     "platform_vault_node_id": "management-1",
     "platform_vault_tls_server_name": "vault.internal",
     "platform_wireguard_interface": "wg0",
@@ -1541,7 +1554,11 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
             "unused known hosts\n",
             copy.deepcopy(BUNDLE_VARIABLES),
         )
-        expected = copy.deepcopy(BUNDLE_VARIABLES)
+        expected = {
+            key: copy.deepcopy(value)
+            for key, value in BUNDLE_VARIABLES.items()
+            if key != "platform_runner"
+        }
         expected["platform_wireguard_public_endpoint"] = "1.1.1.1:51820"
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -1637,6 +1654,51 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
             self.assertEqual(plan["runner"]["public_key"], "")
             self.assertEqual(plan["hub"]["public_key"], HUB_PUBLIC_KEY)
             self.assertNotIn("mtu", plan)
+            self.assertRegex(
+                plan["artifacts"]["enrollment_script_sha256"],
+                r"^[0-9a-f]{64}$",
+            )
+
+    def test_runner_host_plan_is_private_exact_sha_projection(self) -> None:
+        module = self.load_module()
+        inventory = yaml.safe_load(
+            (REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap" / "platform.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        module.decrypt_bundle = lambda path: (
+            copy.deepcopy(inventory),
+            "unused known hosts\n",
+            copy.deepcopy(BUNDLE_VARIABLES),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "runner-host-plan.json"
+            module.materialize_runner_host_plan(
+                Path("ignored.sops.yml"),
+                output,
+                source_git_sha="b" * 40,
+            )
+            plan = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(plan["source_git_sha"], "b" * 40)
+            self.assertEqual(plan["runner"], BUNDLE_VARIABLES["platform_runner"])
+            self.assertRegex(
+                plan["artifacts"]["bootstrap_script_sha256"],
+                r"^[0-9a-f]{64}$",
+            )
+
+    def test_runner_host_bootstrap_consumes_only_the_projected_contract(self) -> None:
+        script = (REPO_ROOT / "scripts" / "bootstrap-self-hosted-runner.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("--plan", script)
+        self.assertIn("--mode check|apply", script)
+        self.assertNotIn("--repository-url", script)
+        self.assertNotIn("--runner-version", script)
+        self.assertNotIn("--runner-sha256", script)
+        self.assertIn("github-managed", script)
+        self.assertIn("bootstrap_script_sha256", script)
 
     def test_runner_overlay_script_consumes_only_the_projected_contract(self) -> None:
         script = (REPO_ROOT / "scripts" / "enroll-runner-overlay.sh").read_text(
@@ -1774,6 +1836,8 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         class _Bundle:
+            RUNTIME_VARIABLE_KEYS = set(BUNDLE_VARIABLES) - {"platform_runner"}
+
             @staticmethod
             def decrypt_bundle(path: Path) -> tuple[dict, str, dict]:
                 return copy.deepcopy(inventory), known_hosts, copy.deepcopy(BUNDLE_VARIABLES)
@@ -1878,8 +1942,8 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
         delivered = yaml.safe_load(recorder.extra_vars["runtime-vars.yml"])
         self.assertEqual(delivered["platform_wireguard_public_endpoint"], "1.1.1.1:51820")
 
-    def test_every_bundle_variable_is_persisted_by_the_executor(self) -> None:
-        """A bundle key the hub never writes down is delivered nowhere."""
+    def test_every_runtime_bundle_variable_is_persisted_by_the_executor(self) -> None:
+        """Runner-host bootstrap data must not become management runtime state."""
         path = REPO_ROOT / "scripts" / "platform-sops.py"
         spec = importlib.util.spec_from_file_location("spiritvpn_platform_sops", path)
         assert spec is not None and spec.loader is not None
@@ -1894,8 +1958,9 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
         self.assertTrue(persisted)
         self.assertEqual(
             persisted,
-            sops.EXPECTED_VARIABLE_KEYS | {"platform_wireguard_public_endpoint"},
+            sops.RUNTIME_VARIABLE_KEYS | {"platform_wireguard_public_endpoint"},
         )
+        self.assertNotIn("platform_runner", persisted)
         defaults = yaml.safe_load(
             (REPO_ROOT / "roles" / "platform_wireguard" / "defaults" / "main.yml").read_text(
                 encoding="utf-8"

@@ -31,35 +31,54 @@ job. It still cannot resolve Vault references. Never expose the identity to a
 pull-request job; allow decryption only for trusted `main` and release workflows,
 and later split the environments or move to ephemeral runners.
 
-## Install
+## Materialize the Git-owned host plan
 
-In the repository settings open **Settings → Actions → Runners → New
-self-hosted runner → Linux**. Record the current runner version and the SHA256
-shown by GitHub for the server architecture. The bootstrap refuses an
-unverified archive and deliberately has no implicit `latest` mode.
-
-Copy the reviewed script to the new runner VPS:
+Runner name, repository, labels, architecture, filesystem layout, update policy
+and the verified bootstrap release live in the encrypted `platform_runner`
+contract. They are not command-line choices. From a clean exact-SHA checkout,
+materialize a temporary private plan:
 
 ```bash
-scp scripts/bootstrap-self-hosted-runner.sh root@RUNNER_IP:/root/
+umask 077
+python3 scripts/platform-sops.py runner-host-plan \
+  --bundle inventories/bootstrap/platform.sops.yml \
+  --source-git-sha "$(git rev-parse HEAD)" \
+  --output /tmp/spiritvpn-runner-host-plan.json
 ```
 
-Generate a short-lived repository registration token locally and feed it to
-the remote script over standard input. Replace the version and checksum with
-the exact values shown by GitHub:
+The plan pins the SHA256 of the bootstrap script from that commit. Copy both
+files to the runner over the operator channel and keep the plan mode `0600`:
 
 ```bash
+scp \
+  scripts/bootstrap-self-hosted-runner.sh \
+  /tmp/spiritvpn-runner-host-plan.json \
+  root@RUNNER_HOST:/tmp/
+```
+
+For an existing runner, perform the read-only check first:
+
+```bash
+ssh root@RUNNER_HOST \
+  'chmod 0600 /tmp/spiritvpn-runner-host-plan.json && \
+   /tmp/bootstrap-self-hosted-runner.sh \
+     --plan /tmp/spiritvpn-runner-host-plan.json \
+     --mode check'
+```
+
+Only a new, unregistered runner needs a short-lived registration token. It is
+fed over standard input and is never stored in the plan or a file:
+
+```bash
+set -o pipefail
 gh api \
   --method POST \
   repos/SpiritTechDevelopment/Infrastructure/actions/runners/registration-token \
   --jq .token |
-ssh root@RUNNER_IP \
-  '/root/bootstrap-self-hosted-runner.sh \
-    --repository-url https://github.com/SpiritTechDevelopment/Infrastructure \
-    --runner-version 2.REPLACE.REPLACE \
-    --runner-sha256 REPLACE_WITH_64_HEX_DIGEST \
-    --runner-name spiritvpn-deploy-1 \
-    --labels spiritvpn-deploy'
+ssh root@RUNNER_HOST \
+  '/tmp/bootstrap-self-hosted-runner.sh \
+    --plan /tmp/spiritvpn-runner-host-plan.json \
+    --mode apply'
 ```
 
 The script:
@@ -70,11 +89,14 @@ The script:
 - verifies the official archive before extraction;
 - registers only the requested repository and label;
 - installs and starts the runner as a systemd service;
-- leaves runner software auto-update enabled;
+- enforces the Git-owned GitHub-managed update policy and bootstrap version
+  floor;
 - is idempotent after successful registration.
 
 The short-lived registration token is necessarily supplied to GitHub's
 `config.sh` process briefly, but is not written to a file by the bootstrap.
+Existing registration is never silently removed or replaced. Delete both
+temporary plan copies after check/apply.
 
 ## Create the topology identity
 
@@ -110,8 +132,8 @@ python3 scripts/platform-sops.py runner-plan \
 ```
 
 The plan contains operational addresses and pins. Never commit it or attach it
-to a workflow artifact. Transfer it and the reviewed enrollment script from the
-same SHA to the runner over the operator channel; keep the plan mode `0600`,
+to a workflow artifact. It also pins the enrollment script digest from the
+same SHA. Transfer both over the operator channel, keep the plan mode `0600`,
 then run:
 
 ```bash
