@@ -32,7 +32,11 @@ EXPECTED_VARIABLE_KEYS = {
     "platform_ssh_allowed_cidrs",
     "platform_vault_node_id",
     "platform_vault_tls_server_name",
+    "platform_wireguard_environment_networks",
     "platform_wireguard_hub_addresses",
+    "platform_wireguard_interface",
+    "platform_wireguard_listen_port",
+    "platform_wireguard_mtu",
     "platform_wireguard_operator_peers",
 }
 
@@ -112,11 +116,17 @@ def validate_variables(variables: dict[str, Any]) -> None:
         "platform_fail2ban_ignore_cidrs",
         require_one=False,
     )
+    wireguard_interface = variables["platform_wireguard_interface"]
+    if not isinstance(wireguard_interface, str) or re.fullmatch(
+        r"[A-Za-z0-9_.-]{1,15}", wireguard_interface
+    ) is None:
+        raise PlatformBundleError("platform_wireguard_interface is invalid")
+
     wireguard_addresses = variables["platform_wireguard_hub_addresses"]
     if not isinstance(wireguard_addresses, dict) or set(wireguard_addresses) != {"develop", "prod"}:
         raise PlatformBundleError("platform_wireguard_hub_addresses must map develop and prod")
-    hub_interfaces: list[ipaddress.IPv4Interface] = []
-    for address in wireguard_addresses.values():
+    hub_interfaces: dict[str, ipaddress.IPv4Interface] = {}
+    for environment, address in wireguard_addresses.items():
         if not isinstance(address, str):
             raise PlatformBundleError("platform_wireguard_hub_addresses must contain strings")
         try:
@@ -125,7 +135,40 @@ def validate_variables(variables: dict[str, Any]) -> None:
             raise PlatformBundleError("platform_wireguard_hub_addresses contains an invalid address") from exc
         if interface.version != 4 or interface.network.prefixlen != 16:
             raise PlatformBundleError("management WireGuard addresses must use IPv4 /16 networks")
-        hub_interfaces.append(interface)
+        hub_interfaces[environment] = interface
+
+    environment_networks = variables["platform_wireguard_environment_networks"]
+    if not isinstance(environment_networks, dict) or set(environment_networks) != {
+        "develop",
+        "prod",
+    }:
+        raise PlatformBundleError(
+            "platform_wireguard_environment_networks must map develop and prod"
+        )
+    for environment, value in environment_networks.items():
+        if not isinstance(value, str):
+            raise PlatformBundleError(
+                "platform_wireguard_environment_networks must contain strings"
+            )
+        try:
+            network = ipaddress.ip_network(value, strict=True)
+        except ValueError as exc:
+            raise PlatformBundleError(
+                "platform_wireguard_environment_networks contains an invalid network"
+            ) from exc
+        if network.version != 4 or network.prefixlen != 16:
+            raise PlatformBundleError("management WireGuard networks must use IPv4 /16")
+        if network != hub_interfaces[environment].network:
+            raise PlatformBundleError(
+                "management WireGuard networks must match their declared hub addresses"
+            )
+
+    listen_port = variables["platform_wireguard_listen_port"]
+    if not isinstance(listen_port, int) or isinstance(listen_port, bool) or not 1 <= listen_port <= 65535:
+        raise PlatformBundleError("platform_wireguard_listen_port is invalid")
+    mtu = variables["platform_wireguard_mtu"]
+    if not isinstance(mtu, int) or isinstance(mtu, bool) or not 1280 <= mtu <= 9000:
+        raise PlatformBundleError("platform_wireguard_mtu is invalid")
 
     operator_peers = variables["platform_wireguard_operator_peers"]
     if not isinstance(operator_peers, list) or not operator_peers:
@@ -155,9 +198,9 @@ def validate_variables(variables: dict[str, Any]) -> None:
             if network.version != 4 or network.prefixlen != 32:
                 raise PlatformBundleError("operator WireGuard allowed_ips must contain only IPv4 /32 addresses")
             address = network.network_address
-            if not any(address in hub.network for hub in hub_interfaces):
+            if not any(address in hub.network for hub in hub_interfaces.values()):
                 raise PlatformBundleError("operator WireGuard address is outside management networks")
-            if address in {hub.ip for hub in hub_interfaces} or address in peer_addresses:
+            if address in {hub.ip for hub in hub_interfaces.values()} or address in peer_addresses:
                 raise PlatformBundleError("operator WireGuard addresses must be unique and not use a hub address")
             peer_addresses.add(address)
     if not isinstance(variables["platform_vault_node_id"], str) or not re.fullmatch(
@@ -266,13 +309,20 @@ def materialize_runtime_variables(
     bundle: Path,
     output: Path,
     *,
-    listen_port: int,
     applied_runtime: Path | None,
+    executor_listen_port: int | None = None,
 ) -> None:
     inventory, _known_hosts, variables = decrypt_bundle(bundle)
+    if (
+        executor_listen_port is not None
+        and executor_listen_port != variables["platform_wireguard_listen_port"]
+    ):
+        raise PlatformBundleError(
+            "installed executor listen port differs from the Git-owned platform contract"
+        )
     desired = copy.deepcopy(variables)
     desired["platform_wireguard_public_endpoint"] = _wireguard_endpoint(
-        _platform_public_host(inventory), listen_port
+        _platform_public_host(inventory), variables["platform_wireguard_listen_port"]
     )
 
     if applied_runtime is not None:
@@ -392,19 +442,19 @@ def main() -> int:
     parser.add_argument("mode", choices=("check", "bootstrap-check", "materialize-runtime"))
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--output", type=Path)
+    # Accepted during the rollout from the executor installed before the listen
+    # port became Git-owned. It is comparison-only and never drives projection.
     parser.add_argument("--wireguard-listen-port", type=int)
     parser.add_argument("--require-applied-runtime", type=Path)
     args = parser.parse_args()
     try:
         if args.mode == "materialize-runtime":
-            if args.output is None or args.wireguard_listen_port is None:
-                raise PlatformBundleError(
-                    "materialize-runtime requires --output and --wireguard-listen-port"
-                )
+            if args.output is None:
+                raise PlatformBundleError("materialize-runtime requires --output")
             materialize_runtime_variables(
                 args.bundle.resolve(),
                 args.output.resolve(),
-                listen_port=args.wireguard_listen_port,
+                executor_listen_port=args.wireguard_listen_port,
                 applied_runtime=(
                     args.require_applied_runtime.resolve()
                     if args.require_applied_runtime is not None

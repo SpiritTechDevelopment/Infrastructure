@@ -250,7 +250,7 @@ def _install_client_config(interface: str, content: str) -> None:
             _run([*sudo, "systemctl", "enable", f"wg-quick@{interface}.service"])
 
 
-def _reused_tunnel_endpoint(interface: str, public_host: str) -> str:
+def _reused_tunnel_endpoint(interface: str, public_host: str, expected_port: int) -> str:
     """Recover the hub's public endpoint from the tunnel a previous bootstrap made.
 
     Фаза 1 недостижима на захардененном хабе: публичный SSH закрыт по замыслу, и
@@ -285,6 +285,10 @@ def _reused_tunnel_endpoint(interface: str, public_host: str) -> str:
     if endpoint.rsplit(":", 1)[0] != public_host:
         raise BootstrapError(
             "the management tunnel does not lead to the hub this bundle describes"
+        )
+    if int(endpoint.rsplit(":", 1)[1]) != expected_port:
+        raise BootstrapError(
+            "the management tunnel endpoint does not use the Git-owned listen port"
         )
     if _run(["ip", "link", "show", "dev", interface], check=False, capture=True).returncode != 0:
         raise BootstrapError(f"management tunnel {interface} is not up")
@@ -365,13 +369,23 @@ def execute(
                 "--extra-vars",
                 f"@{component_variables_path}",
                 "--extra-vars",
-                json.dumps({"platform_wireguard_public_endpoint": f"{public_host}:51820"}),
+                json.dumps(
+                    {
+                        "platform_wireguard_public_endpoint": (
+                            f"{public_host}:{variables['platform_wireguard_listen_port']}"
+                        )
+                    }
+                ),
                 "--syntax-check",
             ],
             environment=public_environment,
         )
         if reuse_tunnel:
-            public_endpoint = _reused_tunnel_endpoint(client_interface, public_host)
+            public_endpoint = _reused_tunnel_endpoint(
+                client_interface,
+                public_host,
+                variables["platform_wireguard_listen_port"],
+            )
             _, _, internal_host = _client_values(
                 peer, variables["platform_wireguard_hub_addresses"]
             )

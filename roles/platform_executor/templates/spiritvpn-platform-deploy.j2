@@ -73,7 +73,6 @@ runtime_arguments=(
   "$worktree/scripts/platform-sops.py" materialize-runtime
   --bundle "$worktree/inventories/bootstrap/platform.sops.yml"
   --output "$platform_vars"
-  --wireguard-listen-port "{{ platform_wireguard_listen_port }}"
 )
 if test "$mode" = apply; then
   test -s "{{ platform_runtime_vars_file }}" || {

@@ -1499,7 +1499,14 @@ BUNDLE_VARIABLES = {
     "platform_fail2ban_ignore_cidrs": [],
     "platform_vault_node_id": "management-1",
     "platform_vault_tls_server_name": "vault.internal",
+    "platform_wireguard_interface": "wg0",
     "platform_wireguard_hub_addresses": {"develop": "10.80.0.1/16", "prod": "10.82.0.1/16"},
+    "platform_wireguard_environment_networks": {
+        "develop": "10.80.0.0/16",
+        "prod": "10.82.0.0/16",
+    },
+    "platform_wireguard_listen_port": 51820,
+    "platform_wireguard_mtu": 1420,
     "platform_wireguard_operator_peers": [
         {"id": "operator", "public_key": PEER_PUBLIC_KEY, "allowed_ips": ["10.80.0.9/32"]}
     ],
@@ -1543,7 +1550,6 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
             module.materialize_runtime_variables(
                 Path("ignored.sops.yml"),
                 output,
-                listen_port=51820,
                 applied_runtime=applied,
             )
             self.assertEqual(yaml.safe_load(output.read_text(encoding="utf-8")), expected)
@@ -1557,11 +1563,21 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
                 module.materialize_runtime_variables(
                     Path("ignored.sops.yml"),
                     refused,
-                    listen_port=51820,
                     applied_runtime=applied,
                 )
             self.assertIn("explicitly applied access contract", str(raised.exception))
             self.assertFalse(refused.exists())
+
+            legacy_refused = root / "legacy-refused.yml"
+            with self.assertRaises(module.PlatformBundleError) as legacy_raised:
+                module.materialize_runtime_variables(
+                    Path("ignored.sops.yml"),
+                    legacy_refused,
+                    applied_runtime=None,
+                    executor_listen_port=51821,
+                )
+            self.assertIn("installed executor listen port", str(legacy_raised.exception))
+            self.assertFalse(legacy_refused.exists())
 
     def test_fleet_bootstrap_input_is_reconciled_in_steady_state(self) -> None:
         tasks = (
@@ -1763,6 +1779,7 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
         for description, keywords in (
             ({"marker": "# hand-written"}, "unmanaged"),
             ({"endpoint": "9.9.9.9:51820"}, "does not lead to the hub"),
+            ({"endpoint": "1.1.1.1:51821"}, "Git-owned listen port"),
             ({"tunnel_up": False}, "is not up"),
         ):
             with self.subTest(**description):
@@ -1798,7 +1815,19 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
         start = tasks.index("Persist the bounded management runtime configuration")
         persisted = set(re.findall(r"'(platform_[a-z0-9_]+)':", tasks[start : tasks.index("dest:", start)]))
         self.assertTrue(persisted)
-        self.assertLessEqual(sops.EXPECTED_VARIABLE_KEYS, persisted)
+        self.assertEqual(
+            persisted,
+            sops.EXPECTED_VARIABLE_KEYS | {"platform_wireguard_public_endpoint"},
+        )
+        defaults = yaml.safe_load(
+            (REPO_ROOT / "roles" / "platform_wireguard" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(defaults["platform_wireguard_interface"], "")
+        self.assertEqual(defaults["platform_wireguard_environment_networks"], {})
+        self.assertEqual(defaults["platform_wireguard_listen_port"], 0)
+        self.assertEqual(defaults["platform_wireguard_mtu"], 0)
 
 
 if __name__ == "__main__":

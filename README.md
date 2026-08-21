@@ -457,6 +457,12 @@ commit и требует вручную ввести `APPLY`. Затем он:
 digest, материализуют временные Ansible variables с mode `0600` и удаляют их
 после прогона. Отсутствующий pin завершает deployment до изменения compose.
 
+Параметры management WireGuard — имя интерфейса, сети сред, listen port и MTU —
+также не имеют рабочих fallback в роли. Они принадлежат SOPS-зашифрованному
+`inventories/bootstrap/platform.sops.yml`. Git-проектор и operator refresh
+формируют из одного набора полей полный runtime contract; несовпадающий
+сохранённый contract останавливает обычный apply до Ansible.
+
 Низкоуровневый entrypoint, используемый сценарием:
 
 ```bash

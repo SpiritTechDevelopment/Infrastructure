@@ -146,7 +146,10 @@ The file is therefore an approval boundary, not a second desired-state source.
 A new key must be added in two places or it silently goes nowhere:
 `EXPECTED_VARIABLE_KEYS` in `scripts/platform-sops.py`, which validates the
 bundle, and the persisted allow-list in `roles/platform_executor`, which decides
-what the hub writes down. A unit test fails if the first outgrows the second.
+what the hub writes down. These sets must match exactly apart from the derived
+public endpoint; a unit test fails if either side outgrows the other. Management
+WireGuard interface, environment networks, listen port and MTU belong to this
+encrypted contract and deliberately have no usable role fallback.
 
 ## 3. Vault ceremony
 

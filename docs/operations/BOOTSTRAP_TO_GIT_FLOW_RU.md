@@ -97,6 +97,10 @@ contract: apply разрешён только при его точном сов�
 `platform-deploy check` может показать план, а `apply` остановится: SSH и
 WireGuard-доступ не меняются автоматически только из-за merge.
 
+В тот же encrypted contract входят operational-параметры management WireGuard:
+интерфейс, сети сред, listen port и MTU. Ansible role не задаёт им рабочих
+fallback-значений; она только применяет проекцию из Git.
+
 Поток для двух флотов независим:
 
 ```text
