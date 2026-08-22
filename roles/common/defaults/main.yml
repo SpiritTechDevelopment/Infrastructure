@@ -59,6 +59,13 @@ common_ssh_ports: >-
 ssh_allowed_cidrs: []                      # [] = allow SSH from anywhere (fallback)
 common_public_tcp_ports: []                # ports open to the internet (input chain)
 common_public_udp_ports: []
+# Networks allowed to ping this host, and the only networks this host may ping.
+# Empty means the host answers no echo at all and emits none — the correct
+# default for anything facing the internet, because an answered ping confirms
+# the host exists and, when every node answers identically, enumerates the
+# fleet. Hosts that need diagnostics name their management network here.
+# Trusted interfaces are accepted wholesale before this and do not need an entry.
+common_icmp_echo_cidrs: []
 # Fully trusted pre-existing tunnel interfaces. Platform bootstrap discovers
 # active WireGuard interfaces and uses this only to preserve operator access.
 common_trusted_interfaces: []

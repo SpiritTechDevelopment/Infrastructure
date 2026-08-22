@@ -15,8 +15,43 @@ table inet spiritvpn_filter {
 {% for interface in common_trusted_interfaces %}
     iifname "{{ interface }}" accept
 {% endfor %}
-    ip protocol icmp limit rate 20/second accept
-    ip6 nexthdr ipv6-icmp limit rate 20/second accept
+    # ICMP is not one class, and the single 20/second bucket that used to stand
+    # here treated it as one. Error signalling and IPv6 discovery keep the
+    # network working; echo is a liveness oracle. They are separated on purpose.
+    #
+    # Errors belonging to a tracked flow are already accepted by the
+    # `established,related` rule above — including the fragmentation-needed and
+    # packet-too-big messages Path MTU Discovery depends on. These two rules
+    # cover the same errors for flows conntrack does not know about.
+    ip protocol icmp icmp type { destination-unreachable, time-exceeded, parameter-problem } accept
+    ip6 nexthdr ipv6-icmp icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept
+
+    # Neighbour and multicast discovery must never be rate-limited: they are how
+    # IPv6 operates on the link, they arrive as NEW rather than related, and the
+    # old shared bucket therefore throttled them. Starving them degrades
+    # connectivity intermittently and under load, which looks like anything at
+    # all except a firewall rule.
+    ip6 nexthdr ipv6-icmp icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-solicit, nd-router-advert, mld-listener-query, mld-listener-report, mld-listener-done, mld2-listener-report } accept
+
+    # Echo only from the declared management networks. Trusted interfaces are
+    # already accepted wholesale above, so this is what carries operator and
+    # bootstrap diagnostics on hosts that reach the overlay without listing it
+    # as trusted — which is every traffic node.
+{% for cidr in common_icmp_echo_cidrs %}
+{% if ':' in cidr %}
+    ip6 saddr {{ cidr }} icmpv6 type echo-request limit rate 5/second accept
+{% else %}
+    ip saddr {{ cidr }} icmp type echo-request limit rate 5/second accept
+{% endif %}
+{% endfor %}
+
+    # Everything else ICMP is dropped, including echo and timestamp from the
+    # internet. Dropped rather than rejected: a rejection confirms the host just
+    # as reliably as a reply would, and confirming the host is the whole thing
+    # being prevented. Timestamp goes with it — it leaks the clock, which
+    # correlates nodes across addresses.
+    ip protocol icmp drop
+    ip6 nexthdr ipv6-icmp drop
 
 {% if ssh_allowed_cidrs | length > 0 %}
 {% for cidr in ssh_allowed_cidrs %}
@@ -97,5 +132,27 @@ table inet spiritvpn_filter {
 
   }
 
-  chain output { type filter hook output priority filter; policy accept; }
+  chain output {
+    type filter hook output priority filter; policy accept;
+    # The second direction of the same rule. A host that never emits
+    # echo-request to the internet cannot be provoked into revealing itself by a
+    # probe that induces it to ping back, and cannot be used as a ping source.
+    #
+    # Only echo-request is dropped. Error signalling still leaves the host —
+    # suppressing that would break Path MTU Discovery for anything connecting
+    # *to* the public data port, which is the opposite of the intent.
+{% for interface in common_trusted_interfaces %}
+    oifname "{{ interface }}" ip protocol icmp icmp type echo-request accept
+    oifname "{{ interface }}" ip6 nexthdr ipv6-icmp icmpv6 type echo-request accept
+{% endfor %}
+{% for cidr in common_icmp_echo_cidrs %}
+{% if ':' in cidr %}
+    ip6 daddr {{ cidr }} icmpv6 type echo-request accept
+{% else %}
+    ip daddr {{ cidr }} icmp type echo-request accept
+{% endif %}
+{% endfor %}
+    ip protocol icmp icmp type echo-request drop
+    ip6 nexthdr ipv6-icmp icmpv6 type echo-request drop
+  }
 }

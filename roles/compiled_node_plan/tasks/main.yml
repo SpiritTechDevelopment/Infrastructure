@@ -126,7 +126,21 @@
     common_enable_unattended_upgrades: true
     common_enable_auditd: true
     common_public_tcp_ports: ["{{ spiritvpn_node_plan.logical_node.public.port }}"]
-    common_public_udp_ports: ["{{ spiritvpn_node_plan.infrastructure.networking.management.listen_port }}"]
+    # Пусто намеренно. Управляющий туннель поднимает нода: в её конфиге стоит
+    # Endpoint хаба и PersistentKeepalive, а у хаба в peer'е ноды endpoint'а нет
+    # вовсе — он узнаёт адрес из входящего рукопожатия. Значит входящий слушатель
+    # ноде не нужен, и открытый наружу порт WireGuard был чистой поверхностью
+    # атаки. Он же выдавал флот: одинаковый well-known UDP-порт на всех узлах,
+    # чья публичная роль — выглядеть обычным веб-сервером.
+    #
+    # Ответы хаба продолжают приходить по conntrack как established: keepalive
+    # (25 с) короче таймаута записи, поэтому туннель не простаивает до её
+    # истечения и правило закрытия порта существующие сессии не рвёт.
+    common_public_udp_ports: []
+    # Ping разрешён только внутри управляющего оверлея — в обе стороны. Отсюда
+    # же работает проверка достижимости хаба в bootstrap_wireguard; наружу узел
+    # не отвечает и сам не пингует.
+    common_icmp_echo_cidrs: ["{{ spiritvpn_node_plan.instance.management_network }}"]
     pki_agent_certificate_chain: >-
       {{ spiritvpn_agent_certificate_chains.get(spiritvpn_node_plan.instance.id, '') }}
     common_restricted_tcp_rules:
