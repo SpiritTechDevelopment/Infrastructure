@@ -17,7 +17,13 @@
     common_enable_auditd: true
     common_public_tcp_ports: []
     common_public_udp_ports: ["{{ platform_wireguard_listen_port }}"]
-    common_trusted_interfaces: ["{{ platform_wireguard_interface }}"]
+    # Оверлей больше не доверен целиком. Раньше `iifname wg0 accept`
+    # срабатывал раньше любого правила по адресу, поэтому на хабе нельзя было
+    # ограничить ни один порт: до всего, что слушает оверлейный адрес,
+    # дотягивалась каждая нода флота — а ноды стоят в интернете. Теперь вход
+    # объявлен поимённо, а транзит оператор → хаб → нода живёт отдельно.
+    common_trusted_interfaces: []
+    common_forward_interfaces: ["{{ platform_wireguard_interface }}"]
     # Мосты Docker: control-стек единственный здесь живёт не в сети хоста, и
     # его контейнерам нужен исходящий трафик наружу. Имена мостов генерирует
     # Docker, поэтому шаблон, а не перечисление.
@@ -40,16 +46,44 @@
     # ipam на живой сети означает её пересоздание, то есть простой контура.
     # Граница доверия здесь и так проходит по «контейнеры на мостах этого
     # хоста», и iifname "br-*" выражает её точнее любого адреса.
+    # Источники берутся из самого контракта, а не перечисляются здесь: список,
+    # который ведут руками, расходится с ростером ровно в тот момент, когда
+    # оператора добавили, а сюда дописать забыли.
+    platform_operator_overlay_cidrs: >-
+      {{ platform_wireguard_operator_peers
+         | map(attribute='allowed_ips') | flatten | list }}
+    platform_runner_overlay_cidrs: >-
+      {{ platform_wireguard_runner_peers | default([])
+         | map(attribute='address') | list }}
+    platform_overlay_networks: >-
+      {{ platform_wireguard_environment_networks.values() | list }}
     common_restricted_tcp_rules:
       - ports: [9443]
         forward_ports: [8443]
         cidrs: ["172.16.0.0/12"]
         interface: "br-*"
+      # SSH из оверлея: операторы и раннер. Раннер ходит сюда форсированной
+      # командой, оператор — обычной сессией; оба только через оверлей.
+      - ports: "{{ common_ssh_ports }}"
+        cidrs: "{{ platform_operator_overlay_cidrs + platform_runner_overlay_cidrs }}"
+        interface: "{{ platform_wireguard_interface }}"
+      # Grafana и Vault UI — только операторам. Ноды в этот список не входят.
+      - ports: ["{{ platform_grafana_port }}", "{{ platform_vault_api_port }}"]
+        cidrs: "{{ platform_operator_overlay_cidrs }}"
+        interface: "{{ platform_wireguard_interface }}"
+      # Loki принимает логи со всех нод, поэтому здесь сеть целиком. Это
+      # единственный порт хаба, открытый всему оверлею, и открыт он на приём
+      # записи, а не на чтение.
+      - ports: ["{{ platform_loki_port }}"]
+        cidrs: "{{ platform_overlay_networks }}"
+        interface: "{{ platform_wireguard_interface }}"
     # Grafana слушает управляющий оверлей: операторы достают её оттуда, а не
     # SSH-туннелем. Адрес берётся из контракта; какой именно из адресов хаба —
     # безразлично, они все на одном wg0, и любой операторский peer достаёт
     # каждый. Анонимный доступ при этом обязан быть выключен: ограничить порт
     # firewall'ом на хабе нельзя, потому что wg0 доверен целиком.
+    platform_vault_overlay_address: >-
+      {{ platform_wireguard_hub_addresses['develop'] | regex_replace('/.*$', '') }}
     platform_grafana_bind_address: >-
       {{ platform_wireguard_hub_addresses['develop'] | regex_replace('/.*$', '') }}
     platform_grafana_anonymous_enabled: false

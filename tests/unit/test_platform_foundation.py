@@ -965,6 +965,34 @@ all:
                 ).read_text(encoding="utf-8")
                 self.assertIn("platform_grafana_anonymous_enabled: false", text)
                 self.assertIn("platform_grafana_bind_address", text)
+
+                # Оверлей не доверен целиком. Пока `iifname wg0 accept` стоял в
+                # input, ни один порт хаба нельзя было ограничить: правило по
+                # интерфейсу срабатывало раньше любого правила по адресу, и до
+                # всего, что слушает оверлейный адрес, дотягивалась каждая нода
+                # флота. Возврат этой строки молча отменил бы разграничение
+                # Vault и Grafana, ничего при этом не сломав видимо.
+                self.assertIn("common_trusted_interfaces: []", text)
+                # Транзит оператор → хаб → нода живёт отдельно от доверия ко
+                # входу. Без него сужение отрезало бы операторов от нод.
+                self.assertIn(
+                    'common_forward_interfaces: ["{{ platform_wireguard_interface }}"]',
+                    text,
+                )
+                # Источники выводятся из ростера, а не перечисляются: список,
+                # который ведут руками, расходится с ростером в тот момент,
+                # когда оператора добавили, а сюда дописать забыли.
+                self.assertIn("platform_wireguard_operator_peers", text)
+                self.assertIn("platform_operator_overlay_cidrs", text)
+
+        # Транзитное правило обязано зависеть от отдельной переменной, иначе
+        # сузить вход нельзя, не сломав пересылку.
+        firewall = (
+            REPO_ROOT / "roles" / "common" / "templates" / "nftables.conf.j2"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            'iifname "{{ interface }}" oifname "{{ interface }}" accept', firewall
+        )
         self.assertNotIn("--web.enable-admin-api", collector_compose)
         # The negated form, not `=false`: these are kingpin boolean flags that
         # take no value, so `=false` left a bare `false` positional behind and

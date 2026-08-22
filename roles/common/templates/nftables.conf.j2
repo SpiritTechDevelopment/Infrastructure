@@ -96,6 +96,14 @@ table inet spiritvpn_filter {
     iifname "{{ interface }}" accept
     oifname "{{ interface }}" accept
 {% endfor %}
+{% for interface in common_forward_interfaces %}
+    # Только транзит, без доверия ко входу на сам хост. Управляющий хаб
+    # пересылает оверлей сам в себя (оператор → хаб → нода), и это обязано
+    # работать даже когда хост принимает из оверлея лишь несколько объявленных
+    # портов. Раньше оба свойства давал один список, поэтому сузить вход было
+    # нельзя, не сломав транзит.
+    iifname "{{ interface }}" oifname "{{ interface }}" accept
+{% endfor %}
 {% if common_container_egress_interfaces | length > 0 %}
     # Container-initiated egress. Only `iifname`, deliberately: this lets a
     # container open an outbound connection and lets the reply back through the
