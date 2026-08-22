@@ -249,6 +249,35 @@ If an approval gate ever becomes available (see
 [3.5](#35-ci-4-environment-separation-rests-on-ssh-not-on-github)), this is the
 first thing that should sit behind it.
 
+#### The executor cannot deploy a change to its own calling convention
+
+The first attempt at this change shipped the renamed flag and the renamed
+template in one commit, and the deployment failed:
+
+```text
+platform-sops.py: error: unrecognized arguments: --require-applied-runtime
+```
+
+`/usr/local/sbin/spiritvpn-platform-deploy` on the hub is a file rendered by the
+*previous* `steady.yml` run. It invokes `platform-sops.py` from the newly
+checked-out worktree **before** the playbook that would replace it has run. So
+the installed executor passed an argument the new script had already dropped and
+died two steps before the fix could install itself.
+
+`--require-applied-runtime` is therefore kept as a hidden alias of
+`--compare-applied-runtime`. The same shape already existed for
+`--wireguard-listen-port`, for the same reason, which is why the pattern should
+now be treated as a rule rather than an accident:
+
+**Any change that alters both the executor template and the interface the
+executor calls has to land in two deployments** — first teach the callee to
+accept both spellings, then rename the caller. Removing the alias is only safe
+once every environment's executor has been re-rendered, and `prod` has no
+automatic path, so its hub can sit on an old build indefinitely.
+
+This applies equally to `spiritvpn-fleet-deploy` and `spiritvpn-control-deploy`,
+which have the same self-rendering property.
+
 ### 3.7. Minor
 
 `platform-readiness.yml` checks out the default branch with no pinned `ref:`,
