@@ -25,6 +25,7 @@ PLATFORM_COMPONENT_VARIABLES = {
     "alertmanager": "platform_alertmanager_image",
     "loki": "platform_loki_image",
     "alloy": "platform_alloy_image",
+    "netbird": "platform_netbird_image",
 }
 
 

@@ -1,0 +1,62 @@
+{{ ansible_managed | comment }}
+# GENERATED — DO NOT EDIT. Источник: roles/platform_netbird.
+#
+# Сверено с combined/config.yaml.example в репозитории вендора, а не с обзорной
+# документацией: та описывает развёртывание за обратным прокси и утверждает, что
+# TLS терминирует прокси. Для combined-сервера это неверно — он принимает
+# certFile и keyFile сам.
+
+server:
+  # Один порт на Management, Signal и Relay. Публичный: в него ходят и ноды, и
+  # операторы.
+  listenAddress: ":{{ platform_netbird_listen_port }}"
+  exposedAddress: "https://{{ platform_netbird_hostname }}:{{ platform_netbird_listen_port }}"
+
+  stunPorts:
+    - {{ platform_netbird_stun_port }}
+
+  # Не 9090 и не все интерфейсы: 9090 занят Prometheus этого же хаба, а метрики
+  # контура описывают состав флота и наружу не показываются.
+  metricsPort: {{ platform_netbird_metrics_port }}
+  healthcheckAddress: "{{ platform_netbird_healthcheck_bind_address }}:{{ platform_netbird_healthcheck_port }}"
+
+  logLevel: "{{ platform_netbird_log_level }}"
+  logFile: "console"
+
+  tls:
+    certFile: "/etc/netbird/tls/fullchain.pem"
+    keyFile: "/etc/netbird/tls/privkey.pem"
+    letsencrypt:
+      enabled: false
+
+  authSecret: "{{ platform_netbird_auth_secret }}"
+  dataDir: "/var/lib/netbird/"
+
+  disableAnonymousMetrics: true
+
+  auth:
+    issuer: "https://{{ platform_netbird_hostname }}/oauth2"
+    # Встроенный Dex. Внешний OIDC — отдельная работа вторым заходом; см.
+    # раздел 3.8 документа о переходе. Здесь важно, что задача идентичности
+    # оператора этим не решается, а откладывается.
+    localAuthDisabled: false
+    signKeyRefreshEnabled: true
+    dashboardRedirectURIs:
+      - "https://{{ platform_netbird_hostname }}/nb-auth"
+      - "https://{{ platform_netbird_hostname }}/nb-silent-auth"
+    cliRedirectURIs:
+      - "http://localhost:53000/"
+    owner:
+      email: "{{ platform_netbird_owner_email }}"
+      password: "{{ platform_netbird_owner_password }}"
+
+  store:
+    # sqlite, а не Postgres контура control. NetBird обязан подниматься и тогда,
+    # когда выкатка окружения сломана; зависимость управляющего оверлея от базы
+    # окружения сделала бы отказ окружения отказом доступа к флоту.
+    engine: "sqlite"
+    encryptionKey: "{{ platform_netbird_store_encryption_key }}"
+
+  reverseProxy:
+    trustedPeers:
+      - "{{ platform_netbird_network }}"

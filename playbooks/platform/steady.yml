@@ -15,8 +15,16 @@
     common_manage_sysctl: true
     common_enable_unattended_upgrades: true
     common_enable_auditd: true
-    common_public_tcp_ports: []
-    common_public_udp_ports: ["{{ platform_wireguard_listen_port }}"]
+    # 443 — управляющий оверлей NetBird: один порт на Management, Signal и
+    # Relay. Открыт намеренно: в него ходят и ноды, и операторы, а TLS
+    # терминирует сам сервер своим wildcard.
+    common_public_tcp_ports: ["{{ platform_netbird_listen_port }}"]
+    # STUN проксировать нельзя — обратный прокси обслуживает только TCP.
+    # WireGuard остаётся здесь как break-glass: он перестал быть транспортом,
+    # но не удалён.
+    common_public_udp_ports:
+      - "{{ platform_wireguard_listen_port }}"
+      - "{{ platform_netbird_stun_port }}"
     # Оверлей больше не доверен целиком. Раньше `iifname wg0 accept`
     # срабатывал раньше любого правила по адресу, поэтому на хабе нельзя было
     # ограничить ни один порт: до всего, что слушает оверлейный адрес,
@@ -106,6 +114,9 @@
     - role: docker
     - role: common
     - role: platform_vault
+    # После Vault и до наблюдаемости: оверлей нужен всему, что смотрит на ноды,
+    # а сам он не зависит ни от чего, кроме docker и common.
+    - role: platform_netbird
     - role: platform_executor
     # One shared collector for every environment, like one shared Vault.
     # Isolation is by write surface: each environment's control deployment

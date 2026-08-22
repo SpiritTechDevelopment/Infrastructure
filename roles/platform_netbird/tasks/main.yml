@@ -1,0 +1,143 @@
+---
+- name: Validate the management overlay inputs
+  ansible.builtin.assert:
+    that:
+      # Тег вместо digest означал бы, что перезапуск может принести другой
+      # управляющий сервер — тот самый, через который ходит вся выкатка.
+      - >-
+        platform_netbird_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - platform_netbird_hostname | length > 0
+      - platform_netbird_hostname is match('^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$')
+      - platform_netbird_owner_email | length > 0
+      - platform_netbird_network | length > 0
+      # Метрики и healthcheck описывают состав контура и не имеют ни TLS, ни
+      # проверки вызывающего. Wildcard вывесил бы их на публичный интерфейс
+      # хаба, у которого открыт 443 — то есть рядом с тем, что мы открываем
+      # намеренно.
+      - platform_netbird_metrics_bind_address == '127.0.0.1'
+      - platform_netbird_healthcheck_bind_address == '127.0.0.1'
+      # 9090 — Prometheus этого же хаба. Совпадение портов на сети хоста
+      # означает не деградацию, а неподнявшийся контейнер.
+      - platform_netbird_metrics_port | int != platform_prometheus_port | int
+      - platform_netbird_metrics_port | int not in [platform_node_exporter_port | int, platform_alertmanager_port | int]
+    fail_msg: "The management overlay inputs are incomplete or unsafe."
+
+- name: Require the TLS material to be present on the hub
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ platform_netbird_tls_certificate_file }}"
+    - "{{ platform_netbird_tls_private_key_file }}"
+  register: _platform_netbird_tls
+
+- name: Refuse to start the overlay without its certificate
+  ansible.builtin.assert:
+    that:
+      - _platform_netbird_tls.results | map(attribute='stat.exists') | select('false') | list | length == 0
+    fail_msg: >-
+      TLS material is missing. Place the wildcard certificate and its key on the
+      hub before deploying; they are delivered as files, never through Ansible
+      variables.
+
+- name: Create the management overlay directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ platform_netbird_dir }}"
+    - "{{ platform_netbird_data_dir }}"
+
+# Секреты заводятся один раз и переживают выкатки. Пересозданный authSecret
+# порвал бы relay для уже подключённых peer'ов, а новый encryptionKey сделал бы
+# нечитаемым store — то есть стёр бы весь ростер. `creates` здесь не
+# оптимизация, а условие безопасности.
+- name: Generate the overlay secrets once
+  ansible.builtin.shell:
+    cmd: >-
+      (umask 077 && openssl rand -base64 32 | tr -d '\n'
+      > {{ item | quote }})
+    creates: "{{ item }}"
+  loop:
+    - "{{ platform_netbird_auth_secret_file }}"
+    - "{{ platform_netbird_store_encryption_key_file }}"
+    - "{{ platform_netbird_owner_password_file }}"
+
+- name: Restrict the overlay secrets to root
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - "{{ platform_netbird_auth_secret_file }}"
+    - "{{ platform_netbird_store_encryption_key_file }}"
+    - "{{ platform_netbird_owner_password_file }}"
+
+- name: Read the overlay secrets for the rendered configuration
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - "{{ platform_netbird_auth_secret_file }}"
+    - "{{ platform_netbird_store_encryption_key_file }}"
+    - "{{ platform_netbird_owner_password_file }}"
+  register: _platform_netbird_secrets
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Render the management overlay configuration
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ platform_netbird_dir }}/config.yaml"
+    owner: root
+    group: root
+    mode: "0600"
+  vars:
+    platform_netbird_auth_secret: >-
+      {{ (_platform_netbird_secrets.results[0].content | b64decode) | trim }}
+    platform_netbird_store_encryption_key: >-
+      {{ (_platform_netbird_secrets.results[1].content | b64decode) | trim }}
+    platform_netbird_owner_password: >-
+      {{ (_platform_netbird_secrets.results[2].content | b64decode) | trim }}
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Render the management overlay compose file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ platform_netbird_dir }}/compose.yml"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Reconcile the management overlay
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ platform_netbird_dir }}/compose.yml"
+      - up
+      - -d
+      - --wait
+  changed_when: true
+  when: not ansible_check_mode
+
+- name: Require the management overlay to answer on loopback
+  ansible.builtin.uri:
+    url: >-
+      http://{{ platform_netbird_healthcheck_bind_address }}:{{
+      platform_netbird_healthcheck_port }}/
+    method: GET
+    status_code: 200
+    return_content: false
+    timeout: 5
+  register: _platform_netbird_readiness
+  retries: 12
+  delay: 5
+  until: _platform_netbird_readiness.status == 200
+  changed_when: false
+  when: not ansible_check_mode
