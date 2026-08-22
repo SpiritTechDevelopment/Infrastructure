@@ -46,6 +46,9 @@ spec:
     authorization:
       customer_access_writers: [spiffe://spiritvpn/develop/service/product]
       customer_access_readers: [spiffe://spiritvpn/develop/service/product]
+    public_endpoint:
+      hostname: control.develop.example.invalid
+      address: 192.0.2.1
     bot:
       release:
         source_git_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

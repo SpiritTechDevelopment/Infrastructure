@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections import Counter, defaultdict
 
-from fleetctl.model import CommonConfig, DesiredState, Environment, Fleet, Instance, LogicalNode
+from fleetctl.model import (
+    CommonConfig,
+    ControlPlane,
+    DesiredState,
+    Environment,
+    Fleet,
+    Instance,
+    LogicalNode,
+)
 
 from .issues import ValidationIssue
 
@@ -142,6 +151,54 @@ def _validate_common_policy(
         )
 
 
+def _validate_control_public_endpoint(
+    environment: Environment,
+    control: ControlPlane,
+    issues: list[ValidationIssue],
+) -> None:
+    """Публичная точка хаба: объявлена целиком, адресом и внутри своей зоны.
+
+    Хаб один на оба окружения, поэтому объявить его дважды с разными адресами
+    можно только ошибкой. Поймать её здесь нельзя: валидация видит ровно одно
+    окружение. Пока `prod` не объявляет `control`, конфликту неоткуда взяться;
+    когда объявит — правилу понадобится межокруженческий шов, которого сейчас
+    в `fleetctl` нет.
+    """
+
+    hostname = control.public_hostname
+    address = control.public_address
+    if hostname is None and address is None:
+        return
+    if hostname is None or address is None:
+        issues.append(
+            ValidationIssue.at(
+                environment.source,
+                "CONTROL_PUBLIC_ENDPOINT",
+                "control public_endpoint must declare both hostname and address",
+            )
+        )
+        return
+    try:
+        ipaddress.ip_address(address)
+    except ValueError:
+        issues.append(
+            ValidationIssue.at(
+                environment.source,
+                "CONTROL_PUBLIC_ENDPOINT",
+                f"control public_endpoint address {address!r} is not an IP address",
+            )
+        )
+    zone = environment.dns_zone
+    if hostname != zone and not hostname.endswith(f".{zone}"):
+        issues.append(
+            ValidationIssue.at(
+                environment.source,
+                "CONTROL_PUBLIC_ENDPOINT",
+                f"control public_endpoint hostname {hostname!r} is outside zone {zone}",
+            )
+        )
+
+
 def _validate_environment(environment: Environment, issues: list[ValidationIssue]) -> None:
     env = environment.object_id
     expected_network = EXPECTED_NETWORKS[env]
@@ -164,6 +221,7 @@ def _validate_environment(environment: Environment, issues: list[ValidationIssue
     control = environment.control
     if control is None:
         return
+    _validate_control_public_endpoint(environment, control, issues)
     if control.postgres_owner_user == control.postgres_runtime_user:
         issues.append(
             ValidationIssue.at(
