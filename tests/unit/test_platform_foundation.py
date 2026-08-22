@@ -938,6 +938,33 @@ all:
             collector_compose,
         )
         self.assertIn("platform_prometheus_bind_address == '127.0.0.1'", collector_tasks)
+
+        # Grafana — исключение среди слушателей хаба: у неё есть человеческий
+        # интерфейс, и операторы достают её через управляющий оверлей. Wildcard
+        # ей по-прежнему запрещён, иначе она оказалась бы и на публичном
+        # интерфейсе.
+        self.assertIn(
+            "platform_grafana_bind_address not in ['0.0.0.0', '*', '']",
+            collector_tasks,
+        )
+        # Условие, ради которого это вообще безопасно. На хабе wg0 доверен
+        # целиком: правило `iifname` срабатывает раньше любого ограничивающего,
+        # поэтому порт на оверлейном адресе достижим для каждой ноды флота, и
+        # firewall тут не поможет. Единственное, что отделяет дашборды с
+        # составом флота и объёмами трафика от узла, вышедшего в оверлей, —
+        # выключенный анонимный доступ.
+        self.assertIn("not (platform_grafana_anonymous_enabled | bool)", collector_tasks)
+        self.assertIn(
+            'GF_AUTH_ANONYMOUS_ENABLED: "{{ platform_grafana_anonymous_enabled',
+            collector_compose,
+        )
+        for playbook in ("steady", "bootstrap"):
+            with self.subTest(playbook=playbook):
+                text = (
+                    REPO_ROOT / "playbooks" / "platform" / f"{playbook}.yml"
+                ).read_text(encoding="utf-8")
+                self.assertIn("platform_grafana_anonymous_enabled: false", text)
+                self.assertIn("platform_grafana_bind_address", text)
         self.assertNotIn("--web.enable-admin-api", collector_compose)
         # The negated form, not `=false`: these are kingpin boolean flags that
         # take no value, so `=false` left a bare `false` positional behind and
@@ -1136,6 +1163,14 @@ all:
             keep_trailing_newline=True, trim_blocks=True, lstrip_blocks=False
         )
         jinja.filters["comment"] = lambda value: str(value)
+        # `bool` — фильтр Ansible, в голом Jinja2 его нет. Тот же образец, что и
+        # в test_bootstrap.py: строковое "false" обязано оставаться ложью, иначе
+        # проверка анонимного доступа читала бы его как истину.
+        jinja.filters["bool"] = lambda value: (
+            value
+            if isinstance(value, bool)
+            else str(value).strip().lower() in ("true", "yes", "on", "1")
+        )
         skeleton_source = (
             collector / "templates" / "prometheus.yml.j2"
         ).read_text(encoding="utf-8")

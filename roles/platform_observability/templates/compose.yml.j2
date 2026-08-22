@@ -143,7 +143,7 @@ services:
       GF_SERVER_HTTP_ADDR: "{{ platform_grafana_bind_address }}"
       GF_SERVER_HTTP_PORT: "{{ platform_grafana_port }}"
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/grafana/admin-password
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "{{ platform_grafana_anonymous_enabled | bool | lower }}"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "{{ platform_grafana_anonymous_role }}"
       GF_USERS_ALLOW_SIGN_UP: "false"
       # The hub reaches the internet, so every phone-home is a real outbound

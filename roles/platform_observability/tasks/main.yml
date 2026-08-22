@@ -13,11 +13,23 @@
       # from a host that already holds Vault. Scraping is outbound and needs no
       # inbound listener at all.
       - platform_prometheus_bind_address == '127.0.0.1'
-      # Same reasoning for everything else on this host. Grafana renders fleet
-      # composition and traffic volumes; the exporter publishes the hub's own
-      # capacity. Neither has an inbound caller outside this machine.
-      - platform_grafana_bind_address == '127.0.0.1'
+      # Same reasoning for the exporter: it publishes the hub's own capacity and
+      # has no inbound caller outside this machine.
       - platform_node_exporter_bind_address == '127.0.0.1'
+      # Grafana — единственный слушатель здесь с человеческим интерфейсом, и
+      # операторы достают его через управляющий оверлей. Поэтому конкретный
+      # адрес ему разрешён, а wildcard нет: на нём он оказался бы ещё и на
+      # публичном интерфейсе хаба.
+      - platform_grafana_bind_address not in ['0.0.0.0', '*', '']
+      # Анонимный доступ допустим только на петле, и это условие безопасности
+      # привязки к оверлею, а не предпочтение. На хабе wg0 доверен целиком —
+      # правило `iifname` срабатывает раньше любого ограничивающего, — поэтому
+      # слушатель на оверлейном адресе достижим для каждой ноды флота. Анонимный
+      # Viewer в таком положении отдал бы состав флота и объёмы трафика любому
+      # узлу, который выйдет в оверлей.
+      - >-
+        not (platform_grafana_anonymous_enabled | bool)
+        or platform_grafana_bind_address == '127.0.0.1'
       - >-
         platform_grafana_image
         is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')

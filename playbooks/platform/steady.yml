@@ -45,6 +45,14 @@
         forward_ports: [8443]
         cidrs: ["172.16.0.0/12"]
         interface: "br-*"
+    # Grafana слушает управляющий оверлей: операторы достают её оттуда, а не
+    # SSH-туннелем. Адрес берётся из контракта; какой именно из адресов хаба —
+    # безразлично, они все на одном wg0, и любой операторский peer достаёт
+    # каждый. Анонимный доступ при этом обязан быть выключен: ограничить порт
+    # firewall'ом на хабе нельзя, потому что wg0 доверен целиком.
+    platform_grafana_bind_address: >-
+      {{ platform_wireguard_hub_addresses['develop'] | regex_replace('/.*$', '') }}
+    platform_grafana_anonymous_enabled: false
     ssh_allowed_cidrs: "{{ platform_ssh_allowed_cidrs }}"
     common_fail2ban_ignoreip: >-
       127.0.0.1/8 ::1 {{ platform_fail2ban_ignore_cidrs | default([]) | join(' ') }}
