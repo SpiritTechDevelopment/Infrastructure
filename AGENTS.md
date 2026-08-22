@@ -649,6 +649,17 @@ longer describes a real ownership structure.
   trailing newline, which is the exact defect being guarded against.
 - `.gitignore` and `.sops.yaml` are coherent; no plaintext secrets, keys or
   decrypted state are tracked.
+- Operator enrolment is two-sided and public-only: private keys are generated on
+  the owner's machine by `scripts/operator-identity.py` and never cross into
+  Git, so revocation stays a reviewed diff rather than a rotation of everything
+  a bundle could have unlocked. The trust anchor is an out-of-band comparison of
+  one fingerprint covering all three keys. `scripts/operator-access.py` edits
+  declarations only and stops, leaving the protected apply path unchanged.
+- `sops-envelope-check.py` compares each file's recipient set against what
+  `.sops.yaml` declares, rather than counting stanzas. This is what catches a
+  forgotten `sops updatekeys` in both directions — including the dangerous one,
+  where a revoked operator silently keeps decrypting everything. It also covers
+  the platform access contract, which the check previously ignored entirely.
 
 ### 6.7. Language requirement compliance
 
