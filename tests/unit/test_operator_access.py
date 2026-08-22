@@ -127,25 +127,38 @@ class OperatorAccessTests(unittest.TestCase):
         (self.root / relative).write_text(result.stdout, encoding="utf-8")
 
     def write_bundle(self) -> None:
+        # Форма конверта повторяет настоящую: `inventory`, `known_hosts` и
+        # `vars` — строки с YAML внутри, а не вложенные отображения, потому что
+        # SOPS шифрует значения этих ключей целиком.
+        #
+        # Первая версия этой фикстуры клала `vars` словарём. Тесты проходили, а
+        # инструмент падал на настоящем контракте с «отсутствует раздел vars»:
+        # фикстура подтверждала структуру, которой не существует. Менять её,
+        # чтобы «тесты позеленели», нельзя — она обязана следовать за форматом.
+        variables = {
+            "platform_operator_ssh_public_keys": [
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExisting spiritvpn-operator-pavel"
+            ],
+            "platform_wireguard_hub_addresses": {
+                "develop": "10.80.0.1/16",
+                "prod": "10.90.0.1/16",
+            },
+            "platform_wireguard_operator_peers": [
+                {
+                    "id": "pavel",
+                    "public_key": "aGVsbG9oZWxsb2hlbGxvaGVsbG9oZWxsb2hlbGxvaGU=",
+                    "allowed_ips": ["10.80.0.10/32"],
+                }
+            ],
+        }
         self.sops_encrypt(
             "inventories/bootstrap/platform.sops.yml",
             {
-                "vars": {
-                    "platform_operator_ssh_public_keys": [
-                        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExisting spiritvpn-operator-pavel"
-                    ],
-                    "platform_wireguard_hub_addresses": {
-                        "develop": "10.80.0.1/16",
-                        "prod": "10.90.0.1/16",
-                    },
-                    "platform_wireguard_operator_peers": [
-                        {
-                            "id": "pavel",
-                            "public_key": "aGVsbG9oZWxsb2hlbGxvaGVsbG9oZWxsb2hlbGxvaGU=",
-                            "allowed_ips": ["10.80.0.10/32"],
-                        }
-                    ],
-                }
+                "apiVersion": "spiritvpn.io/v1alpha1",
+                "kind": "PlatformBootstrap",
+                "inventory": yaml.safe_dump({"all": {"hosts": {"management": {}}}}),
+                "known_hosts": "management ssh-ed25519 AAAA\n",
+                "vars": yaml.safe_dump(variables, sort_keys=False),
             },
         )
 
@@ -286,6 +299,57 @@ class OperatorAccessTests(unittest.TestCase):
         text = (self.root / ".sops.yaml").read_text(encoding="utf-8")
         self.assertIn("раннер намеренно исключён", text)
         self.assertIn("Желаемое состояние", text)
+
+
+@unittest.skipIf(
+    os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1",
+    "требуется расшифровка настоящего контракта платформы",
+)
+@unittest.skipUnless(shutil.which("sops"), "нужен sops")
+class RealContractShapeTests(unittest.TestCase):
+    """Форма настоящего конверта, на которую опирается инструмент.
+
+    Синтетическая фикстура может разойтись с форматом, и тогда тесты
+    подтверждают структуру, которой не существует. Так и вышло: фикстура
+    описывала `vars` словарём, все проверки были зелёными, а выдача доступа
+    падала на первом же обращении к настоящему контракту.
+    """
+
+    def test_envelope_matches_what_the_tool_expects(self) -> None:
+        access = load(ACCESS, "operator_access_shape")
+        decrypted = subprocess.run(
+            ["sops", "--decrypt", str(access.BUNDLE)],
+            cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        if decrypted.returncode != 0:
+            self.skipTest("контракт платформы не расшифровывается на этой машине")
+        envelope = yaml.safe_load(decrypted.stdout)
+
+        self.assertEqual(set(envelope), access.ENVELOPE_KEYS)
+        # Зашифрованные разделы — строки с YAML внутри, а не вложенные
+        # отображения. Обращение к ним как к словарю выглядит естественно и
+        # является ровно тем дефектом, который этот тест закрывает.
+        for field in ("inventory", "known_hosts", "vars"):
+            with self.subTest(field=field):
+                self.assertIsInstance(envelope[field], str)
+        self.assertIsInstance(yaml.safe_load(envelope["vars"]), dict)
+
+    def test_roster_fields_the_tool_edits_exist(self) -> None:
+        access = load(ACCESS, "operator_access_fields")
+        decrypted = subprocess.run(
+            ["sops", "--decrypt", str(access.BUNDLE)],
+            cwd=REPO_ROOT, capture_output=True, text=True,
+        )
+        if decrypted.returncode != 0:
+            self.skipTest("контракт платформы не расшифровывается на этой машине")
+        values = yaml.safe_load(yaml.safe_load(decrypted.stdout)["vars"])
+        for field in (
+            "platform_operator_ssh_public_keys",
+            "platform_wireguard_operator_peers",
+            "platform_wireguard_hub_addresses",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, values)
 
 
 if __name__ == "__main__":

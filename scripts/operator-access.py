@@ -167,11 +167,30 @@ def rewrite_sops_config(root: Path, *, add: str | None, remove: str | None) -> N
     path.write_text("\n".join(result) + "\n", encoding="utf-8")
 
 
+ENVELOPE_KEYS = {"apiVersion", "kind", "inventory", "known_hosts", "vars"}
+
+
 def read_bundle(root: Path) -> dict[str, Any]:
+    """Возвращает конверт контракта как есть.
+
+    Внутри конверта `inventory`, `known_hosts` и `vars` — зашифрованные
+    **строки**, а не вложенные отображения: SOPS шифрует значения этих ключей
+    целиком. Поэтому желаемое состояние разбирается вторым проходом, а обратно
+    собирается сериализацией в строку. Обращение к `bundle["vars"]` как к
+    словарю выглядит естественно и не работает.
+    """
     target = root / BUNDLE
     if not target.is_file():
         fail(f"{BUNDLE}: контракт платформы не найден")
-    return load_mapping(run_sops(["--decrypt", str(target)], cwd=root), str(BUNDLE))
+    envelope = load_mapping(run_sops(["--decrypt", str(target)], cwd=root), str(BUNDLE))
+    if set(envelope) != ENVELOPE_KEYS:
+        fail(f"{BUNDLE}: неожиданная структура конверта")
+    if (
+        envelope.get("apiVersion") != "spiritvpn.io/v1alpha1"
+        or envelope.get("kind") != "PlatformBootstrap"
+    ):
+        fail(f"{BUNDLE}: неподдерживаемый тип документа")
+    return envelope
 
 
 def write_bundle(root: Path, document: dict[str, Any]) -> None:
@@ -197,10 +216,20 @@ def write_bundle(root: Path, document: dict[str, Any]) -> None:
 
 
 def variables(bundle: dict[str, Any]) -> dict[str, Any]:
-    values = bundle.get("vars")
-    if not isinstance(values, dict):
-        fail(f"{BUNDLE}: отсутствует раздел vars")
+    raw = bundle.get("vars")
+    if not isinstance(raw, str) or not raw.strip():
+        fail(f"{BUNDLE}: раздел vars должен быть непустой строкой")
+    values = load_mapping(raw, f"{BUNDLE}:vars")
     return values
+
+
+def set_variables(bundle: dict[str, Any], values: dict[str, Any]) -> None:
+    """Кладёт желаемое состояние обратно в конверт строкой.
+
+    Порядок ключей сохраняется, поэтому диффф остаётся читаемым: перестановка
+    полей превратила бы добавление одного оператора в переписывание файла.
+    """
+    bundle["vars"] = yaml.safe_dump(values, sort_keys=False, allow_unicode=True)
 
 
 def validate_request(path: Path) -> dict[str, str]:
@@ -312,6 +341,7 @@ def grant(root: Path, arguments: argparse.Namespace) -> None:
     # Порядок обязателен: получатель добавляется в .sops.yaml до перешифровки,
     # иначе контракт был бы записан без него и новый оператор не открыл бы даже
     # тот файл, который его включает.
+    set_variables(bundle, values)
     rewrite_sops_config(root, add=request["age_recipient"], remove=None)
     write_bundle(root, bundle)
     update_keys(root)
@@ -355,6 +385,7 @@ def revoke(root: Path, arguments: argparse.Namespace) -> None:
     # .sops.yaml до записи контракта. Иначе контракт с уже вычищенным ростером
     # на короткое время лежал бы на диске зашифрованным ещё и на отзываемого, и
     # прерывание процесса здесь оставило бы отзыв незавершённым и незаметным.
+    set_variables(bundle, values)
     if recipient:
         rewrite_sops_config(root, add=None, remove=recipient)
     write_bundle(root, bundle)
