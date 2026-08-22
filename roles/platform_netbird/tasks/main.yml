@@ -11,12 +11,16 @@
       - platform_netbird_hostname is match('^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$')
       - platform_netbird_owner_email | length > 0
       - platform_netbird_network | length > 0
-      # Метрики и healthcheck описывают состав контура и не имеют ни TLS, ни
-      # проверки вызывающего. Wildcard вывесил бы их на публичный интерфейс
-      # хаба, у которого открыт 443 — то есть рядом с тем, что мы открываем
-      # намеренно.
-      - platform_netbird_metrics_bind_address == '127.0.0.1'
+      # Healthcheck принимает адрес, и он уводится на петлю.
+      #
+      # Метрики — нет: `metricsPort` задаёт только порт, и сервер слушает их на
+      # всех интерфейсах. Проверено по логу первого запуска: «running metrics
+      # server: :9099/metrics». Слоя bind здесь не существует, и единственное,
+      # что держит метрики контура вне интернета, — правило firewall. Поэтому
+      # порт обязан оставаться вне common_public_tcp_ports; переменной с
+      # адресом здесь нет намеренно, чтобы не обещать несуществующего.
       - platform_netbird_healthcheck_bind_address == '127.0.0.1'
+      - platform_netbird_metrics_port | int not in (common_public_tcp_ports | map('int') | list)
       # 9090 — Prometheus этого же хаба. Совпадение портов на сети хоста
       # означает не деградацию, а неподнявшийся контейнер.
       - platform_netbird_metrics_port | int != platform_prometheus_port | int
@@ -34,11 +38,19 @@
 - name: Refuse to start the overlay without its certificate
   ansible.builtin.assert:
     that:
-      - _platform_netbird_tls.results | map(attribute='stat.exists') | select('false') | list | length == 0
+      - _platform_netbird_tls_missing | length == 0
+    # Пути называются поимённо: их два, и «чего-то не хватает» заставляет
+    # оператора гадать ровно в тот момент, когда он и так чинит выкатку.
     fail_msg: >-
-      TLS material is missing. Place the wildcard certificate and its key on the
-      hub before deploying; they are delivered as files, never through Ansible
-      variables.
+      TLS material is missing on the hub: {{ _platform_netbird_tls_missing | join(', ') }}.
+      Place the wildcard certificate and its key at those paths before deploying;
+      they are delivered as files, never through Ansible variables.
+  vars:
+    _platform_netbird_tls_missing: >-
+      {{ _platform_netbird_tls.results
+         | rejectattr('stat.exists')
+         | map(attribute='item')
+         | list }}
 
 - name: Create the management overlay directories
   ansible.builtin.file:
@@ -128,9 +140,11 @@
 
 - name: Require the management overlay to answer on loopback
   ansible.builtin.uri:
+    # Путь именно /health: в корне сервер отдаёт не его. Взято из лога
+    # запуска — «starting healthcheck server on: http://127.0.0.1:9000/health».
     url: >-
       http://{{ platform_netbird_healthcheck_bind_address }}:{{
-      platform_netbird_healthcheck_port }}/
+      platform_netbird_healthcheck_port }}/health
     method: GET
     status_code: 200
     return_content: false

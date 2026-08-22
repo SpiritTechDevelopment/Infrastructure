@@ -20,10 +20,12 @@ platform_netbird_listen_port: 443
 # сознательно (раздел 3.7 документа о переходе).
 platform_netbird_stun_port: 3478
 
-# По умолчанию у NetBird metricsPort = 9090, а это порт Prometheus на хабе.
-# Совпадение означало бы либо неподнявшийся контейнер, либо метрики контура на
-# публичном интерфейсе. Оба слушателя уводятся на петлю и на свободные порты.
-platform_netbird_metrics_bind_address: 127.0.0.1
+# По умолчанию у NetBird metricsPort = 9090, а это порт Prometheus на хабе:
+# совпадение означало бы неподнявшийся контейнер.
+#
+# Адреса у метрик нет — конфигурация принимает только порт, и сервер слушает на
+# всех интерфейсах. Значит дисциплина bind к ним неприменима, и вне интернета их
+# держит одно правило firewall. Порт не должен попадать в common_public_tcp_ports.
 platform_netbird_metrics_port: 9099
 platform_netbird_healthcheck_bind_address: 127.0.0.1
 platform_netbird_healthcheck_port: 9000
