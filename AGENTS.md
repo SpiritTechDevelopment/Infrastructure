@@ -53,7 +53,24 @@ truth — it is worse than no document at all, because people believe it.
   Such a document is either updated together with the change it describes, or
   not created at all.
 
-### 1.3. What must never appear in this file
+### 1.3. Running the tests
+
+Run `python3 -m unittest discover -s tests/unit` **without**
+`SPIRITVPN_SKIP_LIVE_DESIRED=1` whenever the workstation can decrypt the desired
+state — check with `sops --decrypt desired/environments/develop/topology.sops.yml`.
+
+That variable exists for public CI, which holds no decryption identity. Setting
+it locally out of habit silently removes seven tests from the run, and those
+seven are exactly the ones that read the real desired state — the ones the
+trusted runner executes. A green local run reporting "7 skipped" is not the same
+result as the trusted job, and the difference has already shipped a failure:
+narrowing the hub firewall added rules to the platform playbooks and broke a
+regression test that asserts the backend rule, which never ran locally.
+
+`make fleet-test` already runs without the variable. Prefer it, and read the
+skip count rather than only the pass count.
+
+### 1.4. What must never appear in this file
 
 No addresses, domains, port numbers, keys, digests or certificate material —
 by the same repository rule that applies everywhere else ("Не коммитить открытые

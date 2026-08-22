@@ -1069,8 +1069,19 @@ all:
         # Расхождение между bootstrap и steady означало бы хаб, у которого
         # доступ к бэкенду то появляется, то пропадает.
         self.assertEqual(rules["bootstrap"], rules["steady"])
-        self.assertEqual(len(rules["steady"]), 1)
-        rule = rules["steady"][0]
+
+        # Правил стало несколько: после того как оверлей перестал быть доверенным
+        # целиком, вход на хабе объявляется поимённо. Поэтому правило бэкенда
+        # выбирается по своему признаку — мосту, — а не по тому, что оно
+        # единственное. Единственность проверяется отдельно: два правила на один
+        # мост означали бы порт, открытый шире, чем думает читатель.
+        bridge_rules = [
+            candidate
+            for candidate in rules["steady"]
+            if candidate.get("interface") == "br-*"
+        ]
+        self.assertEqual(len(bridge_rules), 1, rules["steady"])
+        rule = bridge_rules[0]
 
         endpoint_ports = set()
         for environment in ("develop", "prod"):
