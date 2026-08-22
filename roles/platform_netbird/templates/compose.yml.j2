@@ -29,13 +29,11 @@ services:
       - {{ platform_netbird_tls_certificate_file }}:/etc/netbird/tls/fullchain.pem:ro
       - {{ platform_netbird_tls_private_key_file }}:/etc/netbird/tls/privkey.pem:ro
       - {{ platform_netbird_data_dir }}:/var/lib/netbird
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          wget -q -O- http://{{ platform_netbird_healthcheck_bind_address }}:{{
-          platform_netbird_healthcheck_port }}/ >/dev/null || exit 1
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+    # Healthcheck здесь намеренно отсутствует. Образ собран на Ubuntu, куда
+    # добавлены только ca-certificates: ни wget, ни curl внутри нет, и проверка
+    # по HTTP изнутри контейнера не выполнится никогда. Такая проверка хуже
+    # отсутствующей — она вечно докладывает «unhealthy», и `compose up --wait`
+    # сдаётся на исправно работающем сервере.
+    #
+    # Готовность проверяет задача роли сразу после этой: она ходит на
+    # healthcheckAddress с самого хоста, ничего не требуя от содержимого образа.
