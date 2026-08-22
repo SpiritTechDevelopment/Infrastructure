@@ -1621,6 +1621,36 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_previous_flag_name_is_still_accepted_for_the_installed_executor(self) -> None:
+        """Исполнитель на хабе вызывает скрипт до того, как playbook его заменит.
+
+        Прогон 1160f02 упал именно здесь: флаг переименовали вместе с шаблоном,
+        и установленный исполнитель передал имя, которого новый скрипт уже не
+        знал, — раньше, чем steady.yml успел его перерендерить. Тест закрепляет
+        алиас, потому что его уборка «за ненадобностью» ломает выкатку ровно
+        один раз и ровно на том хабе, который дольше всех не обновлялся.
+        """
+        source = (REPO_ROOT / "scripts" / "platform-sops.py").read_text(encoding="utf-8")
+        self.assertIn('"--require-applied-runtime"', source)
+        self.assertIn('dest="compare_applied_runtime"', source)
+
+        result = subprocess.run(
+            [
+                "python3",
+                str(REPO_ROOT / "scripts" / "platform-sops.py"),
+                "materialize-runtime",
+                "--bundle", "/nonexistent.sops.yml",
+                "--output", "/nonexistent-output.yml",
+                "--require-applied-runtime", "/nonexistent-applied.yml",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # Падение по расшифровке ожидаемо и нормально: проверяется, что argparse
+        # принял аргумент, а не что бандла нет.
+        self.assertNotIn("unrecognized arguments", result.stderr)
+
     def test_runtime_projection_is_private_and_applies_reviewed_access_changes(self) -> None:
         """Контракт доступа применяется из Git, а расхождение только называется.
 
