@@ -25,8 +25,16 @@ services:
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     ports:
+      # Петля остаётся первой и неизменной: исполнитель и операторские скрипты
+      # ходят сюда локально, а SAN сертификата уже содержит 127.0.0.1.
       - "127.0.0.1:{{ platform_vault_api_port }}:{{ platform_vault_api_port }}"
       - "127.0.0.1:{{ platform_vault_cluster_port }}:{{ platform_vault_cluster_port }}"
+{% if platform_vault_overlay_address | length > 0 %}
+      # Оверлейный адрес — ради UI. Порт открыт firewall'ом только операторским
+      # адресам: узел флота до него не дотянется. Кластерный порт наружу не
+      # публикуется — узел Raft здесь один.
+      - "{{ platform_vault_overlay_address }}:{{ platform_vault_api_port }}:{{ platform_vault_api_port }}"
+{% endif %}
     volumes:
       - ./config:/vault/config:ro
       - ./tls:/vault/tls:ro

@@ -6,6 +6,11 @@ platform_vault_image: ""
 platform_vault_api_port: 8200
 platform_vault_cluster_port: 8201
 platform_vault_tls_server_name: vault.management.internal
+# Пусто — значит Vault остаётся только на петле. Адрес задаёт playbook платформы;
+# роль сама наружу ничего не открывает. Обращаться следует по имени из
+# platform_vault_tls_server_name: SAN сертификата содержит его, но не оверлейный
+# адрес, поэтому подключение по IP не пройдёт проверку.
+platform_vault_overlay_address: ""
 platform_vault_node_id: management-1
 platform_vault_ca_common_name: SpiritVPN management Vault transport CA
 platform_vault_tls_validity_days: 825

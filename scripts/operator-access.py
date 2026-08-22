@@ -363,6 +363,54 @@ def revoke(root: Path, arguments: argparse.Namespace) -> None:
     report(root, operator, None, granted=False, recipient_removed=bool(recipient))
 
 
+def hosts(root: Path, arguments: argparse.Namespace) -> None:
+    """Печатает строки для /etc/hosts оператора.
+
+    Имена берутся под `.internal`, а не под выдуманным TLD: `.internal`
+    зарезервирован ICANN под частное использование и никогда не будет
+    делегирован, тогда как произвольный TLD однажды может стать настоящим — и
+    тогда запрос, ушедший мимо туннеля, ответит кто-то чужой. Тот же суффикс
+    уже стоит в SAN сертификата Vault, поэтому имя работает без перевыпуска.
+
+    Служба DNS на хабе ради двух имён не нужна: это ещё один компонент с
+    digest'ом и ещё одна поверхность на машине, которая держит Vault.
+    """
+    bundle = read_bundle(root)
+    values = variables(bundle)
+    addresses = values.get("platform_wireguard_hub_addresses")
+    if not isinstance(addresses, dict) or not addresses:
+        fail(f"{BUNDLE}: в контракте нет адресов хаба")
+    environment = arguments.environment
+    if environment not in addresses:
+        fail(f"среда {environment} в контракте не объявлена")
+    address = str(addresses[environment]).split("/")[0]
+
+    names = [
+        str(values.get("platform_vault_tls_server_name") or "vault.management.internal"),
+        "grafana.management.internal",
+    ]
+    print(f"# spiritvpn: управляющий оверлей, среда {environment}")
+    print(f"{address}\t{' '.join(names)}")
+    print(
+        "\n".join(
+            [
+                "",
+                "Вставьте строку выше в /etc/hosts. Имена резолвятся только при",
+                "поднятом туннеле — адрес принадлежит управляющему оверлею.",
+                "",
+                "  Vault UI    https://%s:%s" % (names[0], values.get("platform_vault_api_port", 8200)),
+                "  Grafana     http://grafana.management.internal:3000",
+                "",
+                "Vault отдаёт TLS, подписанный локальным CA управляющего хоста;",
+                "его сертификат нужно один раз добавить в доверенные. Grafana",
+                "работает по HTTP внутри туннеля: WireGuard шифрует участок",
+                "оператор—хаб, и другие peer'ы этот трафик не видят.",
+            ]
+        ),
+        file=sys.stderr,
+    )
+
+
 def update_keys(root: Path) -> None:
     for path in encrypted_files(root):
         run_sops(["updatekeys", "--yes", str(path)], cwd=root)
@@ -447,6 +495,12 @@ def main() -> None:
         help="age-получатель отзываемого оператора; без него отзыв неполон",
     )
     revoke_command.set_defaults(handler=revoke)
+
+    hosts_command = commands.add_parser(
+        "hosts", help="строки /etc/hosts для внутренних имён"
+    )
+    hosts_command.add_argument("--environment", default="develop")
+    hosts_command.set_defaults(handler=hosts)
 
     arguments = parser.parse_args()
     arguments.handler(arguments.root.resolve(), arguments)
