@@ -368,26 +368,146 @@ confirms `mask_body` is **overridden nowhere** — not in the node plan, not in 
 playbook, not in desired state. Every node in the fleet returns a byte-identical
 one-word response with no markup.
 
-Two independent consequences, both severe:
+#### Why the mask is the whole of the protection
 
-1. **The mask survives no active probe.** One word of `text/html` with no
-   structure is not a plausible site. Anyone who completes a TLS handshake with
-   the data port sees immediately that this is not what it claims to be — which
-   is exactly the check REALITY exists to defeat.
-2. **The whole fleet is enumerable from one response.** Scanning the internet
-   for that response returns every node at once. Exposing one node exposes all
-   of them simultaneously — the worst possible correlation property for a VPN.
+A client sends a ClientHello whose SNI is one of `serverNames`, carrying auth
+data derived from its X25519 keypair against the server's public key plus a
+`shortId`. Xray intercepts it and opens a real TLS session to `dest`.
 
-Enumeration is reachable a second way: the public hostnames follow a predictable
-pattern under one registered domain and DNS proxying is off (necessarily —
-REALITY needs direct TCP), so the domain's records describe the fleet with no
-scanning at all.
+- **Auth verifies** → Xray hijacks the session after `dest` returns its
+  certificate and switches to the VLESS tunnel.
+- **Auth fails** → Xray transparently proxies the whole connection to `dest`.
+  The prober gets a complete, genuine TLS session with whatever `dest` serves.
 
-Fixing this needs a decision about content, not just a code change. The minimum
-bar is a real static site that **differs per logical node**; the strong form is
-pointing `reality_dest` at a genuine third-party host, which is upstream
-REALITY's own recommendation and removes the local mask from the threat model
-entirely.
+REALITY therefore hides nothing from a prober; it **redirects the prober to a
+real website**. The strength of the camouflage equals the plausibility of
+`dest`, and nothing else.
+
+#### The architecture is right; the content is not
+
+The self-hosted mask is a *better* choice than the usual third-party `dest`, and
+this should not be "fixed" by switching to one. The standard weakness of a
+third-party `dest` is a contradiction between DNS and observation: public DNS
+says the site lives at some CDN, yet this IP serves it. The self-hosted variant
+has no such contradiction — DNS says the domain lives at this IP, and this IP
+serves that domain under a valid certificate for it. Keep the architecture.
+
+#### Failure modes
+
+1. **It is not a website.** Roughly seven bytes of `text/html`: no `<html>`, no
+   `<title>`, no CSS, no favicon, no links, no assets. This is worse than a
+   parked domain, which at least has a registrar page. A prober learns something
+   specific: this IP holds a valid certificate for a real domain and serves a
+   placeholder behind it.
+2. **It is identical fleet-wide.** The body hash is a fleet fingerprint. One
+   query enumerates every node at once, and no scanning is required — public
+   scan datasets already index responses on the data port continuously. It is
+   **retroactive** (historical scan data exposes nodes already rotated away
+   from) and **automatic** (a new node joins the fingerprint the moment it
+   deploys, so rotation buys nothing).
+3. **The HTTP port is closed.** `common_public_tcp_ports` carries only the data
+   port. Real websites answer on the plain-HTTP port with a redirect. Valid
+   certificate, real DNS, HTTPS-only, no redirect port, seven-byte body — each
+   element is weak alone and they compound.
+4. **The header combination is distinctive.** `server_tokens off`,
+   `ssl_session_tickets off`, plus `X-Content-Type-Options` and
+   `Referrer-Policy` on a seven-byte placeholder. Real placeholders do not ship
+   hardened headers; real hardened sites do not ship seven-byte bodies.
+
+Nobody caught this because nothing probes the public port from outside
+([4.4](#44-net-3-the-public-path-gate-exists-only-in-dead-code),
+[4.6](#46-net-5-compiled-probes-are-read-by-nobody)). No automated check has
+ever looked at what a node serves to the internet.
+
+#### Two enumeration paths that need no scanning
+
+- **DNS.** Public hostnames follow a predictable pattern under one registered
+  apex, and proxying is off — necessarily, REALITY needs direct TCP. Knowing one
+  hostname lets an observer guess the siblings; passive DNS datasets already
+  hold them.
+- **Certificate Transparency.** Every certificate for the apex and its
+  subdomains is publicly and permanently logged. CT alone yields the list of
+  logical nodes, historically, without touching the infrastructure.
+
+#### Planned direction (decided, not yet implemented)
+
+Per-logical-node mask content shipped as an **OCI artifact pinned by digest**,
+built in its own repository and pulled at deploy. This matches how every other
+component is already pinned and moves site content — which inherently contains
+the domain — out of this repository.
+
+The artifact carries **only static files**, not nginx. The nginx image stays
+pinned centrally in `components`, the TLS configuration stays owned by the role,
+and only content varies per node.
+
+**Prerequisite that does not exist today.** There is **no registry
+authentication anywhere in this repository** — a tree-wide grep for
+`docker login`, `DOCKER_CONFIG`, `"auths"` and equivalents returns nothing, and
+images are pulled by `docker compose --pull` with no credentials. Nodes
+nonetheless pull `node_agent` from a private-looking namespace, so either that
+package is public or credentials were placed on the hosts by hand outside Git —
+the latter being a CON-1-class problem in its own right. Establishing
+Git-expressed private registry access on nodes is step one; without it this plan
+publishes the camouflage.
+
+**Three traps that would negate the work:**
+
+- **Public artifacts destroy the camouflage completely**, and leave the fleet
+  worse off than today: anyone could pull every site and obtain a ready-made
+  fingerprint set without touching the infrastructure.
+- **Repository names must be opaque.** A name encoding the node (`mask-<node>`)
+  gives away the image→node mapping in a single package listing.
+- **One artifact for the whole fleet is not acceptable**, however much simpler
+  the release flow would be: seizing one node would then expose every mask and
+  restore exactly the correlation this work removes. The artifact is per logical
+  node.
+
+**Moving parts:**
+
+| Where | Change |
+|---|---|
+| new repository | builds one static-content image per logical node |
+| `contracts/desired-state/logical-node.schema.json` | `mask` gains `site` = `{repository, digest}`, **optional** |
+| `fleetctl/compiler/node_plans.py` | propagates `site` into the node plan |
+| `roles/compiled_node_plan` | asserts the digest form, as it already does for other components |
+| `roles/nginx_mask` | extracts the artifact into the site directory when `site` is set; otherwise renders the current template |
+| `roles/compiled_node_plan` | opens the plain-HTTP port; `roles/nginx_mask` adds a redirect server block |
+| `release-bump.yml`, `scripts/topology-release.py` | new `mask-release` type addressing a path **inside** a logical node, which no existing bump does |
+
+`site` must be **optional**. A new required field fails the impact plan against
+the previous deployment baseline — the schema lesson already learned here.
+Absence of `site` keeps current behaviour, which also makes migration
+node-by-node.
+
+**The real cost is content**, not machinery: N plausible, *structurally* distinct
+sites, growing with the fleet. One template with a swapped variable is what
+exists today and must not be recreated — identical structure re-correlates under
+structural hashing even with different text. Decide where sites come from before
+starting, or the shortcut returns within months.
+
+**Honest limit — what this does not fix.** The mask defeats *mass scanning*
+(finding nodes by content without knowing the domain) and *active probing*
+(confirming a suspicion). That is the main censor workflow, so the gain is real.
+It does **not** address enumeration via CT and DNS: whoever learns the apex
+domain obtains the node list regardless of what the nodes serve. **The domain is
+therefore the weaker link, and mask content is secondary to it.** Fixing the
+mask while leaving one apex with predictable subdomains removes the cheapest and
+most automatic enumeration path but leaves a single point that yields the whole
+fleet. Options are a wildcard certificate (one CT entry instead of one per node,
+at the cost of a shared key) or separate apexes per logical node (more expensive,
+but it breaks the linkage). Plan both, or the work buys less than it costs.
+
+**Sequence:**
+
+1. Git-expressed private registry access from nodes — without it the rest
+   publishes the camouflage.
+2. Domain strategy decision (wildcard vs separate apexes) — it determines how
+   many distinct sites are actually needed.
+3. Optional `site` in the schema, compiler, role, plain-HTTP redirect port.
+4. Site repository and `mask-release`.
+5. The external probe asserts that what is served matches what Git declares —
+   the same work as [4.6](#46-net-5-compiled-probes-are-read-by-nobody), which
+   is why they belong together: until then none of steps 1–4 can be confirmed.
 
 ---
 
@@ -558,7 +678,7 @@ These are brought into line as each file is next edited — see the reasoning in
 
 | ID | Severity | Status | Finding |
 |---|---|---|---|
-| ANON-1 | high | open | Identical REALITY mask: the fleet is enumerable and the mask survives no active probe |
+| ANON-1 | high | open; direction chosen ([4.8](#48-anon-1-the-reality-mask-is-a-fleet-wide-fingerprint)) | Identical REALITY mask: the fleet is enumerable and the mask survives no active probe |
 | CON-1 | high | open | Readiness smoke adapters live only on the hub, outside Git |
 | CI-1 | high | **fixed** | `BEFORE` unset: multi-commit pushes were under-deployed |
 | NET-3 | medium | open | The public-path gate exists only in dead code |
