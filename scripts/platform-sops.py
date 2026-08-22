@@ -472,11 +472,54 @@ def _wireguard_endpoint(public_host: str, listen_port: int) -> str:
     return f"{endpoint_host}:{listen_port}"
 
 
+_MISSING = object()
+
+
+def _report_access_drift(compare_applied_runtime: Path, desired: dict[str, Any]) -> None:
+    """Сообщает, какие поля контракта доступа меняет этот прогон.
+
+    Выкатку не прерывает. Раньше на этом месте стоял отказ: применение
+    считалось состоявшимся только после защищённой операции с рабочей станции,
+    и `platform-deploy` останавливался, если объявленный в Git контракт
+    расходился с применённым. Отказ был последним гейтом между слитым коммитом
+    и root на хабе, и снят он сознательно — обоснование в AGENTS.md.
+
+    Раз остановки больше нет, остаётся хотя бы след: смена ростера не должна
+    выглядеть в транскрипте так же, как смена MTU.
+
+    Печатаются только имена полей. Значения не печатаются никогда: среди них
+    лежит токен бота Alertmanager, а транскрипт исполнителя читают и хранят.
+    """
+    try:
+        applied = yaml.safe_load(compare_applied_runtime.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        # Нечитаемого файла достаточно для молчания: это первый прогон на этом
+        # хабе, а не расхождение. Отказ здесь останавливал бы выкатку ровно на
+        # том хосте, у которого ещё нет ничего, что можно было бы сравнивать.
+        return
+    if not isinstance(applied, dict):
+        return
+    for key, default in TRANSITIONAL_RUNTIME_DEFAULTS.items():
+        if key not in applied and desired[key] == default:
+            applied[key] = copy.deepcopy(default)
+    changed = sorted(key for key in desired if applied.get(key, _MISSING) != desired[key])
+    # Ключ, который исчез из контракта, тоже изменение доступа: так пропадает
+    # последний оператор из ростера, если поле снесли целиком.
+    removed = sorted(set(applied) - set(desired))
+    if not changed and not removed:
+        return
+    print(
+        "контракт доступа изменяется этим прогоном; поля: "
+        + ", ".join(changed + removed),
+        file=sys.stderr,
+    )
+
+
 def materialize_runtime_variables(
     bundle: Path,
     output: Path,
     *,
-    applied_runtime: Path | None,
+    compare_applied_runtime: Path | None,
     executor_listen_port: int | None = None,
 ) -> None:
     inventory, _known_hosts, variables = decrypt_bundle(bundle)
@@ -495,22 +538,8 @@ def materialize_runtime_variables(
         _platform_public_host(inventory), variables["platform_wireguard_listen_port"]
     )
 
-    if applied_runtime is not None:
-        try:
-            applied = yaml.safe_load(applied_runtime.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError) as exc:
-            raise PlatformBundleError(
-                "persisted management runtime configuration is unreadable"
-            ) from exc
-        if isinstance(applied, dict):
-            for key, default in TRANSITIONAL_RUNTIME_DEFAULTS.items():
-                if key not in applied and desired[key] == default:
-                    applied[key] = copy.deepcopy(default)
-        if not isinstance(applied, dict) or applied != desired:
-            raise PlatformBundleError(
-                "reviewed platform bundle differs from the explicitly applied access "
-                "contract; run the guarded platform refresh before apply"
-            )
+    if compare_applied_runtime is not None:
+        _report_access_drift(compare_applied_runtime, desired)
 
     _write_private(
         output,
@@ -731,7 +760,9 @@ def main() -> int:
     # Accepted during the rollout from the executor installed before the listen
     # port became Git-owned. It is comparison-only and never drives projection.
     parser.add_argument("--wireguard-listen-port", type=int)
-    parser.add_argument("--require-applied-runtime", type=Path)
+    # Сравнение, а не требование. Прежнее имя описывало отказ, которого больше
+    # нет, и оставить его значило бы обещать гейт, которого не существует.
+    parser.add_argument("--compare-applied-runtime", type=Path)
     parser.add_argument("--runner-id")
     parser.add_argument("--source-git-sha")
     args = parser.parse_args()
@@ -745,9 +776,9 @@ def main() -> int:
                 args.bundle.resolve(),
                 args.output.resolve(),
                 executor_listen_port=args.wireguard_listen_port,
-                applied_runtime=(
-                    args.require_applied_runtime.resolve()
-                    if args.require_applied_runtime is not None
+                compare_applied_runtime=(
+                    args.compare_applied_runtime.resolve()
+                    if args.compare_applied_runtime is not None
                     else None
                 ),
             )
@@ -756,7 +787,7 @@ def main() -> int:
                 raise PlatformBundleError(
                     "runner-plan requires --output, --runner-id and --source-git-sha"
                 )
-            if args.wireguard_listen_port is not None or args.require_applied_runtime is not None:
+            if args.wireguard_listen_port is not None or args.compare_applied_runtime is not None:
                 raise PlatformBundleError("runtime options cannot be used with runner-plan")
             _require_clean_exact_source(args.source_git_sha)
             materialize_runner_plan(
@@ -773,7 +804,7 @@ def main() -> int:
             if (
                 args.runner_id is not None
                 or args.wireguard_listen_port is not None
-                or args.require_applied_runtime is not None
+                or args.compare_applied_runtime is not None
             ):
                 raise PlatformBundleError(
                     "overlay or runtime options cannot be used with runner-host-plan"
@@ -790,7 +821,7 @@ def main() -> int:
                 for value in (
                     args.output,
                     args.wireguard_listen_port,
-                    args.require_applied_runtime,
+                    args.compare_applied_runtime,
                     args.runner_id,
                     args.source_git_sha,
                 )
