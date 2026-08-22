@@ -647,8 +647,8 @@ compare-and-swap `refs/deployments/<environment>`. Сам управляющий
 ```bash
 make fleet-promote \
   ENVIRONMENT=develop \
-  SOURCE_GIT_SHA=<применённый SHA> \
-  BASELINE_GIT_SHA=<ожидаемый прежний SHA> \
+  SOURCE_GIT_SHA="применённый-SHA" \
+  BASELINE_GIT_SHA="ожидаемый-прежний-SHA" \
   APPLY=1
 ```
 
