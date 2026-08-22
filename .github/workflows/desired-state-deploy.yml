@@ -29,6 +29,11 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    # `actions: read` только ради истории прогонов этого же workflow: из неё
+    # берётся база сравнения ниже. Записи не даёт и на выкатку не влияет.
+    permissions:
+      contents: read
+      actions: read
     outputs:
       platform: ${{ steps.split.outputs.platform }}
       control: ${{ steps.split.outputs.control }}
@@ -49,6 +54,62 @@ jobs:
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           test "$(git rev-parse refs/remotes/origin/main)" = "$SOURCE_GIT_SHA"
 
+      # База сравнения — коммит, который этот workflow в прошлый раз успешно
+      # свёл, а не родитель головного коммита.
+      #
+      # Родитель головного был здесь молчаливой ошибкой: push из трёх коммитов
+      # разбирался так, будто существует только последний, и контуры первых
+      # двух не выкатывались вовсе. Прогон при этом зелёный — то есть ровно тот
+      # тихий недовыкат, против которого построен весь этот шаг. Незаметно это
+      # было потому, что `BEFORE` никогда не задавался: в CI работала ветка
+      # умолчания, а в тестах переменная приходит снаружи, и обе стороны видели
+      # разный код.
+      #
+      # Один push даёт один прогон CI и один прогон этого workflow, поэтому
+      # головной коммит прошлого успешного прогона — это в точности состояние
+      # до текущего push. Если прошлый прогон упал, его дельта остаётся в
+      # сравнении и доедет следующим — это и есть обещанный level-triggered
+      # reconcile, а не декларация о нём.
+      - name: Resolve the last successfully reconciled commit
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          reconciled="$RUNNER_TEMP/reconciled-runs"
+          # Сбой запроса и «успешных прогонов нет» — разные вещи, и разводятся
+          # они здесь намеренно. Подстановка процесса не роняет шаг: её код
+          # возврата не виден ни `set -e`, ни `pipefail`, поэтому запрос идёт
+          # отдельной командой. Иначе временная ошибка API читалась бы как
+          # отсутствие базы и разворачивала бы полную сверку всех контуров.
+          gh api \
+            "/repos/${GITHUB_REPOSITORY}/actions/workflows/desired-state-deploy.yml/runs?branch=main&status=success&per_page=50" \
+            --jq '.workflow_runs[] | select(.conclusion == "success") | .head_sha' \
+            > "$reconciled"
+
+          before=""
+          while read -r candidate; do
+            test -n "$candidate" || continue
+            # Коммит из прогона мог исчезнуть из истории после force-push.
+            # Сравнивать с недостижимым объектом нельзя.
+            if git cat-file -e "${candidate}^{commit}" 2>/dev/null; then
+              before="$candidate"
+              break
+            fi
+          done < "$reconciled"
+
+          if test -z "$before"; then
+            # Успешной сверки в истории нет, значит неизвестно, что уже
+            # применено. Пустое дерево делает изменёнными все файлы: шаг ниже
+            # видит неопознанные пути и выкатывает все контуры во всех средах.
+            # Догадка о базе здесь стоила бы ровно того недовыката, который
+            # этот шаг и должен исключать.
+            before="$(git hash-object -t tree /dev/null)"
+            echo "нет успешной сверки в истории; сравнение идёт с пустым деревом" >&2
+          fi
+          printf 'before=%s\n' "$before" >> "$GITHUB_OUTPUT"
+          echo "база сравнения: $before"
+
       # Изменение относится к конкретной среде только если среда написана в
       # самом пути. Всё остальное — роли, playbooks, компилятор, контракты,
       # общие куски desired state — влияет на любую среду сразу, и разбирать,
@@ -59,11 +120,13 @@ jobs:
         id: split
         env:
           AFTER: ${{ github.event.workflow_run.head_sha }}
+          BEFORE: ${{ steps.baseline.outputs.before }}
         run: |
           set -euo pipefail
-          if test -z "${BEFORE:-}"; then
-            BEFORE="$(git rev-parse "$AFTER^" 2>/dev/null || printf '%040d' 0)"
-          fi
+          # BEFORE обязан прийти снаружи. Умолчание здесь раньше подставляло
+          # родителя головного коммита и теряло всё, что было в push раньше
+          # него; отсутствие базы — это отказ, а не повод угадывать.
+          test -n "${BEFORE:-}"
           platform_list="$RUNNER_TEMP/platform"
           control_list="$RUNNER_TEMP/control"
           fleet_list="$RUNNER_TEMP/fleet"

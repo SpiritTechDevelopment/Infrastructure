@@ -59,16 +59,27 @@ spec:
 """
 
 
-def detect_script() -> str:
+def workflow_step(step_id: str) -> dict:
     workflow = yaml.safe_load(
         (REPO_ROOT / ".github" / "workflows" / "desired-state-deploy.yml").read_text(
             encoding="utf-8"
         )
     )
     for step in workflow["jobs"]["detect"]["steps"]:
-        if step.get("id") == "split":
-            return step["run"]
-    raise AssertionError("desired-state-deploy.yml has no detect step with id 'split'")
+        if step.get("id") == step_id:
+            return step
+    raise AssertionError(f"desired-state-deploy.yml has no detect step with id {step_id!r}")
+
+
+def detect_step() -> dict:
+    return workflow_step("split")
+
+
+def detect_script() -> str:
+    return detect_step()["run"]
+
+
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 class DesiredStateDetectTest(unittest.TestCase):
@@ -259,6 +270,172 @@ class DesiredStateDetectTest(unittest.TestCase):
         head = self.commit("add a node")
         self.assert_areas(self.detect("0" * 40, head), platform=[], control=[], fleet=[])
 
+    # Push из нескольких коммитов. Оба коммита трогают только пути, привязанные
+    # к среде, — то есть ни один из них сам по себе не поднимает все контуры.
+    # Тогда покрытие первого коммита доказывает именно ширину сравнения, а не
+    # срабатывание catch-all на неопознанном пути.
+    def test_every_commit_of_a_multi_commit_push_is_covered(self) -> None:
+        self.write("desired/environments/develop/platform/observability.yml", "spec: {}\n")
+        self.commit("first: declare platform state")
+        self.write("desired/environments/develop/nodes/develop-entry-de.yml", "spec: {}\n")
+        head = self.commit("second: declare a node")
+
+        self.assert_areas(
+            self.detect(self.base, head),
+            platform=["develop"],
+            control=[],
+            fleet=["develop"],
+        )
+
+    # Тот же push, разобранный от родителя головного коммита, — снимок дефекта.
+    # Виден только второй коммит, платформенный контур теряется целиком, а
+    # прогон при этом зелёный. Тест закрепляет причину, по которой база обязана
+    # приходить снаружи, а не выводиться из головного коммита.
+    def test_diffing_from_the_head_parent_loses_the_rest_of_the_push(self) -> None:
+        self.write("desired/environments/develop/platform/observability.yml", "spec: {}\n")
+        self.commit("first: declare platform state")
+        self.write("desired/environments/develop/nodes/develop-entry-de.yml", "spec: {}\n")
+        head = self.commit("second: declare a node")
+
+        self.assert_areas(
+            self.detect(f"{head}^", head), platform=[], control=[], fleet=["develop"]
+        )
+
+    # Проверка проводки, а не логики, и потому по тексту workflow. Логика ниже
+    # была верна всё время — не задан был её вход: шаг не получал `BEFORE`, а
+    # тест подставлял его сам, так что обе стороны видели разный код и дефект
+    # не мог проявиться ни там, ни там.
+    def test_the_split_step_is_given_a_baseline_from_outside(self) -> None:
+        environment = detect_step().get("env") or {}
+        self.assertIn(
+            "BEFORE",
+            environment,
+            "шаг split обязан получать базу сравнения из workflow, а не выводить её сам",
+        )
+        self.assertIn("steps.baseline.outputs.before", environment["BEFORE"])
+
+    def test_the_split_step_refuses_to_run_without_a_baseline(self) -> None:
+        output = self.runner_temp / "github-output"
+        output.write_text("", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", "-c", self.script],
+            cwd=self.repository,
+            env={
+                **os.environ,
+                "PATH": self.path,
+                "AFTER": self.base,
+                "RUNNER_TEMP": str(self.runner_temp),
+                "GITHUB_OUTPUT": str(output),
+            },
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0, "пустая база обязана останавливать шаг")
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BaselineStepTest(unittest.TestCase):
+    """Как шаг выбирает базу сравнения и что делает, когда выбрать не из чего.
+
+    Шаг спрашивает у API головной коммит прошлого успешного прогона этого же
+    workflow. Интересна здесь не удачная ветка, а две неудачных: пустая история
+    и сбой запроса выглядят одинаково — «ничего не пришло», — но означают разное
+    и обязаны расходиться. Сбой, принятый за пустую историю, разворачивает
+    полную сверку всех контуров по временной сетевой ошибке.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.script = workflow_step("baseline")["run"]
+
+    def setUp(self) -> None:
+        self._temporary = tempfile.TemporaryDirectory(prefix="baseline-")
+        self.addCleanup(self._temporary.cleanup)
+        root = Path(self._temporary.name)
+        self.repository = root / "repository"
+        self.repository.mkdir()
+        self.runner_temp = root / "runner-temp"
+        self.runner_temp.mkdir()
+        self.binaries = root / "bin"
+        self.binaries.mkdir()
+
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.name", "baseline-test")
+        self.git("config", "user.email", "baseline@spiritvpn.invalid")
+        (self.repository / "file").write_text("one", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "one")
+        self.reconciled = self.git("rev-parse", "HEAD")
+        (self.repository / "file").write_text("two", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "two")
+
+    def git(self, *arguments: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(self.repository), *arguments], text=True
+        ).strip()
+
+    def run_baseline(self, gh_stand_in: str) -> subprocess.CompletedProcess:
+        stand_in = self.binaries / "gh"
+        stand_in.write_text(gh_stand_in, encoding="utf-8")
+        stand_in.chmod(0o755)
+        self.output = self.runner_temp / "github-output"
+        self.output.write_text("", encoding="utf-8")
+        return subprocess.run(
+            ["bash", "-c", self.script],
+            cwd=self.repository,
+            env={
+                **os.environ,
+                "PATH": f"{self.binaries}{os.pathsep}{os.environ['PATH']}",
+                "GITHUB_REPOSITORY": "spirit/infra",
+                "GITHUB_OUTPUT": str(self.output),
+                "RUNNER_TEMP": str(self.runner_temp),
+            },
+            capture_output=True,
+            text=True,
+        )
+
+    def resolved_baseline(self) -> str:
+        for line in self.output.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key == "before":
+                return value
+        raise AssertionError("шаг не записал base сравнения в GITHUB_OUTPUT")
+
+    def test_the_last_reconciled_commit_becomes_the_baseline(self) -> None:
+        result = self.run_baseline(f'#!/bin/sh\nprintf "%s\\n" "{self.reconciled}"\n')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.resolved_baseline(), self.reconciled)
+
+    # Прогон мог остаться в API, а его коммит — исчезнуть из истории после
+    # force-push. Сравнивать с недостижимым объектом нельзя.
+    def test_an_unreachable_commit_is_skipped(self) -> None:
+        result = self.run_baseline(
+            f'#!/bin/sh\nprintf "%s\\n%s\\n" "{"a" * 40}" "{self.reconciled}"\n'
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.resolved_baseline(), self.reconciled)
+
+    # Успешной сверки не было ни разу: что уже применено — неизвестно, поэтому
+    # изменённым считается всё дерево и сверяются все контуры.
+    def test_no_successful_run_falls_back_to_the_empty_tree(self) -> None:
+        result = self.run_baseline("#!/bin/sh\n:\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.resolved_baseline(), EMPTY_TREE)
+
+    # Тот случай, ради которого запрос вынесен из подстановки процесса: её код
+    # возврата не виден ни `set -e`, ни `pipefail`, и сбой API молча выглядел бы
+    # как пустая история — то есть выкатывал бы всё подряд по сетевой ошибке.
+    def test_a_failing_api_call_stops_the_step(self) -> None:
+        result = self.run_baseline('#!/bin/sh\necho "gh: API error" >&2\nexit 1\n')
+        self.assertNotEqual(
+            result.returncode, 0, "сбой обращения к API обязан останавливать шаг"
+        )
+        self.assertNotIn(
+            EMPTY_TREE,
+            self.output.read_text(encoding="utf-8"),
+            "сбой API не должен превращаться в полную сверку",
+        )
