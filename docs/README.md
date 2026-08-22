@@ -7,8 +7,7 @@ point-in-time fleet snapshots remain available through Git history.
 
 | Document | Purpose |
 |---|---|
-| [architecture/INFRA_TECHNICAL_SPEC.md](architecture/INFRA_TECHNICAL_SPEC.md) | Approved normative infrastructure v1 specification |
-| [status/INFRA_V1_IMPLEMENTATION_STATUS.md](status/INFRA_V1_IMPLEMENTATION_STATUS.md) | Implemented capabilities, limitations, and ordered next work |
+| [../contracts/backend/INFRA_DELTA.md](../contracts/backend/INFRA_DELTA.md) | Open decisions and the infrastructure-owned delta to the backend |
 | [../contracts/backend/BACKEND_DOMAIN_AGREEMENTS.md](../contracts/backend/BACKEND_DOMAIN_AGREEMENTS.md) | Vendored authority for backend-owned domain behavior |
 | [../contracts/nodeagent/v1/node_agent.proto](../contracts/nodeagent/v1/node_agent.proto) | Backend-to-node-agent wire contract |
 | [../contracts/desired-state/README.md](../contracts/desired-state/README.md) | Desired-state schema contract |
@@ -19,7 +18,6 @@ Supporting indexes:
 
 - [architecture/README.md](architecture/README.md)
 - [integration/README.md](integration/README.md)
-- [status/README.md](status/README.md)
 - [operations/README.md](operations/README.md)
 
 Для последовательного знакомства со всей системой без чтения нормативной

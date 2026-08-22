@@ -11,14 +11,21 @@ MARKDOWN_LINK = re.compile(r"\[[^]]*\]\(([^)]+)\)")
 
 
 class DocumentationTests(unittest.TestCase):
-    def test_normative_v1_documents_exist(self) -> None:
+    # Раньше список назывался «нормативные документы» и требовал спецификацию
+    # вместе со снимком состояния реализации. Проверялось при этом только
+    # существование файла, то есть тест закреплял за ними статус, содержание
+    # которого не подтверждал ничем: оба разошлись с main и продолжали
+    # считаться нормативными, пока корневой README уже объявлял docs/
+    # справочными. Осталось то, на что действительно ссылаются контракты и
+    # процедуры.
+    def test_referenced_documents_exist(self) -> None:
         required = (
-            "docs/architecture/INFRA_TECHNICAL_SPEC.md",
-            "docs/status/INFRA_V1_IMPLEMENTATION_STATUS.md",
             "contracts/backend/BACKEND_DOMAIN_AGREEMENTS.md",
+            "contracts/backend/INFRA_DELTA.md",
             "contracts/nodeagent/v1/node_agent.proto",
             "fleetctl/README.md",
             "desired/README.md",
+            "docs/operations/INFRA_V1_GUIDE_RU.md",
         )
         for relative in required:
             with self.subTest(path=relative):
@@ -32,6 +39,7 @@ class DocumentationTests(unittest.TestCase):
             "docs/deploy",
             "docs/reference",
             "docs/security",
+            "docs/status",
             "docs/testing",
             "governance",
         )

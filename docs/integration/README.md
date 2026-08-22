@@ -7,7 +7,6 @@ descriptive compatibility document:
 |---|---|
 | [Backend domain agreement](../../contracts/backend/BACKEND_DOMAIN_AGREEMENTS.md) | Backend-owned domain model, manifest semantics, access, accounting, and agent operations |
 | [node_agent.proto](../../contracts/nodeagent/v1/node_agent.proto) | Backend-to-node-agent wire API |
-| [Infrastructure specification](../architecture/INFRA_TECHNICAL_SPEC.md) | Infrastructure-owned topology, rollout, PKI, readiness, and required backend delta |
 | [Desired-state schemas](../../contracts/desired-state/README.md) | Structural input contract consumed by `fleetctl` |
 
 Direct Xray mutation is not an integration surface. Runtime customer ownership

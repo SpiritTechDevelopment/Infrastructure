@@ -33,9 +33,9 @@ scripts/vendor-backend-contract.sh <commit-sha>
 1. инварианты компилятора в `fleetctl` (лимиты, правила валидации манифеста);
 2. схемы в `contracts/desired-state/` и `contracts/schemas/`;
 3. открытые решения в
-   [`INFRA_TECHNICAL_SPEC.md` §23](../../docs/architecture/INFRA_TECHNICAL_SPEC.md#23-открытые-решения);
+   [`INFRA_DELTA.md`](INFRA_DELTA.md#23-открытые-решения);
 4. дельту к бэкенду в
-   [`INFRA_TECHNICAL_SPEC.md` §24](../../docs/architecture/INFRA_TECHNICAL_SPEC.md#24-дельта-к-бэкенду).
+   [`INFRA_DELTA.md`](INFRA_DELTA.md#24-дельта-к-бэкенду).
 
 Единственное локальное отличие вендоренного файла от источника — врезка о
 происхождении в первых восьми строках. Проверить, что остальное совпадает:

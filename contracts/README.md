@@ -18,5 +18,5 @@ Compatibility rules:
 
 The normative backend behavior is vendored in
 [`backend/BACKEND_DOMAIN_AGREEMENTS.md`](backend/BACKEND_DOMAIN_AGREEMENTS.md).
-Infrastructure-owned requirements are in
-[`docs/architecture/INFRA_TECHNICAL_SPEC.md`](../docs/architecture/INFRA_TECHNICAL_SPEC.md).
+The infrastructure-owned delta to the backend is in
+[`backend/INFRA_DELTA.md`](backend/INFRA_DELTA.md).

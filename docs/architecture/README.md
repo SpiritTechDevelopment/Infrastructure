@@ -1,16 +1,20 @@
-# Architecture
+# Архитектура
 
-[`INFRA_TECHNICAL_SPEC.md`](INFRA_TECHNICAL_SPEC.md) is the only normative
-infrastructure architecture document.
+Нормативной архитектурной спецификации в репозитории больше нет.
+`INFRA_TECHNICAL_SPEC.md` описывал предыдущий этап реализации и разошёлся с
+`main`, поэтому снят; полный текст остаётся в истории Git.
 
-[`TRANSITIONAL_GITHUB_RUNNER.md`](TRANSITIONAL_GITHUB_RUNNER.md) records the
-temporary GitHub-hosted runner boundary without changing the protected-runner
-target in the normative specification.
+Устройство работающей системы описывают сам репозиторий — `desired/`,
+`contracts/`, `fleetctl/`, `roles/`, `playbooks/` — и
+[руководство оператора](../operations/INFRA_V1_GUIDE_RU.md). Документ, который
+расходится с кодом, здесь не считается источником истины.
 
-It defines the environment/fleet/logical-node/instance model, source-of-truth
-boundaries, compiler invariants, generated artifacts, PKI, rollout ordering,
-readiness gates, backend and agent boundaries, DNS, observability, failure
-behavior, and acceptance phases.
+Разделы снятой спецификации, которые не устарели, сохранены отдельно:
+[`contracts/backend/INFRA_DELTA.md`](../../contracts/backend/INFRA_DELTA.md) —
+открытые решения и дельта к бэкенду. Они остаются частью процедуры повторного
+вендоринга контракта бэкенда.
 
-Superseded architecture drafts remain available in Git history. This directory
-contains only the approved v1 model.
+[`TRANSITIONAL_GITHUB_RUNNER.md`](TRANSITIONAL_GITHUB_RUNNER.md) описывает
+границу, действовавшую, пока выкатка шла с раннеров GitHub. Переход завершён —
+рабочий контур использует выделенный раннер, — поэтому документ читается как
+запись о прошлом состоянии, а не как описание текущего.
