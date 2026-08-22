@@ -35,12 +35,21 @@ class RepositorySurfaceTests(unittest.TestCase):
         )
         self.assertEqual(unexpected, [])
 
-    def test_makefile_exposes_only_fleet_operations(self) -> None:
+    def test_makefile_exposes_only_declared_operation_families(self) -> None:
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
         targets = set(re.findall(r"(?m)^([a-zA-Z0-9_-]+):", makefile))
         operational = targets - {"help", "check", "lint", "syntax"}
         self.assertTrue(operational)
-        self.assertTrue(all(target.startswith("fleet-") for target in operational))
+        # Семейств два, и они разделены намеренно. `fleet-` трогает серверы.
+        # `operator-` не трогает их вовсе: выдача и отзыв доступа правят только
+        # объявления в Git и оставляют диффф под ревью, а применяет его отдельная
+        # защищённая операция. Общий префикс скрыл бы эту разницу, а список без
+        # префиксов перестал бы быть ограничителем.
+        families = ("fleet-", "operator-")
+        unexpected = sorted(
+            target for target in operational if not target.startswith(families)
+        )
+        self.assertEqual(unexpected, [], "цель вне объявленных семейств операций")
         self.assertNotIn("ALLOW_LEGACY", makefile)
 
     def test_scripts_are_bounded_to_the_v1_control_plane(self) -> None:
@@ -62,6 +71,14 @@ class RepositorySurfaceTests(unittest.TestCase):
                 # explicitly approved local contract without printing argv.
                 "control-contract-check.py",
                 "platform-sops.py",
+                # Личность оператора создаётся на его собственной машине:
+                # приватные ключи не покидают её, наружу уходит только запрос
+                # с публичными частями и один отпечаток для сверки вне канала.
+                "operator-identity.py",
+                # Выдача и отзыв правят только объявления — ростер в контракте
+                # платформы и получателей в .sops.yaml — и перешифровывают
+                # затронутые файлы. Ничего не применяют и на серверы не ходят.
+                "operator-access.py",
                 "platform-remote.sh",
                 "bootstrap-self-hosted-runner.sh",
                 # Creates the one decryption identity intentionally assigned to

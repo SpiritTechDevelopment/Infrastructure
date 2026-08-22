@@ -140,6 +140,28 @@ fleet-platform-refresh: fleet-platform-check ## Deliver reviewed bundle values t
 	  --bundle "$(PLATFORM_BUNDLE)" \
 	  --operator-wireguard-private-key "$(PLATFORM_WIREGUARD_PRIVATE_KEY)"
 
+operator-identity: ## Создать личность оператора и запрос на включение; OPERATOR=id
+	@test -n "$(OPERATOR)" || (echo 'нужен OPERATOR=<идентификатор>' >&2; exit 2)
+	@# Запускается будущим владельцем доступа на своей машине. Приватные ключи
+	@# остаются здесь; наружу уходит только запрос с публичными частями.
+	python3 scripts/operator-identity.py create \
+	  --operator "$(OPERATOR)" \
+	  --output "$(or $(REQUEST),operator-request-$(OPERATOR).yml)"
+
+operator-grant: ## Включить оператора в объявления; REQUEST=file ADDRESS=10.x.y.z
+	@test -n "$(REQUEST)" || (echo 'нужен REQUEST=<файл запроса>' >&2; exit 2)
+	@test -n "$(ADDRESS)" || (echo 'нужен ADDRESS=<адрес в управляющем оверлее>' >&2; exit 2)
+	@# Ничего не применяет: оставляет диффф под ревью. Адрес обязателен, потому
+	@# что адреса нод флота лежат вне этого контракта и автоматический выбор мог
+	@# бы молча столкнуться с адресом ноды.
+	python3 scripts/operator-access.py grant --request "$(REQUEST)" --address "$(ADDRESS)"
+
+operator-revoke: ## Отозвать оператора; OPERATOR=id AGE_RECIPIENT=age1...
+	@test -n "$(OPERATOR)" || (echo 'нужен OPERATOR=<идентификатор>' >&2; exit 2)
+	@test -n "$(AGE_RECIPIENT)" || (echo 'нужен AGE_RECIPIENT=<age1...>: без него отзыв неполон' >&2; exit 2)
+	python3 scripts/operator-access.py revoke \
+	  --operator "$(OPERATOR)" --age-recipient "$(AGE_RECIPIENT)"
+
 syntax: ## Syntax-check the active v1 playbooks
 	@# Discovered, not enumerated: a hand-maintained list is how a new playbook
 	@# reaches the deployment path without ever being parsed. `find` rather than
@@ -177,4 +199,4 @@ check: fleet-sops-envelope-check fleet-test ## Run local v1 static checks
 	fleet-dns-plan fleet-dns-apply \
 	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-promote fleet-platform-check \
 	fleet-platform-bootstrap-check fleet-platform-bootstrap fleet-platform-refresh \
-	fleet-deploy-log syntax lint check
+	fleet-deploy-log operator-identity operator-grant operator-revoke syntax lint check
