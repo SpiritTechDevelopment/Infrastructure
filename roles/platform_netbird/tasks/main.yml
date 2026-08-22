@@ -13,10 +13,12 @@
       - >-
         platform_netbird_proxy_image
         is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
-      # Сервер и дашборд обязаны остаться на петле: наружу их выводит прокси,
-      # и только он держит TLS. Слушатель на публичном интерфейсе отдавал бы
-      # управляющий API открытым текстом — ровно то, что уже случилось однажды.
-      - platform_netbird_http_bind_address == '127.0.0.1'
+      # Адрес в listenAddress сервер игнорирует: при `127.0.0.1:8081` он всё
+      # равно слушает `*:8081`, проверено через ss на живом хабе. Дисциплина
+      # bind здесь, как и у метрик, недоступна — порт держит вне интернета одно
+      # правило firewall, поэтому он обязан оставаться необъявленным публично.
+      # Переменная задаёт адрес, по которому к серверу обращается прокси.
+      - platform_netbird_http_port | int not in (common_public_tcp_ports | map('int') | list)
       - platform_netbird_hostname | length > 0
       - platform_netbird_hostname is match('^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$')
       - platform_netbird_owner_email | length > 0
@@ -117,6 +119,7 @@
     owner: root
     group: root
     mode: "0600"
+  register: _platform_netbird_config
   vars:
     platform_netbird_auth_secret: >-
       {{ (_platform_netbird_secrets.results[0].content | b64decode) | trim }}
@@ -134,6 +137,7 @@
     owner: root
     group: root
     mode: "0600"
+  register: _platform_netbird_proxy_config
 
 - name: Render the management overlay compose file
   ansible.builtin.template:
@@ -143,33 +147,48 @@
     group: root
     mode: "0600"
 
+# Пересоздание, а не просто `up`, когда изменилась отрендеренная конфигурация.
+# Compose сравнивает определение сервиса и содержимое смонтированных файлов не
+# хеширует: правка config.yaml сама по себе оставила бы сервер работать со
+# старым. Найдено дорого — сервер остался слушать 443 со старой настройкой, и
+# прокси не смог занять порт: «bind() to 0.0.0.0:443 failed (98: Address in
+# use)».
 - name: Reconcile the management overlay
   ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - -f
-      - "{{ platform_netbird_dir }}/compose.yml"
-      - up
-      - -d
-      - --wait
+    argv: >-
+      {{ ['docker', 'compose', '-f', platform_netbird_dir ~ '/compose.yml', 'up', '-d']
+         + (['--force-recreate'] if _platform_netbird_rendered_changed else [])
+         + ['--wait'] }}
+  vars:
+    _platform_netbird_rendered_changed: >-
+      {{ (_platform_netbird_config.changed | default(false))
+         or (_platform_netbird_proxy_config.changed | default(false)) }}
   changed_when: true
   when: not ansible_check_mode
 
-- name: Require the management overlay to answer on loopback
+# Проверяется поле certificate_valid, а не код ответа, и 503 считается
+# допустимым. Причина в устройстве самой проверки
+# (relay/healthcheck/healthcheck.go v0.76.3): статус становится unhealthy, если
+# `len(listeners) == 0`, а при мультиплексировании relay на порт management
+# своего слушателя у него нет вовсе — «no separate relay listener». То есть 200
+# отсюда не придёт никогда, и ждать его значит ждать вечно.
+#
+# certificate_valid при этом — сильное утверждение, а не слабое: оно
+# выставляется в false, если схема не rels:// или если не удалось дозвониться
+# по публичному адресу. Истина здесь означает, что путь пройден целиком: TLS на
+# прокси, маршрут WebSocket, ответ relay.
+- name: Require the management overlay to complete a TLS round trip
   ansible.builtin.uri:
-    # Путь именно /health: в корне сервер отдаёт не его. Взято из лога
-    # запуска — «starting healthcheck server on: http://127.0.0.1:9000/health».
     url: >-
       http://{{ platform_netbird_healthcheck_bind_address }}:{{
       platform_netbird_healthcheck_port }}/health
     method: GET
-    status_code: 200
-    return_content: false
+    status_code: [200, 503]
+    return_content: true
     timeout: 5
   register: _platform_netbird_readiness
   retries: 12
   delay: 5
-  until: _platform_netbird_readiness.status == 200
+  until: _platform_netbird_readiness.json.certificate_valid | default(false)
   changed_when: false
   when: not ansible_check_mode
