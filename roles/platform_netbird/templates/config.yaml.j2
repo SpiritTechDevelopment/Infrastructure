@@ -1,15 +1,16 @@
 {{ ansible_managed | comment }}
 # GENERATED — DO NOT EDIT. Источник: roles/platform_netbird.
 #
-# Сверено с combined/config.yaml.example в репозитории вендора, а не с обзорной
-# документацией: та описывает развёртывание за обратным прокси и утверждает, что
-# TLS терминирует прокси. Для combined-сервера это неверно — он принимает
-# certFile и keyFile сам.
+# Сверено с исходником v0.76.3, а не с примером конфигурации: пример показывает
+# блок `tls` так, будто сервер терминирует TLS сам, и это ввело в заблуждение.
+# На деле `combined/cmd/root.go` загружает сертификат и результат отбрасывает,
+# оставляя лишь признак для relay. TLS терминирует nginx перед сервером — как и
+# говорила обзорная документация.
 
 server:
-  # Один порт на Management, Signal и Relay. Публичный: в него ходят и ноды, и
-  # операторы.
-  listenAddress: ":{{ platform_netbird_listen_port }}"
+  # Петля: наружу сервер выводит nginx, он же терминирует TLS. Один порт на
+  # Management, Signal и Relay — так устроен combined-сервер.
+  listenAddress: "{{ platform_netbird_http_bind_address }}:{{ platform_netbird_http_port }}"
   exposedAddress: "https://{{ platform_netbird_hostname }}:{{ platform_netbird_listen_port }}"
 
   stunPorts:
@@ -23,6 +24,11 @@ server:
   logLevel: "{{ platform_netbird_log_level }}"
   logFile: "console"
 
+  # Этот блок TLS не включает — основной слушатель остаётся HTTP, его
+  # шифрует nginx. Сертификат здесь нужен для другого: `handleTLSConfig`
+  # загружает его и возвращает признак, по которому relay объявляет себя как
+  # `rels://`, а не `rel://`. Убрать блок значит заставить relay рекламировать
+  # незашифрованный адрес при живом TLS на прокси.
   tls:
     certFile: "/etc/netbird/tls/fullchain.pem"
     keyFile: "/etc/netbird/tls/privkey.pem"
@@ -58,5 +64,9 @@ server:
     encryptionKey: "{{ platform_netbird_store_encryption_key }}"
 
   reverseProxy:
+    # Прокси стоит на этой же машине, поэтому доверенный источник — петля.
+    # Без этого сервер видел бы адрес nginx вместо адреса клиента.
+    trustedHTTPProxies:
+      - "127.0.0.1/32"
     trustedPeers:
       - "{{ platform_netbird_network }}"

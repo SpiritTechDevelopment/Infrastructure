@@ -53,6 +53,10 @@ components:
         repository: ENC[AES256_GCM,data:X1YsYPrXkOAkGM+m6Kk30/NYdmtLl/qh,iv:0wXNdPvWW41alzv67+AW6l4TSJXLsMUekJCgffOtLoI=,tag:m83m2Z3N8+8y7o0+cfHJDA==,type:str]
         tag: ENC[AES256_GCM,data:HYiA4tA/,iv:Si6EZBkl9E9mruDoDXfxyEbHcbQtpT+dDJs0W1gkiIk=,tag:DKMRVe0Mme/z2n04mK2vLA==,type:str]
         digest: ENC[AES256_GCM,data:02keZWclRr/8mPPhNgrpD/vrV+xpWeHt41u37A45bLLkvgRtJIeQms/4t5xbEVENy5P1wlprK2v8KPHsxN1qNQLjI1zeG0I=,iv:IzyoyHAqemholgUb7ei7PbshAahRM2I5EtAYZ/AhkQU=,tag:E7Nw4Jfsb86Ss3i/mEG4jg==,type:str]
+    netbird_dashboard:
+        repository: ENC[AES256_GCM,data:KfLiZDmrc7d8iIX/PwxLmpbtMg==,iv:rhaP0M0CPFHdvdepE9iKRNHnESWXILpSbCJTaSnic7c=,tag:bIGtdGDQM58GPlYarAePGw==,type:str]
+        tag: ENC[AES256_GCM,data:1s/DaDUEkQ==,iv:O1iXqlNQ2UqiajDxE5/xn+LrjuJN6h8beBkzcpXvCv4=,tag:o8rynfxx0T5s4YzEq3b8pA==,type:str]
+        digest: ENC[AES256_GCM,data:haDU4e/ysfFdsyAhPyhJImMvzUdU77AbmvdVAYw7Xo2sSzV/5LKVVg5zWB4BDuXxtwJSzb1N/PtTSUn2uk3hbM9R1IjF34Q=,iv:ecR1k75wCSFakdGRcJ9p1FDdDDOqgEnKGkiQ+5eMEWc=,tag:BePEUs5ddB4HO5v5WlNLcQ==,type:str]
 sops:
     age:
         - enc: |
@@ -82,7 +86,7 @@ sops:
             61t1waEjlucIur2RbZi3qh8d5jygSKkz0PsGpqdBnE0xANBxhU3P+A==
             -----END AGE ENCRYPTED FILE-----
           recipient: age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
-    lastmodified: "2026-08-22T21:39:52Z"
-    mac: ENC[AES256_GCM,data:QSRIRnpbeE/nCxJVEFs+KN8TM+P8qi+YXB9xCVkRmaPTz/oDZdHHULLYFTxaGNy4I/2yWpEjhJH1YVlCX0GEhTMX/w7zjR/ZRHPbMbMaB3oWCUU2ek54/WciRhdIeSgatSdnfVi40En4bOZB5/zU0WFz9jaHqiUQ/SFSPXI7mUc=,iv:UgP8KcRXP5wzvASAKD6gYQ2XkTsprVHJeDFHZvjUPrc=,tag:I0zXPvEjwRsLfS3E4IA8zQ==,type:str]
+    lastmodified: "2026-08-22T22:50:26Z"
+    mac: ENC[AES256_GCM,data:Gfp9VG2aJIaPXp7A2dB8xoHSxx1W5R6etA66TStTjaZ/3ox00sAvNY0EBM8jHOY6oSME4jjRqZMKGgz5jFHYJEiw+ttdIGtb5qv7TzYpmBez4fu2KlRup2Sqx9SNRBl3msZqd0xzalmzScAt7NjOZywB9fZb7Bl8+UwWvc/fMow=,iv:rtEHglkDVFg0ycBRvsPdc+lHcasYneUk5Tlpd+4Eqzs=,tag:dOEUfEWcXAJ4ZLCQ+PF6Nw==,type:str]
     unencrypted_suffix: _unencrypted
     version: 3.13.2

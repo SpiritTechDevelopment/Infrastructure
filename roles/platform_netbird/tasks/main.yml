@@ -7,6 +7,16 @@
       - >-
         platform_netbird_image
         is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - >-
+        platform_netbird_dashboard_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - >-
+        platform_netbird_proxy_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      # Сервер и дашборд обязаны остаться на петле: наружу их выводит прокси,
+      # и только он держит TLS. Слушатель на публичном интерфейсе отдавал бы
+      # управляющий API открытым текстом — ровно то, что уже случилось однажды.
+      - platform_netbird_http_bind_address == '127.0.0.1'
       - platform_netbird_hostname | length > 0
       - platform_netbird_hostname is match('^[A-Za-z0-9][A-Za-z0-9.-]{0,251}[A-Za-z0-9]$')
       - platform_netbird_owner_email | length > 0
@@ -116,6 +126,14 @@
       {{ (_platform_netbird_secrets.results[2].content | b64decode) | trim }}
   no_log: true
   when: not ansible_check_mode
+
+- name: Render the management overlay reverse proxy
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: "{{ platform_netbird_dir }}/nginx.conf"
+    owner: root
+    group: root
+    mode: "0600"
 
 - name: Render the management overlay compose file
   ansible.builtin.template:
