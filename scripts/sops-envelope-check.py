@@ -41,7 +41,68 @@ def encrypted_leaves(value: Any, path: str) -> list[str]:
     return issues
 
 
-def check_sops_metadata(path: Path, document: dict[str, Any]) -> list[str]:
+def load_creation_rules(root: Path) -> tuple[list[tuple[re.Pattern[str], set[str]]], list[str]]:
+    """Читает `.sops.yaml` как объявление того, кто обязан уметь расшифровать.
+
+    Возвращает правила в объявленном порядке: SOPS применяет первое совпавшее,
+    и проверка обязана вести себя так же, иначе она подтвердит не то правило,
+    по которому файл был зашифрован.
+    """
+    issues: list[str] = []
+    path = root / ".sops.yaml"
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        return [], [f"{path}: {exc}"]
+    if not isinstance(document, dict):
+        return [], [f"{path}: document must be a mapping"]
+    raw_rules = document.get("creation_rules")
+    if not isinstance(raw_rules, list) or not raw_rules:
+        return [], [f"{path}: creation_rules must be a non-empty list"]
+
+    rules: list[tuple[re.Pattern[str], set[str]]] = []
+    for index, rule in enumerate(raw_rules):
+        if not isinstance(rule, dict):
+            issues.append(f"{path}: creation_rules[{index}] must be a mapping")
+            continue
+        try:
+            pattern = re.compile(str(rule.get("path_regex", "")))
+        except re.error as exc:
+            issues.append(f"{path}: creation_rules[{index}] has an invalid path_regex: {exc}")
+            continue
+        recipients = {
+            item.strip()
+            for item in str(rule.get("age", "")).replace("\n", " ").split(",")
+            if item.strip()
+        }
+        if not recipients:
+            issues.append(f"{path}: creation_rules[{index}] declares no age recipient")
+            continue
+        for recipient in sorted(recipients):
+            if not AGE_RECIPIENT_RE.fullmatch(recipient):
+                issues.append(
+                    f"{path}: creation_rules[{index}] has an invalid recipient {recipient!r}"
+                )
+        rules.append((pattern, recipients))
+    return rules, issues
+
+
+def expected_recipients(
+    rules: list[tuple[re.Pattern[str], set[str]]], relative: str
+) -> set[str] | None:
+    for pattern, recipients in rules:
+        if pattern.search(relative):
+            return recipients
+    return None
+
+
+def check_sops_metadata(
+    path: Path,
+    document: dict[str, Any],
+    *,
+    declared: set[str] | None = None,
+    relative: str | None = None,
+) -> list[str]:
     issues: list[str] = []
     sops = document.get("sops")
     if not isinstance(sops, dict):
@@ -49,18 +110,43 @@ def check_sops_metadata(path: Path, document: dict[str, Any]) -> list[str]:
     if not ENC_RE.fullmatch(str(sops.get("mac", ""))):
         issues.append(f"{path}: encrypted SOPS MAC is missing")
     recipients = sops.get("age")
-    if not isinstance(recipients, list) or len(recipients) < 3:
-        issues.append(f"{path}: three age recipient stanzas are required")
-    else:
-        for recipient in recipients:
-            if not isinstance(recipient, dict) or not AGE_RECIPIENT_RE.fullmatch(
-                str(recipient.get("recipient", ""))
-            ):
-                issues.append(f"{path}: invalid age recipient stanza")
-            if not str(recipient.get("enc", "")).startswith(
-                "-----BEGIN AGE ENCRYPTED FILE-----"
-            ):
-                issues.append(f"{path}: wrapped age data key is missing")
+    if not isinstance(recipients, list) or not recipients:
+        issues.append(f"{path}: at least one age recipient stanza is required")
+        return issues
+
+    present: set[str] = set()
+    for recipient in recipients:
+        if not isinstance(recipient, dict) or not AGE_RECIPIENT_RE.fullmatch(
+            str(recipient.get("recipient", ""))
+        ):
+            issues.append(f"{path}: invalid age recipient stanza")
+            continue
+        present.add(str(recipient["recipient"]))
+        if not str(recipient.get("enc", "")).startswith(
+            "-----BEGIN AGE ENCRYPTED FILE-----"
+        ):
+            issues.append(f"{path}: wrapped age data key is missing")
+
+    # Равенство множеств, а не счётчик. Добавление получателя в .sops.yaml не
+    # перешифровывает существующие файлы: без `sops updatekeys` новый оператор
+    # не расшифрует ничего, а отозванный — продолжит расшифровывать всё. Второе
+    # опаснее и незаметнее, и раньше проходило проверку, потому что она считала
+    # стансы, а не сверяла их с объявлением.
+    if declared is None:
+        issues.append(
+            f"{path}: no .sops.yaml creation rule matches {relative or path.name}"
+        )
+        return issues
+    for extra in sorted(present - declared):
+        issues.append(
+            f"{path}: recipient {extra} can decrypt but is not declared in .sops.yaml"
+            " — run `sops updatekeys` after removing it"
+        )
+    for missing in sorted(declared - present):
+        issues.append(
+            f"{path}: recipient {missing} is declared in .sops.yaml but cannot decrypt"
+            " — run `sops updatekeys` after adding it"
+        )
     return issues
 
 
@@ -78,6 +164,18 @@ def load_document(path: Path, issues: list[str]) -> dict[str, Any] | None:
 
 def check(root: Path) -> list[str]:
     issues: list[str] = []
+    rules, rule_issues = load_creation_rules(root)
+    issues.extend(rule_issues)
+
+    def metadata(path: Path, document: dict[str, Any]) -> list[str]:
+        relative = path.relative_to(root).as_posix()
+        return check_sops_metadata(
+            path,
+            document,
+            declared=expected_recipients(rules, relative),
+            relative=relative,
+        )
+
     desired_root = root / "desired"
     environments_root = desired_root / "environments"
     if not environments_root.is_dir():
@@ -106,7 +204,7 @@ def check(root: Path) -> list[str]:
             continue
         payload = {key: value for key, value in document.items() if key != "sops"}
         issues.extend(f"{path}: {issue}" for issue in encrypted_leaves(payload, "$"))
-        issues.extend(check_sops_metadata(path, document))
+        issues.extend(metadata(path, document))
 
     fleet_ids = root / "desired" / "fleet-ids.yml"
     document = load_document(fleet_ids, issues)
@@ -115,7 +213,7 @@ def check(root: Path) -> list[str]:
         issues.extend(
             f"{fleet_ids}: {issue}" for issue in encrypted_leaves(payload, "$")
         )
-        issues.extend(check_sops_metadata(fleet_ids, document))
+        issues.extend(metadata(fleet_ids, document))
 
     for environment_root in environment_roots:
         environment = environment_root.name
@@ -145,12 +243,21 @@ def check(root: Path) -> list[str]:
         else:
             issues.extend(f"{topology}: {issue}" for issue in encrypted_leaves(spec, "spec"))
 
-        issues.extend(check_sops_metadata(topology, document))
+        issues.extend(metadata(topology, document))
         sops = document.get("sops")
         if not isinstance(sops, dict):
             continue
         if sops.get("encrypted_regex") != "^(spec)$":
             issues.append(f"{topology}: SOPS encrypted_regex must cover spec")
+
+    # Контракт доступа к платформе — тот самый файл, который правит выдача и
+    # отзыв операторского доступа. Без него проверка получателей не покрывала
+    # ровно ту поверхность, ради которой она и нужна.
+    platform = root / "inventories" / "bootstrap" / "platform.sops.yml"
+    if platform.is_file():
+        document = load_document(platform, issues)
+        if document is not None:
+            issues.extend(metadata(platform, document))
     return issues
 
 

@@ -21,6 +21,8 @@ class SopsEnvelopeCheckTests(unittest.TestCase):
         self._temporary = tempfile.TemporaryDirectory(prefix="sops-envelope-")
         self.addCleanup(self._temporary.cleanup)
         self.root = Path(self._temporary.name)
+        self.recipients = ["age1exampleone", "age1exampletwo", "age1examplethree"]
+        self.write_creation_rules(self.recipients)
         self.environment_root = self.root / "desired" / "environments" / "develop"
         self.environment_root.mkdir(parents=True)
         common_root = self.root / "desired" / "common"
@@ -29,15 +31,28 @@ class SopsEnvelopeCheckTests(unittest.TestCase):
             self.write_scalar_ciphertext(common_root / filename)
         self.write_scalar_ciphertext(self.root / "desired" / "fleet-ids.yml")
 
-    def sops_metadata(self) -> dict:
+    def write_creation_rules(self, recipients: list[str]) -> None:
+        (self.root / ".sops.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "creation_rules": [
+                        {"path_regex": "^desired/", "age": ", ".join(recipients)},
+                    ]
+                },
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+
+    def sops_metadata(self, recipients: list[str] | None = None) -> dict:
         encrypted = "ENC[AES256_GCM,data:x,iv:y,tag:z,type:str]"
         return {
             "age": [
                 {
-                    "recipient": f"age1example{suffix}",
+                    "recipient": recipient,
                     "enc": "-----BEGIN AGE ENCRYPTED FILE-----\nx",
                 }
-                for suffix in ("one", "two", "three")
+                for recipient in (recipients or self.recipients)
             ],
             "mac": encrypted,
         }
@@ -96,6 +111,46 @@ class SopsEnvelopeCheckTests(unittest.TestCase):
                 "mixed environment YAML" in issue
                 for issue in MODULE.check(self.root)
             )
+        )
+
+    # Два направления забытого `sops updatekeys`. Опаснее второе: оно молчит и
+    # длится сколько угодно, потому что отозванный оператор продолжает
+    # расшифровывать всё. Прежняя проверка считала стансы и пропускала оба.
+    def test_recipient_declared_but_unable_to_decrypt_is_rejected(self) -> None:
+        # Получателя добавили в .sops.yaml и не перешифровали файлы.
+        self.write_creation_rules([*self.recipients, "age1examplefour"])
+        self.write_topology()
+        issues = MODULE.check(self.root)
+        self.assertTrue(
+            any("age1examplefour" in issue and "cannot decrypt" in issue for issue in issues),
+            issues,
+        )
+
+    def test_recipient_able_to_decrypt_but_undeclared_is_rejected(self) -> None:
+        # Получателя убрали из .sops.yaml и не перешифровали: доступ остался.
+        self.write_creation_rules(self.recipients[:-1])
+        self.write_topology()
+        issues = MODULE.check(self.root)
+        self.assertTrue(
+            any(
+                self.recipients[-1] in issue and "not declared" in issue
+                for issue in issues
+            ),
+            issues,
+        )
+
+    def test_file_matching_no_creation_rule_is_rejected(self) -> None:
+        self.write_creation_rules(self.recipients)
+        (self.root / ".sops.yaml").write_text(
+            yaml.safe_dump(
+                {"creation_rules": [{"path_regex": "^nothing/", "age": "age1exampleone"}]},
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+        self.write_topology()
+        self.assertTrue(
+            any("no .sops.yaml creation rule matches" in issue for issue in MODULE.check(self.root))
         )
 
     def test_unexpected_common_yaml_is_rejected(self) -> None:
