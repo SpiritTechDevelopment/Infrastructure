@@ -1609,6 +1609,9 @@ BUNDLE_VARIABLES = {
     "platform_alertmanager_telegram_bot_token": "12345:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "platform_alertmanager_telegram_chat_id": "-100500",
     "platform_alertmanager_telegram_thread_id": "",
+    "platform_netbird_hostname": "netbird.example.invalid",
+    "platform_netbird_network": "100.90.0.0/16",
+    "platform_netbird_owner_email": "operator@example.invalid",
 }
 
 
@@ -1997,6 +2000,7 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
                     "platform_alertmanager_image",
                     "platform_loki_image",
                     "platform_alloy_image",
+                    "platform_netbird_image",
                 )
             }
             path.write_text(yaml.safe_dump(variables), encoding="utf-8")

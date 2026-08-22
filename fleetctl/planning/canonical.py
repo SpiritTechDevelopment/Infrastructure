@@ -103,6 +103,12 @@ def _control_values(state: DesiredState) -> dict[str, Any] | None:
         "secret_refs": dict(sorted(control.secret_refs.items())),
         "customer_access_writers": list(control.customer_access_writers),
         "customer_access_readers": list(control.customer_access_readers),
+        # Публичная точка хаба проецируется здесь, иначе её смена не меняла бы
+        # канонический дайджест: план сообщил бы «изменений нет», а
+        # `dns-plan.json` уже был бы другим. Ключ присутствует и когда точка не
+        # объявлена — у baseline прошлой выкатки он читается как `null`.
+        "public_hostname": control.public_hostname,
+        "public_address": control.public_address,
     }
 
 

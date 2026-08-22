@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 from fleetctl.cli import main
-from fleetctl.compiler import render_files
+from fleetctl.compiler import compile_dns_plan, render_files
 from fleetctl.validation import DesiredStateInvalid, validate_environment
 
 
@@ -426,6 +426,43 @@ class DesiredStateValidationTests(unittest.TestCase):
             mutate,
         )
         self.assertIn("DNS_ZONE", codes)
+
+    def test_control_public_endpoint_must_be_declared_whole(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            del document["spec"]["control"]["public_endpoint"]["address"]
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("SCHEMA", codes)
+
+    def test_control_public_endpoint_address_must_be_an_ip_address(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["control"]["public_endpoint"]["address"] = "not-an-address"
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("CONTROL_PUBLIC_ENDPOINT", codes)
+
+    def test_control_public_endpoint_hostname_must_belong_to_environment_zone(self) -> None:
+        def mutate(document: dict[str, object]) -> None:
+            document["spec"]["control"]["public_endpoint"]["hostname"] = "control.example.net"
+
+        codes = self.validate_mutated_fixture("environments/develop/environment.yml", mutate)
+        self.assertIn("CONTROL_PUBLIC_ENDPOINT", codes)
+
+    def test_control_without_public_endpoint_stays_valid(self) -> None:
+        # Поле необязательное намеренно: baseline прошлой выкатки его не
+        # содержит, и план против неё обязан грузиться. Отдельный путь, а не
+        # `validate_mutated_fixture`, — тот утверждает отказ.
+        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            desired_root = Path(temporary_directory) / "desired"
+            shutil.copytree(source, desired_root)
+            target = desired_root / "environments/develop/environment.yml"
+            document = yaml.safe_load(target.read_text(encoding="utf-8"))
+            del document["spec"]["control"]["public_endpoint"]
+            target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+        self.assertIsNone(state.environment.control.public_hostname)
+        self.assertEqual(compile_dns_plan(state)["records"][0]["id"], "develop-entry-nl")
 
     def test_common_files_reject_unknown_fields(self) -> None:
         def mutate(document: dict[str, object]) -> None:

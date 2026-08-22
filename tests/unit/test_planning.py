@@ -152,6 +152,27 @@ class ImpactPlanningTests(unittest.TestCase):
         )
         self.assertEqual(plan.affected["dns_nodes"], ())
 
+    def test_control_endpoint_change_is_visible_as_a_dns_change(self) -> None:
+        # Запись хаба принадлежит не ноде, поэтому в `dns_nodes` её не выразить.
+        # Без отдельной области смена адреса выглядела бы как выкатка, не
+        # трогающая DNS, — при том что `dns-plan.json` уже другой.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            baseline_root = copy_valid_desired(root, "baseline")
+            current_root = copy_valid_desired(root, "current")
+            environment_path = current_root / "environments" / "develop" / "environment.yml"
+            environment = load_yaml(environment_path)
+            environment["spec"]["control"]["public_endpoint"]["address"] = "192.0.2.2"
+            save_yaml(environment_path, environment)
+
+            baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
+            current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
+            plan = build_impact_plan(current, baseline)
+
+        self.assertEqual(plan.affected["dns_control"], ("develop",))
+        # Ноды при этом не трогаются: у хаба своя запись.
+        self.assertEqual(plan.affected["dns_nodes"], ())
+
     def test_node_override_affects_only_that_node(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

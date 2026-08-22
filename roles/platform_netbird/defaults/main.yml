@@ -1,0 +1,54 @@
+---
+# Управляющий overlay контура. Заменяет WireGuard в роли транспорта; сам
+# WireGuard остаётся спящим break-glass, см. docs/architecture/NETBIRD_MIGRATION.md.
+
+# Пустой по умолчанию: образ обязан приезжать закреплённым по digest из
+# desired/common/components.yml через scripts/platform-component-vars.py.
+# Роль отказывается работать с тегом.
+platform_netbird_image: ""
+
+platform_netbird_dir: /etc/spiritvpn/netbird
+platform_netbird_data_dir: /var/lib/spiritvpn/netbird
+
+# Публичное имя хаба. Оно же идёт в exposedAddress и в issuer встроенного IdP,
+# поэтому обязано совпадать с A-записью и с SAN сертификата.
+platform_netbird_hostname: ""
+
+# Один порт на Management, Signal и Relay — так устроен combined-сервер.
+platform_netbird_listen_port: 443
+# STUN. Проксировать UDP нельзя, поэтому порт публичный; цена принята
+# сознательно (раздел 3.7 документа о переходе).
+platform_netbird_stun_port: 3478
+
+# По умолчанию у NetBird metricsPort = 9090, а это порт Prometheus на хабе.
+# Совпадение означало бы либо неподнявшийся контейнер, либо метрики контура на
+# публичном интерфейсе. Оба слушателя уводятся на петлю и на свободные порты.
+platform_netbird_metrics_bind_address: 127.0.0.1
+platform_netbird_metrics_port: 9099
+platform_netbird_healthcheck_bind_address: 127.0.0.1
+platform_netbird_healthcheck_port: 9000
+
+# TLS терминирует сам сервер — обратный прокси не нужен. Материал подаётся
+# файлами, уже лежащими на хабе, а не переменными: приватный ключ не должен
+# проходить через факты Ansible и через SOPS-бандл третьей копией.
+platform_netbird_tls_certificate_file: /etc/spiritvpn/netbird/tls/fullchain.pem
+platform_netbird_tls_private_key_file: /etc/spiritvpn/netbird/tls/privkey.pem
+
+# Секреты, которые сервер принимает значениями, а не путями. Заводятся на хабе
+# один раз и переживают выкатки — как пароль администратора Grafana рядом.
+# Пересоздание разлогинило бы операторов и порвало бы relay.
+platform_netbird_auth_secret_file: /var/lib/spiritvpn/netbird-auth-secret
+platform_netbird_store_encryption_key_file: /var/lib/spiritvpn/netbird-store-encryption-key
+
+# Первый администратор встроенного IdP. Пароль генерируется здесь же и
+# показывается оператору один раз — сменить его следует после первого входа.
+platform_netbird_owner_email: ""
+platform_netbird_owner_password_file: /var/lib/spiritvpn/netbird-owner-password
+
+# Оверлейная сеть NetBird. Объявляется, а не выясняется: адрес резолвера и
+# доверенные peer-сети — чистые функции от неё.
+platform_netbird_network: ""
+
+platform_netbird_log_level: info
+platform_netbird_log_max_size: 10m
+platform_netbird_log_max_files: "3"

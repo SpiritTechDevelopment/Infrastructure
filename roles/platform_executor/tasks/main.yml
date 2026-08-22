@@ -215,7 +215,10 @@
         'platform_vault_tls_server_name': platform_vault_tls_server_name,
         'platform_alertmanager_telegram_bot_token': platform_alertmanager_telegram_bot_token,
         'platform_alertmanager_telegram_chat_id': platform_alertmanager_telegram_chat_id,
-        'platform_alertmanager_telegram_thread_id': platform_alertmanager_telegram_thread_id
+        'platform_alertmanager_telegram_thread_id': platform_alertmanager_telegram_thread_id,
+        'platform_netbird_hostname': platform_netbird_hostname,
+        'platform_netbird_network': platform_netbird_network,
+        'platform_netbird_owner_email': platform_netbird_owner_email
       } | to_nice_yaml(indent=2, sort_keys=true) }}
     dest: "{{ platform_runtime_vars_file }}"
     owner: root

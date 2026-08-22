@@ -339,6 +339,7 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                         control_spec["authorization"]["customer_access_readers"]
                     ),
                     bot=_to_bot(control_spec.get("bot")),
+                    **_to_public_endpoint(control_spec.get("public_endpoint")),
                 )
             return Environment(
                 object_id=object_id,
@@ -405,6 +406,16 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 source=path,
             )
     raise AssertionError(f"unreachable kind: {document['kind']}")
+
+
+def _to_public_endpoint(endpoint_spec: dict[str, Any] | None) -> dict[str, str | None]:
+    """Публичное имя и адрес хаба; отсутствие блока — не ошибка, а прошлая схема."""
+
+    spec = endpoint_spec or {}
+    return {
+        "public_hostname": spec.get("hostname"),
+        "public_address": spec.get("address"),
+    }
 
 
 def _to_bot(bot_spec: dict[str, Any] | None) -> BotRuntime | None:

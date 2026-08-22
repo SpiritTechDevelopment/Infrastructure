@@ -21,6 +21,7 @@ AFFECTED_KEYS = (
     "backend_nodes",
     "node_runtime",
     "dns_nodes",
+    "dns_control",
     "monitoring",
     "management",
 )
@@ -105,6 +106,11 @@ def build_impact_plan(
             affected["node_runtime"].update(current_instances)
         if "dns_zone" in fields:
             affected["dns_nodes"].update(current_dns_nodes | baseline_dns_nodes)
+        if "control" in fields and _control_endpoint_changed(current_data, baseline_data):
+            # Запись хаба принадлежит не ноде, поэтому в `dns_nodes` её не
+            # выразить; отмечаем сам контур, чтобы смена адреса не выглядела
+            # как выкатка, не трогающая DNS.
+            affected["dns_control"].add(current.environment.object_id)
         if "management_network" in fields:
             affected["monitoring"].update(_active_instance_ids(current_instances))
 
@@ -366,6 +372,17 @@ def _active_instance_ids(instances: dict[str, dict[str, Any]]) -> set[str]:
         for instance_id, instance in instances.items()
         if instance["target_state"] != "retired"
     }
+
+
+def _control_endpoint_changed(current_data: dict[str, Any], baseline_data: dict[str, Any]) -> bool:
+    """Сменилась ли публичная точка хаба внутри изменившегося блока `control`."""
+
+    current_control = current_data["environment"].get("control") or {}
+    baseline_control = baseline_data["environment"].get("control") or {}
+    return any(
+        current_control.get(field) != baseline_control.get(field)
+        for field in ("public_hostname", "public_address")
+    )
 
 
 def _changed_fields(current: dict[str, Any], baseline: dict[str, Any], *, exclude: tuple[str, ...] = ()) -> list[str]:

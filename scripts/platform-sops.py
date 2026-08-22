@@ -30,6 +30,13 @@ EXPECTED_VARIABLE_KEYS = {
     "platform_alertmanager_telegram_thread_id",
     "platform_fail2ban_ignore_cidrs",
     "platform_github_ssh_keys",
+    # Управляющий оверлей. Набор ключей сверяется на точное совпадение, поэтому
+    # эти три обязаны появиться в бандле тем же коммитом, что и здесь: код
+    # впереди бандла роняет выкатку на «unexpected key set», бандл впереди кода
+    # — тоже.
+    "platform_netbird_hostname",
+    "platform_netbird_network",
+    "platform_netbird_owner_email",
     "platform_operator_ssh_public_keys",
     "platform_runner",
     "platform_ssh_allowed_cidrs",

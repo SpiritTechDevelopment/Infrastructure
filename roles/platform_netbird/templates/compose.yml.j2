@@ -1,0 +1,41 @@
+{{ ansible_managed | comment }}
+name: spiritvpn-netbird
+
+# Предел на логи контейнера. См. тот же блок в roles/platform_observability: у
+# json-file нет предела по умолчанию, а daemon.json потребовал бы перезапуска
+# Docker, то есть простоя всего, что крутится на хабе.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "{{ platform_netbird_log_max_size }}"
+    max-file: "{{ platform_netbird_log_max_files }}"
+
+services:
+  netbird:
+    image: {{ platform_netbird_image }}
+    restart: unless-stopped
+    logging: *logging
+    stop_grace_period: 30s
+    # Сеть хоста, как у Prometheus рядом, и по более жёсткой причине: STUN
+    # обязан видеть настоящий адрес источника. За NAT Docker он увидел бы адрес
+    # моста, и определение внешнего адреса peer'а — то единственное, ради чего
+    # STUN существует — сломалось бы молча.
+    network_mode: host
+    command:
+      - --config
+      - /etc/netbird/config.yaml
+    volumes:
+      - {{ platform_netbird_dir }}/config.yaml:/etc/netbird/config.yaml:ro
+      - {{ platform_netbird_tls_certificate_file }}:/etc/netbird/tls/fullchain.pem:ro
+      - {{ platform_netbird_tls_private_key_file }}:/etc/netbird/tls/privkey.pem:ro
+      - {{ platform_netbird_data_dir }}:/var/lib/netbird
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O- http://{{ platform_netbird_healthcheck_bind_address }}:{{
+          platform_netbird_healthcheck_port }}/ >/dev/null || exit 1
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

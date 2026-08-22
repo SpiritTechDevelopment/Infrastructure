@@ -74,6 +74,15 @@ class ControlPlane:
     # the last deployed baseline, and that baseline predates this field: making
     # it mandatory would make every plan against it fail to load.
     bot: BotRuntime | None = None
+    # Публичное имя и адрес самого хаба — того, что обслуживает управляющие
+    # поверхности контура. Объявлены здесь, потому что DNS-план проецирует
+    # desired state, а не читает контракт платформы.
+    #
+    # Необязательные по той же причине, что и `bot`: прошлая выкатка их не
+    # содержит. Объявляются только вместе — запись без адреса и адрес без
+    # имени одинаково бессмысленны, это проверяет валидация.
+    public_hostname: str | None = None
+    public_address: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

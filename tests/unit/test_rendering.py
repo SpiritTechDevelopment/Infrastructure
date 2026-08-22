@@ -99,6 +99,16 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(
             plan["records"],
             [
+                # Хаб идёт первым и вне сортировки по инстансам: инстанса у него
+                # нет, а порядок обязан быть детерминированным.
+                {
+                    "id": "control",
+                    "name": "control.develop.example.invalid",
+                    "proxied": False,
+                    "record_type": "A",
+                    "ttl_seconds": 60,
+                    "value": "192.0.2.1",
+                },
                 {
                     "id": "develop-entry-nl",
                     "instance_id": "develop-entry-nl-01",
@@ -216,8 +226,10 @@ class RenderingTests(unittest.TestCase):
             files = render_files(state)
 
         dns = json.loads(files["dns-plan.json"])
+        # Не у всякой записи есть инстанс: запись хаба принадлежит контуру, а не
+        # ноде, и ключей инстанса не несёт вовсе — а не несёт их пустыми.
         self.assertEqual(
-            [record["instance_id"] for record in dns["records"]],
+            [record["instance_id"] for record in dns["records"] if "instance_id" in record],
             ["develop-entry-nl-01", "develop-exit-de-01"],
         )
         monitoring = json.loads(files["monitoring-targets.json"])

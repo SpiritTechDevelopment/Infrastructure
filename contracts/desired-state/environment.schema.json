@@ -106,6 +106,15 @@
                 "customer_access_readers": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 253}}
               }
             },
+            "public_endpoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["hostname", "address"],
+              "properties": {
+                "hostname": {"type": "string", "minLength": 1, "maxLength": 253},
+                "address": {"type": "string", "minLength": 1, "maxLength": 45}
+              }
+            },
             "bot": {
               "type": "object",
               "additionalProperties": false,
