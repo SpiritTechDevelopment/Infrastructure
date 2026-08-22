@@ -14,8 +14,23 @@ platform_netbird_data_dir: /var/lib/spiritvpn/netbird
 # поэтому обязано совпадать с A-записью и с SAN сертификата.
 platform_netbird_hostname: ""
 
-# Один порт на Management, Signal и Relay — так устроен combined-сервер.
+# 443 держит nginx, а не сам NetBird. Combined-сервер TLS на своём основном
+# слушателе не терминирует: `handleTLSConfig` загружает сертификат, но
+# вызывающий код результат отбрасывает и оставляет лишь признак для relay.
+# Проверено по исходнику v0.76.3 и подтверждено на живом сервере, который отдал
+# простой HTTP на 443.
 platform_netbird_listen_port: 443
+
+# Сам сервер и дашборд слушают петлю; наружу их выводит прокси.
+platform_netbird_http_bind_address: 127.0.0.1
+platform_netbird_http_port: 8081
+platform_netbird_dashboard_port: 8080
+
+# Дашборд — отдельный контейнер, не часть combined-образа.
+platform_netbird_dashboard_image: ""
+# Терминатор TLS. Образ переиспользуется из компонента nginx_mask: это тот же
+# nginx, и второй pin того же софта означал бы две версии на один контур.
+platform_netbird_proxy_image: ""
 # STUN. Проксировать UDP нельзя, поэтому порт публичный; цена принята
 # сознательно (раздел 3.7 документа о переходе).
 platform_netbird_stun_port: 3478

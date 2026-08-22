@@ -1971,6 +1971,8 @@ class HardenedHubBundleDeliveryTests(unittest.TestCase):
                     "platform_loki_image",
                     "platform_alloy_image",
                     "platform_netbird_image",
+                    "platform_netbird_dashboard_image",
+                    "platform_netbird_proxy_image",
                 )
             }
             path.write_text(yaml.safe_dump(variables), encoding="utf-8")

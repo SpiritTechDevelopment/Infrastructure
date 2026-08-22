@@ -1,0 +1,77 @@
+{{ ansible_managed | comment }}
+# GENERATED — DO NOT EDIT. Источник: roles/platform_netbird.
+#
+# Маршруты взяты из документации NetBird для внешнего обратного прокси, вариант
+# «Combined — Host», и не сочинены: management и signal ходят нативным gRPC,
+# relay — по WebSocket, дашборд — обычным HTTP, и всё это на одном имени.
+# Простого proxy_pass здесь недостаточно.
+
+events {
+  worker_connections 1024;
+}
+
+http {
+  access_log off;
+  server_tokens off;
+
+  upstream netbird_dashboard {
+    server 127.0.0.1:{{ platform_netbird_dashboard_port }};
+    keepalive 10;
+  }
+
+  upstream netbird_server {
+    server {{ platform_netbird_http_bind_address }}:{{ platform_netbird_http_port }};
+  }
+
+  # Порт 80 намеренно не слушается. Перенаправление с HTTP существует ради
+  # людей, набирающих имя руками, а здесь единственные люди — операторы. Лишний
+  # открытый порт на машине с Vault этого не стоит.
+  server {
+    listen {{ platform_netbird_listen_port }} ssl;
+    http2 on;
+    server_name {{ platform_netbird_hostname }};
+
+    ssl_certificate     /etc/netbird/tls/fullchain.pem;
+    ssl_certificate_key /etc/netbird/tls/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # Соединения gRPC живут долго: агент нод держит их постоянно.
+    client_header_timeout 1d;
+    client_body_timeout 1d;
+
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Scheme $scheme;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host $host;
+    grpc_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+    # WebSocket: relay и мультиплексированный прокси.
+    location ~ ^/(relay|ws-proxy/) {
+      proxy_pass http://netbird_server;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection "Upgrade";
+      proxy_set_header Host $host;
+      proxy_read_timeout 1d;
+    }
+
+    # Нативный gRPC: signal и management.
+    location ~ ^/(signalexchange\.SignalExchange|management\.(ManagementService|ProxyService))/ {
+      grpc_pass grpc://netbird_server;
+      grpc_read_timeout 1d;
+      grpc_send_timeout 1d;
+      grpc_socket_keepalive on;
+    }
+
+    # HTTP: API и встроенный IdP.
+    location ~ ^/(api|oauth2)/ {
+      proxy_pass http://netbird_server;
+      proxy_set_header Host $host;
+    }
+
+    location / {
+      proxy_pass http://netbird_dashboard;
+    }
+  }
+}

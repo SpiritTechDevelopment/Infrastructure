@@ -26,6 +26,9 @@ PLATFORM_COMPONENT_VARIABLES = {
     "loki": "platform_loki_image",
     "alloy": "platform_alloy_image",
     "netbird": "platform_netbird_image",
+    "netbird_dashboard": "platform_netbird_dashboard_image",
+    # Тот же nginx, что держит маскировочный сайт на нодах: один софт — один pin.
+    "nginx_mask": "platform_netbird_proxy_image",
 }
 
 

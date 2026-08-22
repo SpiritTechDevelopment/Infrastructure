@@ -20,6 +20,8 @@ services:
     # обязан видеть настоящий адрес источника. За NAT Docker он увидел бы адрес
     # моста, и определение внешнего адреса peer'а — то единственное, ради чего
     # STUN существует — сломалось бы молча.
+    #
+    # HTTP при этом слушается на петле: наружу сервер выводит прокси.
     network_mode: host
     command:
       - --config
@@ -37,3 +39,38 @@ services:
     #
     # Готовность проверяет задача роли сразу после этой: она ходит на
     # healthcheckAddress с самого хоста, ничего не требуя от содержимого образа.
+
+  dashboard:
+    image: {{ platform_netbird_dashboard_image }}
+    restart: unless-stopped
+    logging: *logging
+    # Не сеть хоста: образ слушает :80 и на хосте занял бы этот порт целиком.
+    # Публикация на петлю оставляет его доступным одному лишь прокси и не
+    # требует от образа уметь менять адрес привязки.
+    ports:
+      - "127.0.0.1:{{ platform_netbird_dashboard_port }}:80"
+    environment:
+      NETBIRD_MGMT_API_ENDPOINT: "https://{{ platform_netbird_hostname }}"
+      NETBIRD_MGMT_GRPC_API_ENDPOINT: "https://{{ platform_netbird_hostname }}"
+      AUTH_AUTHORITY: "https://{{ platform_netbird_hostname }}/oauth2"
+      AUTH_CLIENT_ID: "netbird-dashboard"
+      AUTH_AUDIENCE: "netbird-dashboard"
+      AUTH_SUPPORTED_SCOPES: "openid profile email offline_access api"
+      AUTH_REDIRECT_URI: "/nb-auth"
+      AUTH_SILENT_REDIRECT_URI: "/nb-silent-auth"
+      USE_AUTH0: "false"
+
+  proxy:
+    image: {{ platform_netbird_proxy_image }}
+    restart: unless-stopped
+    logging: *logging
+    # Сеть хоста: прокси обязан доставать и сервер на петле, и дашборд на
+    # опубликованном порту петли, и слушать 443 на публичном интерфейсе.
+    network_mode: host
+    volumes:
+      - {{ platform_netbird_dir }}/nginx.conf:/etc/nginx/nginx.conf:ro
+      - {{ platform_netbird_tls_certificate_file }}:/etc/netbird/tls/fullchain.pem:ro
+      - {{ platform_netbird_tls_private_key_file }}:/etc/netbird/tls/privkey.pem:ro
+    depends_on:
+      - netbird
+      - dashboard
