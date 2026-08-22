@@ -1,598 +1,611 @@
-# AGENTS.md — требования и разбор состояния репозитория
+# AGENTS.md — requirements and repository assessment
 
-Файл читают и люди, и агенты. Первая часть — обязательные требования к работе с
-репозиторием. Вторая — разбор фактического состояния: что устроено верно, что
-сломано и что из этого уже исправлено.
-
----
-
-## 1. Требования
-
-### 1.1. Язык
-
-**Вся документация и все комментарии в этом репозитории пишутся на русском.**
-
-Относится к:
-
-- файлам `*.md` в любом каталоге;
-- комментариям в `roles/`, `playbooks/`, `.github/workflows/`, `scripts/`,
-  `tests/`, `fleetctl/` — включая docstring'и Python;
-- сообщениям об ошибках и `fail_msg`, которые читает оператор;
-- телу и заголовку коммита.
-
-Не переводятся и остаются как есть: идентификаторы, имена файлов, ключи YAML и
-JSON, флаги команд, названия продуктов и протоколов, цитаты из чужих контрактов
-и вендоренные документы. Смешивать язык внутри одного предложения ради перевода
-термина не нужно: `nftables`, `conntrack`, `digest`, `overlay` остаются собой.
-
-Требование действует на всё, что пишется начиная с его появления. Ретроспективный
-перевод накопленного идёт по мере правки файлов, а не отдельной механической
-волной: диффф на три тысячи строк, не меняющий поведения, невозможно
-отревьюить, а именно ревью здесь и есть смысл требования.
-
-Текущее состояние соответствия — раздел [6.7](#67-соответствие-требованию-о-языке).
-
-### 1.2. Документация и источник истины
-
-Нормативной архитектурной спецификации в репозитории нет намеренно. Документ,
-разошедшийся с кодом, источником истины не является — он хуже отсутствующего,
-потому что ему верят.
-
-- Устройство работающей системы описывают `desired/`, `contracts/`, `fleetctl/`,
-  `roles/`, `playbooks/` и [руководство оператора](docs/operations/INFRA_V1_GUIDE_RU.md).
-- Документ, который нельзя проверить кодом или прогоном, не объявляется
-  нормативным.
-- Снимок состояния реализации с датой в заголовке устаревает молча. Такой
-  документ либо обновляется вместе с изменением, либо не заводится.
-
-### 1.3. Что нельзя писать в этот файл
-
-Здесь нет и не должно быть адресов, доменов, номеров портов, ключей, digest'ов
-и содержимого сертификатов — по тому же правилу репозитория, что и везде
-(«Не коммитить открытые IP, домены, порты, сертификаты, токены или ключи»).
-Конкретные значения называются путём к ключу желаемого состояния.
+This file is written for AI agents working on the repository. Part one is the
+binding requirements. Part two is an assessment of the actual state: what is
+built correctly, what is broken, and which of it has already been fixed.
 
 ---
 
-## 2. Что это за репозиторий
+## 1. Requirements
 
-Управляющий GitOps-репозиторий VPN-флота на VLESS/REALITY. Направление
-изменения — Git → управляющий хост → серверы; обнаруженное состояние сервера
-никогда не записывается обратно как желаемое. Три слоя:
+### 1.1. Language
 
-| Слой | Чем описан | Где |
+**All documentation and all comments in this repository are written in Russian.**
+
+This covers:
+
+- every `*.md` file in every directory;
+- comments in `roles/`, `playbooks/`, `.github/workflows/`, `scripts/`,
+  `tests/`, `fleetctl/` — including Python docstrings;
+- error messages and `fail_msg` text that an operator reads;
+- commit subjects and bodies.
+
+Not translated, left as-is: identifiers, file names, YAML and JSON keys, command
+flags, product and protocol names, quotations from external contracts, and
+vendored documents. There is no need to mix languages inside a sentence to
+translate a term — `nftables`, `conntrack`, `digest`, `overlay` stay as they are.
+
+**This file is the single exception and stays in English.** `AGENTS.md` is not
+project documentation; it is an interface addressed to AI agents, and English is
+the working language of that interface. Everything it *describes* still follows
+the rule above. Do not translate this file, and do not treat its language as
+precedent for anything else.
+
+The requirement applies to everything written from the moment it was introduced.
+Retroactive translation of what already exists happens as files are edited, not
+as one mechanical wave: a three-thousand-line diff that changes no behaviour
+cannot be reviewed, and review is precisely the point of the requirement.
+
+Current compliance is tracked in [6.7](#67-language-requirement-compliance).
+
+### 1.2. Documentation and the source of truth
+
+There is deliberately no normative architecture specification in this
+repository. A document that has diverged from the code is not a source of
+truth — it is worse than no document at all, because people believe it.
+
+- The behaviour of the running system is described by `desired/`, `contracts/`,
+  `fleetctl/`, `roles/`, `playbooks/` and the
+  [operator guide](docs/operations/INFRA_V1_GUIDE_RU.md).
+- A document that cannot be checked against code or a run is not declared
+  normative.
+- A point-in-time status snapshot with a date in its header goes stale silently.
+  Such a document is either updated together with the change it describes, or
+  not created at all.
+
+### 1.3. What must never appear in this file
+
+No addresses, domains, port numbers, keys, digests or certificate material —
+by the same repository rule that applies everywhere else ("Не коммитить открытые
+IP, домены, порты, сертификаты, токены или ключи"). Concrete values are referred
+to by their desired-state key path instead.
+
+---
+
+## 2. What this repository is
+
+A GitOps control repository for a VLESS/REALITY VPN fleet. Change flows
+Git → management host → servers; observed server state is never written back as
+desired state. Three layers:
+
+| Layer | Expressed in | Location |
 |---|---|---|
-| Желаемое состояние | YAML под SOPS | `desired/` |
-| Компилятор | Python | `fleetctl/` |
-| Механизм применения | Ansible | `roles/`, `playbooks/` |
+| Desired state | SOPS-encrypted YAML | `desired/` |
+| Compiler | Python | `fleetctl/` |
+| Application mechanism | Ansible | `roles/`, `playbooks/` |
 
-`fleetctl` компилирует зашифрованную топологию в планы нод, инвентарь Ansible,
-план управляющего контура, цели мониторинга, план DNS и манифест бэкенда.
-Ansible потребляет только скомпилированные артефакты: `roles/compiled_node_plan`
-— единственная точка перевода плана во входы ролей, и она отказывается работать
-с планом, не принадлежащим текущему хосту
+`fleetctl` compiles the encrypted topology into node plans, an Ansible
+inventory, a control plan, monitoring targets, a DNS plan and a backend
+manifest. Ansible consumes only compiled artifacts: `roles/compiled_node_plan`
+is the single translation point from plan to role inputs, and it refuses to run
+against a plan that does not belong to its inventory host
 ([tasks/main.yml](roles/compiled_node_plan/tasks/main.yml)).
 
-### Проверенное состояние
+### Verified state
 
-- **Тесты**: 304 проходят, 7 пропущены (`SPIRITVPN_SKIP_LIVE_DESIRED=1`).
-- **Линт**: `make lint` чистый — ansible-lint 0 ошибок на 115 файлах, профиль
-  `production` проходит.
-- **Флот** (по локальным артефактам `build/`, они gitignored): один управляющий
-  хост, одна входная и одна выходная нода, управляющий оверлей WireGuard,
-  образы нод закреплены по digest.
+- **Tests**: 304 pass, 7 skipped (`SPIRITVPN_SKIP_LIVE_DESIRED=1`).
+- **Lint**: `make lint` clean — ansible-lint 0 failures across 115 files, the
+  stricter `production` profile passes.
+- **Fleet** (from the gitignored local `build/` artifacts): one management host,
+  one entry node, one exit node, a WireGuard management overlay, node images
+  pinned by digest.
 
-Репозиторий заметно выше среднего. Модель безопасности связная и в основном
-выражена кодом, а не прозой. Находки ниже настоящие, но лежат на прочном
-основании.
+This repository is well above average. The security model is coherent and mostly
+expressed in code rather than prose. The findings below are real, but they sit
+on a solid foundation.
 
 ---
 
 ## 3. CI/CD
 
-### 3.1. Что устроено верно
+### 3.1. What is built correctly
 
-- **Разделённое доверие.** Публичные раннеры GitHub не держат ключа
-  расшифровки: они проверяют структуру SOPS-конвертов и компилируют открытую
-  fixture. Реальную топологию открывает только выделенный раннер с локальной
-  age identity (`ci.yml`, задача `trusted-desired-state`).
-- **Передача точного SHA.** Ни одна выкатка не берёт «последний доступный»
-  коммит: проверяются равенство `git rev-parse HEAD` запрошенному SHA и
-  достижимость из `origin/main`
+- **Split trust.** Public GitHub runners hold no decryption identity: they
+  validate SOPS envelope structure and compile a plaintext fixture. Only the
+  dedicated runner with a local age identity opens the real topology
+  (`ci.yml`, job `trusted-desired-state`).
+- **Exact-SHA handoff.** No deployment picks a "latest available" commit:
+  `git rev-parse HEAD` is asserted equal to the requested SHA, and reachability
+  from `origin/main` is asserted
   ([fleet-deploy.yml](.github/workflows/fleet-deploy.yml)).
-- **Учётные данные не пересекают границу.** Раннер отдаёт Git bundle на
-  stdin форсированной команде по SSH. `scripts/platform-remote.sh` проверяет
-  каждый аргумент якорным регулярным выражением, `authorized_keys` привязывает
-  ключ к одной среде через `restrict,command=`
+- **Credentials never cross the boundary.** The runner hands a Git bundle over
+  stdin to a forced SSH command. `scripts/platform-remote.sh` validates every
+  argument with anchored regexes, `authorized_keys` binds each key to one
+  environment via `restrict,command=`
   ([authorized_keys.j2](roles/platform_executor/templates/authorized_keys.j2)),
-  а `spiritvpn-github-command` перепроверяет всё заново на стороне хаба. Две
-  независимые проверки — это не дублирование, а разные границы доверия.
-- **Право записи изолировано.** `contents: write` живёт в единственной задаче
-  `promote`, у которой нет ни SSH-ключа, ни бандла, ни доступа к хабу.
-  Перестановка ссылки идёт compare-and-swap с обеих сторон.
-- **Нулевой код возврата не считается успехом.** `deployment-record.py` разбирает
-  транскрипт исполнителя и решает, принял ли бэкенд манифест, прежде чем ссылка
-  сдвинется.
-- **Действия закреплены по SHA коммита**, версия — в комментарии рядом.
-- **`prod` исключён из автоматического пути**, причина записана в точке решения.
+  and `spiritvpn-github-command` revalidates everything server-side. Two
+  independent checks — not duplication, but two different trust boundaries.
+- **Write access is isolated.** `contents: write` lives in the single `promote`
+  job, which has no SSH key, no bundle and no hub access. The ref moves by
+  compare-and-swap on both ends.
+- **A zero exit code is not treated as success.** `deployment-record.py` parses
+  the executor transcript to decide whether the backend actually accepted the
+  manifest before the ref may advance.
+- **Actions are pinned by commit SHA**, with the version in a trailing comment.
+- **`prod` is excluded from the automatic path**, with the reason recorded at
+  the point of decision.
 
-### 3.2. CI-1: push из нескольких коммитов недовыкатывался — **исправлено**
+### 3.2. CI-1: multi-commit pushes were under-deployed — **fixed**
 
-`BEFORE` не задавался никем, и в CI работала ветка умолчания, подставлявшая
-родителя головного коммита. Push из нескольких коммитов разбирался так, будто
-существует только последний: контуры остальных не выкатывались, а прогон
-оставался зелёным. Ровно тот тихий недовыкат, против которого шаг и построен.
+`BEFORE` was never set, so CI always took the default branch that substituted
+the parent of the head commit. A push of several commits was analysed as if only
+the last one existed: the contours of the rest were never deployed, and the run
+stayed green. Exactly the silent under-deployment the step exists to prevent.
 
-Теперь база берётся из головного коммита прошлого успешного прогона этого же
-workflow, а шаг `split` без неё отказывается работать. Один push даёт один
-прогон CI и один прогон сверки, поэтому такой коммит — в точности состояние до
-текущего push; дельта упавшего прогона доезжает следующим. Когда успешного
-прогона в истории нет, база — пустое дерево: сверяются все контуры, а не
-угадывается неизвестное.
+The baseline is now the head commit of the last *successful* run of this same
+workflow, and `split` refuses to run without one. One push produces one CI run
+and one reconcile run, so that commit is precisely the state before the current
+push; the delta of a failed run carries into the next comparison. With no
+successful run in history the baseline is the empty tree — every contour
+reconciles rather than guessing at the unknown.
 
-Почему дефект пережил выделенный набор тестов, стоит записать отдельно:
-`tests/unit/test_desired_state_detect.py` выполняет настоящий скрипт шага, но
-**подставляет `BEFORE` сам**. В CI работала ветка умолчания, в тестах — нет.
-Обе стороны были правы относительно того кода, который видели.
+Why the defect survived a dedicated test suite is worth recording:
+`tests/unit/test_desired_state_detect.py` executes the real step script but
+**injects `BEFORE` itself**. Production took the default branch; the tests never
+did. Both sides were correct about the code they could see.
 
-Первая версия исправления имела собственный дефект: запрос к API стоял внутри
-подстановки процесса, чей код возврата не виден ни `set -e`, ни `pipefail`.
-Временная ошибка сети читалась бы как «успешных сверок не было» и разворачивала
-бы полную выкатку всех контуров. Запрос вынесен в отдельную команду, её падение
-останавливает шаг.
+The first version of the fix had a defect of its own: the API call sat inside a
+process substitution, whose exit status is invisible to both `set -e` and
+`pipefail`. A transient network error would have read as "no successful
+reconcile exists" and triggered a full deployment of every contour. The query is
+now a separate command whose failure stops the step.
 
-Закреплено восемью тестами: покрытие многокоммитного push, снимок прежнего
-поведения как дефекта, две проверки проводки и четыре на сам шаг базы
-(достижимый прогон, коммит, потерянный force-push'ем, пустая история, сбой
-запроса).
+Locked in by eight tests: multi-commit push coverage, a snapshot of the old
+behaviour as a defect, two wiring guards, and four on the baseline step itself
+(reachable run, commit lost to force-push, empty history, failing query).
 
-### 3.3. CI-2: недостижимая ветка в определении контуров
+### 3.3. CI-2: unreachable branch in contour detection
 
-Ветка `*/environment.yml`
-([desired-state-deploy.yml](.github/workflows/desired-state-deploy.yml))
-разделяет control и fleet сравнением поддеревьев `.spec.control` через `yq`.
-Файла `environment.yml` под `desired/environments/*/` нет — там только
-`topology.sops.yml`. Ветка недостижима в рабочем контуре и молча зависит от
-наличия `yq` на образе раннера. В тестах она, наоборот, покрыта: fixture его
-создаёт. Оставлена намеренно — удаление сделало бы будущий `environment.yml`
-видимым только для fleet, то есть завело бы новый недовыкат.
+The `*/environment.yml` branch
+([desired-state-deploy.yml](.github/workflows/desired-state-deploy.yml)) splits
+control from fleet by comparing `.spec.control` subtrees with `yq`. No
+`environment.yml` exists under `desired/environments/*/` — only
+`topology.sops.yml`. The branch is unreachable in production and silently
+depends on `yq` being present on the runner image. In tests it is covered: the
+fixture creates one. Kept deliberately — deleting it would make a future
+`environment.yml` visible to fleet only, i.e. introduce a new under-deployment.
 
-### 3.4. CI-3: цепочка доверия релиза выходит за пределы репозитория
+### 3.4. CI-3: the release trust chain reaches outside this repository
 
-`release-bump.yml` запускается по `repository_dispatch` **на выделенном
-раннере**, расшифровывает топологию и пушит прямо в `main` токеном
-`INFRA_PUSH_TOKEN`, минуя pull request и ревью владельцев кода. Для `develop`
-получившийся коммит затем выкатывается автоматически.
+`release-bump.yml` runs on `repository_dispatch` **on the dedicated runner**,
+decrypts the topology and pushes straight to `main` with `INFRA_PUSH_TOKEN`,
+bypassing pull request and code-owner review. For `develop` the resulting commit
+then deploys automatically.
 
-Решение осознанное и задокументированное, радиус поражения ограничен: каждое
-поле полезной нагрузки проверяется якорным регулярным выражением, а шаг
-`Refuse an unexpected change` роняет задачу, если диффф затронул что-то кроме
-одного файла топологии. Остаётся факт, который стоит называть прямо: **любой
-репозиторий или токен, способный отправить сюда `repository_dispatch`, может
-сдвинуть работающий digest образа в `develop` без участия человека.** Это
-принятый риск, а не дефект, — но он должен быть принят явно, и область действия
-и ротация токена относятся к операторскому руководству.
+The decision is deliberate and documented, and the blast radius is bounded:
+every payload field is validated with anchored regexes, and the
+`Refuse an unexpected change` step fails the job if the diff touches anything
+but the single topology file. What remains worth stating plainly: **any
+repository or token able to send a `repository_dispatch` here can move a running
+image digest in `develop` with no human involved.** That is an accepted risk,
+not a defect — but it should be accepted explicitly, and the token's scope and
+rotation belong in the operator guide.
 
-### 3.5. CI-4: разделение сред держится на SSH, а не на GitHub
+### 3.5. CI-4: environment separation rests on SSH, not on GitHub
 
-`environment:` отсутствует во всех задачах выкатки, потому что GitHub
-Environments недоступны на текущем плане. Workflows подробно это объясняют, и
-фактическое разделение — форсированная команда, привязанная к среде, плюс
-перепроверка на сервере — работает. Следствие: **гейта одобрения нет нигде**.
-`prod` защищён только тем, что отфильтрован из автоматического пути и требует
-ручного запуска. Кто может запустить workflow, тот может применить `prod`.
-Проверить заново, когда план изменится.
+`environment:` is absent from every deployment job because GitHub Environments
+are unavailable on the current plan. The workflows explain this at length, and
+the actual separation — a forced command bound to one environment plus
+server-side revalidation — works. The consequence: **there is no approval gate
+anywhere.** `prod` is protected only by being filtered out of the automatic path
+and requiring a manual dispatch. Whoever can dispatch a workflow can apply
+`prod`. Re-examine when the plan changes.
 
-### 3.6. Мелкое
+### 3.6. Minor
 
-`platform-readiness.yml` делает checkout ветки по умолчанию без закрепления
-`ref:`, в отличие от всех остальных workflow. Влияние малое — шаг выполняет
-только read-only команду, — но непоследовательно.
+`platform-readiness.yml` checks out the default branch with no pinned `ref:`,
+unlike every other workflow. Low impact — the step runs only a read-only remote
+command — but inconsistent.
 
 ---
 
-## 4. Топология, порты и сетевая поверхность
+## 4. Topology, ports and network surface
 
-### 4.1. Дисциплина привязки адресов — сильнейшая часть репозитория
+### 4.1. Bind discipline is the strongest part of the repository
 
-Экспозиция решается в одном месте
-([compiled_node_plan/tasks/main.yml](roles/compiled_node_plan/tasks/main.yml)) и
-затем удерживается тремя независимыми слоями:
+Exposure is decided in one place
+([compiled_node_plan/tasks/main.yml](roles/compiled_node_plan/tasks/main.yml))
+and then held by three independent layers:
 
-1. **Адрес привязки.** Все слушатели наблюдаемости привязаны к оверлейному
-   адресу ноды; Vault, gRPC-API Xray, его метрики и UI Alloy — только петля.
-   Wildcard не используется нигде.
-2. **Firewall.** `common_restricted_tcp_rules` дополнительно ограничивает порты
-   агента и метрик управляющей сетью и оверлейным интерфейсом — с комментарием,
-   прямо говорящим, что правило существует, чтобы firewall не оказался
-   единственным, что стоит между `/metrics` и интернетом, если привязку когда-то
-   ослабят.
-3. **Готовность.** Playbook перепроверяет привязку и **падает** на wildcard, а
-   не предупреждает ([operations/readiness.yml](playbooks/operations/readiness.yml)).
+1. **Bind address.** Every observability listener is bound to the node's overlay
+   address; Vault, the Xray gRPC API, its metrics and the Alloy UI are
+   loopback-only. A wildcard is used nowhere.
+2. **Firewall.** `common_restricted_tcp_rules` additionally scopes the agent and
+   metrics ports to the management network and the overlay interface — with a
+   comment stating outright that the rule exists so the firewall is not the only
+   thing between `/metrics` and the internet if a bind is ever loosened.
+3. **Readiness.** The playbook re-asserts the bind and **fails** on a wildcard
+   rather than warning
+   ([operations/readiness.yml](playbooks/operations/readiness.yml)).
 
-Три слоя, каждый из которых самостоятельно предотвращает одну и ту же утечку, с
-записанным рассуждением. Это верный образец, и применён он последовательно.
+Three layers, each of which independently prevents the same disclosure, with the
+reasoning recorded. This is the right pattern, applied consistently.
 
-Публичный вход на ноде ограничен объявленным портом данных, SSH из управляющей
-сети и — до исправления ниже — портом WireGuard. Маршрутизация Xray
-блэкхолит `geoip:private` раньше всего остального, что не даёт клиенту дотянуться
-через выходную ноду до частных сетей оператора.
+Public ingress on a node is limited to the declared data port, SSH from the
+management network, and — before the fix below — the WireGuard port. Xray
+routing blackholes `geoip:private` ahead of everything else, which stops a
+customer from reaching the operator's private networks through an exit node.
 
-### 4.2. NET-1: порт WireGuard был открыт наружу без нужды — **исправлено**
+### 4.2. NET-1: the WireGuard port was open to the internet needlessly — **fixed**
 
-Туннель поднимает нода: в её конфиге стоит `Endpoint` хаба и
-`PersistentKeepalive`, а в peer'е хаба для ноды endpoint'а нет вовсе — адрес
-узнаётся из входящего рукопожатия
+The node brings up the tunnel: its config carries the hub's `Endpoint` and
+`PersistentKeepalive`, while the hub's peer entry for the node has no endpoint
+at all — the address is learned from the incoming handshake
 ([configure-wireguard.sh.j2](roles/bootstrap_wireguard/templates/configure-wireguard.sh.j2),
-[base.conf.j2](roles/platform_wireguard/templates/base.conf.j2)). Входящий
-слушатель ноде не нужен, а открытый порт был поверхностью атаки и признаком
-флота: одинаковый well-known UDP-порт на всех узлах, чья публичная роль —
-выглядеть обычным веб-сервером.
+[base.conf.j2](roles/platform_wireguard/templates/base.conf.j2)). A node needs
+no inbound listener, so the open port was pure attack surface and a fleet
+signal: the same well-known UDP port on every node whose public role is to look
+like an ordinary web server.
 
-`common_public_udp_ports` для нод пуст. Существующие туннели не рвутся: ответы
-хаба приходят по записи conntrack, созданной исходящим пакетом самой ноды, а
-keepalive короче таймаута записи.
+`common_public_udp_ports` is now empty for nodes. Existing tunnels are not
+broken: the hub's replies arrive on the conntrack entry created by the node's
+own outbound packet, and keepalive is shorter than that entry's timeout.
 
-**Осталось открытым:** `ListenPort` по-прежнему закреплён одинаковым значением
-на всех нодах и потому является исходящим портом туннеля — видимым любому
-наблюдателю на пути и одинаковым по флоту. Открепление означает перезапуск
-интерфейса на живых нодах, поэтому это отдельное осознанное изменение.
+**Still open:** `ListenPort` remains pinned to the same value on every node and
+is therefore the tunnel's *source* port — visible to any on-path observer and
+uniform across the fleet. Unpinning it restarts the interface on live nodes, so
+it belongs in a separate deliberate change.
 
-### 4.3. NET-2: ICMP разбирался как один класс — **исправлено**
+### 4.3. NET-2: ICMP was handled as a single class — **fixed**
 
-**Поправка к первой редакции этого документа.** Правила ICMP стоят *после*
-`ct state established,related accept`. Conntrack помечает ошибки ICMP,
-относящиеся к отслеживаемому потоку, как `related`, поэтому
-`fragmentation-needed` и `packet-too-big` для существующих соединений
-принимаются раньше лимитера. Path MTU Discovery для отслеживаемых потоков
-сломан не был — первоначальное утверждение было слишком сильным.
+**Correction to the first revision of this document.** The ICMP rules sit
+*after* `ct state established,related accept`. Conntrack marks ICMP errors
+belonging to a tracked flow as `related`, so `fragmentation-needed` and
+`packet-too-big` for existing connections are accepted before the limiter. Path
+MTU Discovery for tracked flows was never broken — the original claim was too
+strong.
 
-Общая ставка 20/s управляла тем ICMP, который conntrack видит как `NEW`. Отсюда
-две настоящих проблемы:
+The shared 20/s bucket governed the ICMP that conntrack sees as `NEW`. That left
+two genuine problems:
 
-1. **IPv6 Neighbour Discovery ограничивался по скорости.** NS/NA/RS/RA приходят
-   как `NEW` и попадали под лимит, а без них IPv6 на канале не работает.
-   Один отправитель с 20+ pps любого ICMPv6 морил бы ND для всего интерфейса.
-   IPv6 в желаемом состоянии не объявлен, поэтому проблема была скрытой, — но
-   её вид отказа (плавающая, зависящая от нагрузки потеря связности) относится
-   к самым трудноатрибутируемым.
-2. **Echo принимался откуда угодно.** Каждый узел отвечал на ping всему
-   интернету, подтверждая своё существование.
+1. **IPv6 Neighbour Discovery was rate-limited.** NS/NA/RS/RA arrive as `NEW`
+   and fell under the limit, and without them IPv6 does not work on the link at
+   all. A single sender at 20+ pps of any ICMPv6 would starve ND for the whole
+   interface. IPv6 is not declared in desired state, so the problem was latent —
+   but its failure mode (intermittent, load-dependent connectivity loss) is
+   among the hardest to attribute.
+2. **Echo was accepted from anywhere.** Every node answered ping from the whole
+   internet, confirming its own existence.
 
-Теперь классов четыре: ошибки ICMP/ICMPv6 принимаются безусловно, ND и MLD —
-безусловно и без лимита, echo — только из `common_icmp_echo_cidrs` с ограничением
-5/s, остальное отбрасывается молча (reject подтверждал бы хост не хуже ответа).
-Timestamp уходит вместе с echo, закрывая корреляцию по часам. Цепочка `output`
-получила второе направление: echo-request уходит только на доверенные интерфейсы
-и объявленные сети. Сигнализация об ошибках наружу по-прежнему уходит —
-её подавление сломало бы PMTUD для клиентов, подключающихся к порту данных.
+There are now four classes: ICMP/ICMPv6 errors accepted unconditionally, ND and
+MLD accepted unconditionally and unlimited, echo accepted only from
+`common_icmp_echo_cidrs` at 5/s, and everything else dropped silently — a reject
+would confirm the host as well as a reply. Timestamp goes with echo, closing a
+clock-correlation channel. The `output` chain gained the second direction:
+echo-request leaves only toward trusted interfaces and declared networks. Error
+signalling still leaves the host, deliberately — suppressing it would break
+PMTUD for clients connecting to the data port.
 
-Единственная живая зависимость от ICMP — проверка достижимости хаба в
-`bootstrap_wireguard`, ping с ноды на оверлейный адрес хаба. Хаб принимает его
-правилом `iifname "<оверлей>" accept` (хаб задаёт `common_trusted_interfaces`,
-ноды — нет), а не общим правилом ICMP, поэтому закрытие публичного echo бутстрап
-не ломает.
+The only live ICMP dependency is the hub reachability check in
+`bootstrap_wireguard`, a ping from the node to the hub's overlay address. The
+hub accepts it via `iifname "<overlay>" accept` (the hub sets
+`common_trusted_interfaces`; nodes do not), not via the general ICMP rule, so
+closing public echo does not break bootstrap.
 
-Проверено в сетевых пространствах имён на отрендеренном наборе правил, а не
-чтением: оверлейный ping работает в обе стороны, публичный не отвечает на вход и
-отбрасывается на выход, порт данных остаётся доступен, порт метрик остаётся
-закрыт.
+Verified in network namespaces against the rendered ruleset rather than by
+reading: overlay ping works both directions, public ping is unanswered inbound
+and dropped outbound, the data port stays reachable, the metrics port stays
+closed.
 
-### 4.4. NET-3: проверка публичного пути существует только в мёртвом коде
+### 4.4. NET-3: the public-path gate exists only in dead code
 
-`fleetctl/readiness/suite.py` определяет два гейта достижимости —
-`host_reachable` по **публичному** адресу и `management_address_reachable` по
-оверлейному. Это верная двухпутевая модель: она отличает «машина жива» от
-«машина жива и оверлей сошёлся».
+`fleetctl/readiness/suite.py` defines two reachability gates — `host_reachable`
+against the **public** address and `management_address_reachable` against the
+overlay one. That is a correct two-path model: it distinguishes "the machine is
+up" from "the machine is up and the overlay converged".
 
-**Её никто не вызывает.** `build_gate_specs` и `GateRunner` импортируются только
-из `tests/unit/test_readiness.py`. Ни `fleetctl/cli.py`, ни один playbook на
-модуль не ссылаются; у протокола `ReadinessProbe` нет ни одной реализации.
+**Nothing calls it.** `build_gate_specs` and `GateRunner` are imported only by
+`tests/unit/test_readiness.py`. Neither `fleetctl/cli.py` nor any playbook
+references the module; the `ReadinessProbe` protocol has no implementation.
 
-Работающая готовность — это `playbooks/operations/readiness.yml`, и она
-проверяет только оверлейный путь. Публичный не проверяется снаружи никогда.
-Вместе с [4.6](#46-net-5-скомпилированные-пробы-никем-не-читаются) это значит:
-**ни один автоматический механизм не подтверждает, что нода достижима из
-интернета.** Нода со сломанным публичным интерфейсом, DNS-записью или слушателем
-пройдёт готовность и будет объявлена рабочей.
+The readiness that actually runs is `playbooks/operations/readiness.yml`, and it
+checks the overlay path only. The public path is never verified from outside.
+Together with [4.6](#46-net-5-compiled-probes-are-read-by-nobody) this means:
+**no automated mechanism confirms that a node is reachable from the internet.** A
+node with a broken public interface, DNS record or listener passes readiness and
+is declared serving.
 
-### 4.5. NET-4: проверка публичного порта — поиск подстроки
+### 4.5. NET-4: the public-port readiness assertion is a substring match
 
 ```yaml
 - "(':' ~ (…public.port | string)) in _readiness_listeners.stdout"
 ```
 
-Ищется подстрока во всём выводе `ss -H -lnt`. Условие выполнится, если что-либо
-слушает порт, десятичная запись которого начинается с тех же цифр, на **любом**
-адресе — включая петлю. Контраст с проверкой метрик двадцатью строками ниже,
-которая сверяет `адрес:порт` точно и явно отвергает wildcard, показывает, что
-строгая форма автору известна.
+This searches the whole `ss -H -lnt` output for a substring. It passes if
+anything listens on a port whose decimal form starts with those digits, on
+**any** address — including loopback. The contrast with the metrics assertion
+twenty lines below, which matches `address:port` exactly and explicitly rejects
+wildcards, shows the strict form was known to the author.
 
-### 4.6. NET-5: скомпилированные пробы никем не читаются
+### 4.6. NET-5: compiled probes are read by nobody
 
-`fleetctl` компилирует цели трёх коллекций, и все помечены `readiness_expected`:
+`fleetctl` compiles targets in three collections, all marked
+`readiness_expected`:
 
-| Коллекция | Вид | Кто читает |
+| Collection | Kind | Consumer |
 |---|---|---|
-| `management` | `metrics` | Prometheus через file_sd |
-| `management` | `health` (gRPC агента) | **никто** |
-| `external` | `probe` (публичный порт) | **никто** |
-| `node-local` | `metrics` (Xray) | **никто** |
+| `management` | `metrics` | Prometheus via file_sd |
+| `management` | `health` (agent gRPC) | **nobody** |
+| `external` | `probe` (public port) | **nobody** |
+| `node-local` | `metrics` (Xray) | **nobody** |
 
-`roles/control_observability` отбирает `kind == 'metrics'` и
-`collection == 'management'`, остальное отбрасывает. Задачи-прощупывателя в
-скелете Prometheus нет. `blackbox_exporter` закреплён по digest в
-`desired/common/components.yml` и попадает в каждый план ноды, но **не упоминается
-ни в одной роли, playbook, шаблоне или compose-файле** — существует только в
-сгенерированных артефактах.
+`roles/control_observability` selects `kind == 'metrics'` and
+`collection == 'management'` and discards the rest. There is no prober job in
+the Prometheus skeleton. `blackbox_exporter` is pinned by digest in
+`desired/common/components.yml` and reaches every node plan, but **is referenced
+by no role, playbook, template or compose file** — it exists only in generated
+artifacts.
 
-То есть внешняя проба публичного порта — единственное, что независимо обнаружило
-бы разрыв из [4.4](#44-net-3-проверка-публичного-пути-существует-только-в-мёртвом-коде),
-— компилируется, объявляется ожидаемой в готовности и молча выбрасывается.
-Объявленная и не выполняемая проба хуже отсутствующей: она читается как покрытие.
+So the external probe of the public port — the one thing that would independently
+detect the gap in [4.4](#44-net-3-the-public-path-gate-exists-only-in-dead-code)
+— is compiled, declared readiness-expected, and silently dropped. A declared
+probe that never runs is worse than none: it reads as coverage.
 
-### 4.7. NET-6: готовность выходной ноды раскрывает адреса третьей стороне
+### 4.7. NET-6: exit readiness discloses addresses to a third party
 
-`spiritvpn_smoke_echo_url` указывает на публичный echo-сервис
+`spiritvpn_smoke_echo_url` points at a public echo service
 ([compiled_node_plan/defaults/main.yml](roles/compiled_node_plan/defaults/main.yml)).
-Компромисс признан в комментарии, и сама проверка осмысленна — она доказывает,
-что выход не проксирован и не заNATен. Но для VPN-оператора это значит, что
-каждый прогон готовности сообщает адреса выходов флота, скоррелированные по
-времени, стороннему сервису с собственными логами. Для `prod` заслуживает
-собственной точки на уже поддерживаемой инфраструктуре.
+The trade-off is acknowledged in a comment, and the check itself is meaningful —
+it proves egress is neither proxied nor NATed. But for a VPN operator it means
+every readiness run reports the fleet's exit addresses, correlated in time, to a
+third-party service with its own logs. For `prod` this deserves an endpoint on
+infrastructure already being maintained.
 
-### 4.8. ANON-1: маскировка REALITY — отпечаток всего флота
+### 4.8. ANON-1: the REALITY mask is a fleet-wide fingerprint
 
-Вся защита REALITY держится на том, что активный прощупыватель, подключившись к
-порту данных, не отличит ноду от обычного веб-сервера. `reality_dest` указывает
-на локальный nginx, и этот маскировочный сайт — один шаблон:
+REALITY's entire protection rests on an active prober being unable to
+distinguish the node from an ordinary web server when it connects to the data
+port. `reality_dest` points at a local nginx, and that mask site is one template:
 
 ```jinja
-{# roles/nginx_mask/templates/index.html.j2 — файл целиком #}
+{# roles/nginx_mask/templates/index.html.j2 — the whole file #}
 {{ mask_body }}
 ```
 
-где `mask_body` — одно захардкоженное слово
+where `mask_body` is a single hard-coded bare word
 ([nginx_mask/defaults/main.yml](roles/nginx_mask/defaults/main.yml)). Grep
-подтверждает: `mask_body` **не переопределяется нигде** — ни в плане ноды, ни в
-playbook, ни в желаемом состоянии. Все ноды флота отдают побайтово одинаковый
-ответ из одного слова без разметки.
+confirms `mask_body` is **overridden nowhere** — not in the node plan, not in a
+playbook, not in desired state. Every node in the fleet returns a byte-identical
+one-word response with no markup.
 
-Два независимых следствия, оба тяжёлые:
+Two independent consequences, both severe:
 
-1. **Маскировка не переживает ни одной активной проверки.** Одно слово
-   `text/html` без структуры не является правдоподобным сайтом. Любой, кто
-   установит TLS-соединение с портом данных, сразу увидит, что это не то, чем
-   представляется, — то есть ровно ту проверку, ради которой REALITY и нужен.
-2. **Весь флот перечисляется по одному ответу.** Сканирование интернета по этому
-   ответу возвращает все ноды разом. Раскрытие одной ноды раскрывает все
-   одновременно — худшее из возможных свойств корреляции для VPN.
+1. **The mask survives no active probe.** One word of `text/html` with no
+   structure is not a plausible site. Anyone who completes a TLS handshake with
+   the data port sees immediately that this is not what it claims to be — which
+   is exactly the check REALITY exists to defeat.
+2. **The whole fleet is enumerable from one response.** Scanning the internet
+   for that response returns every node at once. Exposing one node exposes all
+   of them simultaneously — the worst possible correlation property for a VPN.
 
-Перечисление достижимо и вторым путём: публичные имена следуют предсказуемому
-образцу под одним зарегистрированным доменом, а проксирование DNS выключено
-(иначе и нельзя — REALITY нужен прямой TCP), так что записи домена описывают
-флот вообще без сканирования.
+Enumeration is reachable a second way: the public hostnames follow a predictable
+pattern under one registered domain and DNS proxying is off (necessarily —
+REALITY needs direct TCP), so the domain's records describe the fleet with no
+scanning at all.
 
-Исправление требует решения о содержании, а не только правки кода. Минимальная
-планка — настоящий статический сайт, **различающийся по логическим нодам**;
-сильная форма — направить `reality_dest` на настоящий сторонний хост, что
-является рекомендацией самого REALITY и убирает локальную маскировку из модели
-угроз целиком.
-
----
-
-## 5. Укрепление хоста и контейнеров
-
-### 5.1. Что сделано хорошо
-
-- **Режимный гейт с растяжкой.** `roles/common` отказывается трогать
-  пользователей, sshd, sudoers, firewall, fail2ban, sysctl, auditd и
-  автообновления в режиме `runtime` и **проверяет утверждением**, что все флаги
-  выключены, а не просто игнорирует их. Выкатка рантайма структурно не может
-  изменить управление доступом.
-- **Сверка, а не только handler'ы.** Набор правил nftables переприменяется на
-  каждом укреплённом прогоне, потому что handler пропустил бы таблицу ядра,
-  поправленную руками. То же рассуждение для `augenrules --load`. Это и есть
-  разница между управлением конфигурацией и её *сходимостью*.
-- **Проблема порта SSH при бутстрапе решена верно.** В фазе бутстрапа открыты и
-  порт по умолчанию, и объявленный, потому что Ansible переоткрывает соединение
-  в непредсказуемый момент; установившаяся фаза оставляет только объявленный.
-  Комментарий фиксирует, что это выучено на живом обрыве.
-- **nftables заменяет только собственную таблицу** (`add`+`delete`, никогда
-  `flush ruleset`), поэтому таблица NAT Docker остаётся нетронутой.
-- **sysctl намеренно сохраняет `ip_forward` и не трогает `rp_filter`** — с
-  записанной причиной: наивная база сломала бы оверлей.
-
-### 5.2. SEC-1: ограничения возможностей применены ровно к одному контейнеру
-
-Только Vault несёт `cap_drop: ["ALL"]` и `security_opt: ["no-new-privileges:true"]`
-([platform_vault](roles/platform_vault/templates/compose.yml.j2)). Ни один другой
-compose-файл в репозитории не задаёт `cap_drop`, `security_opt`, `read_only` или
-`no-new-privileges`. В том числе на нодах, стоящих в интернете:
-
-- **Xray** — `user: "0:0"`, `network_mode: host`, терминирует недоверенный TLS из
-  интернета на порту данных. Самый рискованный процесс во флоте: root, полный
-  набор возможностей, пространство имён сети хоста, прямая экспозиция. Побег из
-  контейнера здесь — компрометация хоста без промежуточного шага. Ему нужен
-  примерно `NET_BIND_SERVICE` и почти ничего больше.
-- **Alloy** — `user: "0:0"` со смонтированным сокетом Docker, что равносильно
-  root на хосте. На хабе это признано комментарием; на нодах тот же монтаж стоит
-  без оговорки, а экспозиция там выше.
-- **node-exporter** — `pid: host` и `/` смонтирован только на чтение.
-
-Асимметрия и есть суть находки: репозиторий умеет ограничивать контейнер и
-применяет это к тому единственному, что работает на *защищённом* хосте, тогда
-как контейнеры на *открытых* хостах работают без ограничений.
-
-### 5.3. SEC-2: учётная запись выкатки равносильна root — по построению
-
-`common_deploy_groups: [sudo, docker]` плюс `NOPASSWD:ALL`. Файл умолчаний
-говорит это прямо: выигрыш — именованная учётная запись без парольного входа, а
-не жёсткая граница. Рассуждение верное и записанное. Отмечено, чтобы это не
-принимали за границу привилегий.
+Fixing this needs a decision about content, not just a code change. The minimum
+bar is a real static site that **differs per logical node**; the strong form is
+pointing `reality_dest` at a genuine third-party host, which is upstream
+REALITY's own recommendation and removes the local mask from the threat model
+entirely.
 
 ---
 
-## 6. Согласованность источников и потоков
+## 5. Host and container hardening
 
-### 6.1. CON-1: адаптеры smoke-проверок не лежат в Git
+### 5.1. Done well
 
-`playbooks/operations/readiness.yml` **утверждает**, что
-`spiritvpn_direct_smoke_argv` непуст для каждой выходной ноды и
-`spiritvpn_entry_exit_smoke_argv` — при наличии скомпилированных мостов. Оба по
-умолчанию пусты, и поставляемый пример
+- **Mode gate with a tripwire.** `roles/common` refuses to touch users, sshd,
+  sudoers, firewall, fail2ban, sysctl, auditd or unattended upgrades in
+  `runtime` mode, and **asserts** that every flag is off rather than merely
+  ignoring them. A runtime deployment structurally cannot change access control.
+- **Reconciliation, not just handlers.** The nftables ruleset is re-applied on
+  every hardened run, because a handler would miss a kernel table edited by
+  hand. Same reasoning for `augenrules --load`. This is the difference between
+  configuration management and configuration convergence.
+- **The bootstrap SSH port problem is solved correctly.** During bootstrap both
+  the default and declared ports stay open, because Ansible reopens its
+  connection at an unpredictable moment; steady state leaves only the declared
+  one. The comment records that this was learned from a live disconnect.
+- **nftables replaces only its own table** (`add`+`delete`, never
+  `flush ruleset`), so Docker's NAT table is untouched.
+- **sysctl deliberately preserves `ip_forward` and leaves `rp_filter` alone** —
+  with the reason recorded: a naive baseline would break the overlay.
+
+### 5.2. SEC-1: capability restrictions applied to exactly one container
+
+Only Vault carries `cap_drop: ["ALL"]` and
+`security_opt: ["no-new-privileges:true"]`
+([platform_vault](roles/platform_vault/templates/compose.yml.j2)). No other
+compose file in the repository sets `cap_drop`, `security_opt`, `read_only` or
+`no-new-privileges`. That includes, on internet-facing nodes:
+
+- **Xray** — `user: "0:0"`, `network_mode: host`, terminating untrusted TLS from
+  the internet on the data port. The riskiest process in the fleet: root, full
+  capability set, host network namespace, direct exposure. A container escape
+  here is a host compromise with no intermediate step. It needs roughly
+  `NET_BIND_SERVICE` and little else.
+- **Alloy** — `user: "0:0"` with the Docker socket mounted, which is
+  root-equivalent on the host. On the hub this is acknowledged in a comment; on
+  nodes the same mount sits without one, and the exposure there is greater.
+- **node-exporter** — `pid: host` with `/` mounted read-only.
+
+The asymmetry is the finding: the repository knows how to constrain a container
+and applies it to the one running on the *protected* host, while the containers
+on the *exposed* hosts run unconstrained.
+
+### 5.3. SEC-2: the deploy account is root-equivalent by design
+
+`common_deploy_groups: [sudo, docker]` plus `NOPASSWD:ALL`. The defaults file
+says so plainly: the win is a named account with no password login, not a hard
+boundary. The reasoning is correct and recorded. Noted so it is not mistaken for
+a privilege boundary.
+
+---
+
+## 6. Consistency of sources and flows
+
+### 6.1. CON-1: readiness smoke adapters are not in Git
+
+`playbooks/operations/readiness.yml` **asserts** that
+`spiritvpn_direct_smoke_argv` is non-empty for every exit node and
+`spiritvpn_entry_exit_smoke_argv` whenever compiled bridges exist. Both default
+to empty, and the shipped example
 ([examples/fleet-executor-readiness.yml](examples/fleet-executor-readiness.yml))
-поставляется пустым с пометкой «держать пустым, пока не появятся проверенные
-исполняемые пробы; готовность тогда падает закрыто».
+ships empty with the note to keep it so until reviewed executable probes exist,
+readiness failing closed in the meantime.
 
-Настоящие значения исполнитель читает из `/etc/spiritvpn/deploy/<env>/readiness.yml`
-на хабе — файла, **которого в этом репозитории нет**. Раз выкатки с выходной
-нодой проходили, файл заполнен руками.
+The executor reads the real values from
+`/etc/spiritvpn/deploy/<env>/readiness.yml` on the hub — a file **not present in
+this repository**. Since deployments involving an exit node have succeeded, that
+file has been filled in by hand.
 
-То есть определение «нода действительно правильно несёт трафик» — важнейшая
-поведенческая проверка системы — живёт только на управляющем хосте, вне версий,
-вне ревью и вне всех гарантий этого репозитория. `README.md` запрещает ровно
-это: «Не изменять сервер вручную, если та же настройка должна принадлежать Git».
+So the definition of "this node actually carries traffic correctly" — the most
+important behavioural check in the system — lives only on the management host,
+unversioned, unreviewed, and outside every guarantee this repository makes.
+`README.md` forbids exactly this: "Не изменять сервер вручную, если та же
+настройка должна принадлежать Git".
 
-### 6.2. CON-2: документы противоречили друг другу — **исправлено**
+### 6.2. CON-2: the documents contradicted each other — **fixed**
 
-Было: корневой `README.md` объявлял справочными все документы в `docs/`, тогда
-как `docs/architecture/README.md` называл `INFRA_TECHNICAL_SPEC.md`
-«единственным нормативным», а `tests/unit/test_documentation.py` закреплял за
-ним и за снимком состояния реализации статус нормативных — проверяя при этом
-только существование файла. Проходящий тест утверждал нормативность, содержания
-которой не подтверждал ничем. Снимок состояния был при этом фактически ложен:
-дата, ветка, утверждения об отсутствии живой выкатки и о пустых каталогах сред —
-всё расходилось с `main`.
+Previously: the root `README.md` called every document in `docs/` reference
+material, while `docs/architecture/README.md` called `INFRA_TECHNICAL_SPEC.md`
+"the only normative" one, and `tests/unit/test_documentation.py` enforced
+normative status for it and for the implementation-status snapshot — while
+checking only that the file existed. A passing test asserted a status whose
+content it verified in no way. The status snapshot was materially false: its
+date, branch, claim of no live rollout and claim of empty environment
+directories all diverged from `main`.
 
-Спецификация и снимок сняты с `main` (полный текст остаётся в истории Git),
-`docs/status/` удалён целиком, `docs/architecture/README.md` переписан, тест
-переименован в `test_referenced_documents_exist` и проверяет то, на что
-действительно ссылаются контракты и процедуры.
+The specification and the snapshot were removed from `main` (the full text
+remains in Git history), `docs/status/` was deleted entirely,
+`docs/architecture/README.md` was rewritten, and the test was renamed to
+`test_referenced_documents_exist` and now checks what contracts and procedures
+actually reference.
 
-Разделы 23 и 24 спецификации — открытые решения и дельта к бэкенду — устаревшими
-**не были**: раздел 24 описывает действующую границу манифеста, проверку среды
-по идентичности вызывающего и замороженный baseline прото, и на него ссылается
-процедура повторного вендоринга контракта. Они сохранены в
-[`contracts/backend/INFRA_DELTA.md`](contracts/backend/INFRA_DELTA.md) рядом с
-тем, что их использует, а ссылки перенаправлены туда.
+Sections 23 and 24 of the specification — open decisions and the backend delta —
+were **not** stale: section 24 describes the live manifest boundary, the
+caller-identity environment check and the frozen proto baseline, and the backend
+contract re-vendoring procedure points at them. They are preserved in
+[`contracts/backend/INFRA_DELTA.md`](contracts/backend/INFRA_DELTA.md) next to
+what uses them, with the references repointed.
 
-### 6.3. CON-3: `fleetctl/readiness` — протестированный мёртвый код
+### 6.3. CON-3: `fleetctl/readiness` is tested dead code
 
-См. [4.4](#44-net-3-проверка-публичного-пути-существует-только-в-мёртвом-коде).
-Целый пакет плюс отдельный файл тестов, недостижимый ни из CLI, ни из playbook.
-Он кодирует **иной** и в одном отношении **лучший** контракт готовности, чем
-работающий playbook (включает гейт публичного пути, которого у playbook нет), и
-не содержит проверок, которые у playbook есть.
+See [4.4](#44-net-3-the-public-path-gate-exists-only-in-dead-code). A whole
+package plus a dedicated test file, unreachable from the CLI and from every
+playbook. It encodes a **different** and in one respect **better** readiness
+contract than the playbook that runs (it includes the public-path gate the
+playbook lacks) and omits checks the playbook has.
 
-Два расходящихся определения готовности, одно из которых проверяется только
-собственными тестами. Либо подключить его как источник истины и порождать
-playbook из него, либо удалить. Оставлять хуже обоих вариантов: зелёные тесты на
-неиспользуемой модели создают ложную уверенность.
+Two divergent definitions of readiness, one exercised only by its own tests.
+Either wire it in as the source of truth and generate the playbook from it, or
+delete it. Leaving it is worse than either: green tests on an unused model
+create false confidence.
 
-### 6.4. CON-4: `blackbox_exporter` объявлен и не используется
+### 6.4. CON-4: `blackbox_exporter` is declared and unused
 
-Закреплён по digest, попадает в каждый план ноды, не упоминается нигде.
-См. [4.6](#46-net-5-скомпилированные-пробы-никем-не-читаются).
+Pinned by digest, reaches every node plan, referenced nowhere. See
+[4.6](#46-net-5-compiled-probes-are-read-by-nobody).
 
-### 6.5. CON-5: `CODEOWNERS` ссылается на несуществующий файл
+### 6.5. CON-5: `CODEOWNERS` references a file that does not exist
 
-Указан `/playbooks/access.yml`, которого в `playbooks/` нет. Записи по путям к
-тому же избыточны: правило `*` уже назначает обоих владельцев на всё, и каждая
-следующая строка это повторяет. Безвредно, но файл больше не описывает реальную
-структуру владения.
+`/playbooks/access.yml` is listed; `playbooks/` contains no such file. The
+per-path entries are redundant anyway: the `*` rule already assigns both owners
+to everything, and each following line restates it. Harmless, but the file no
+longer describes a real ownership structure.
 
-### 6.6. Хорошее, что стоит сохранить
+### 6.6. Good practice worth preserving
 
-- Детерминированность рендера проверяется двойным рендером и `diff`, и в
-  публичном, и в доверенном CI.
-- `_notice: "GENERATED — DO NOT EDIT"` проверяется утверждением у потребителей, а
-  не только пишется: сгенерированный файл нельзя поправить руками, не уронив
-  прогон.
-- `roles/compiled_node_plan` сверяет установленный на хосте план с планом
-  выкатки до любой мутации, поэтому устаревшая нода падает громко.
-- Обращение с секретами дисциплинировано: `no_log` на задачах с секретами,
-  отчёт об ошибке по *имени ссылки*, а не по значению, и проверка UUID мостов
-  через `\Z`, а не `$`, — потому что в Python `$` совпадает и перед завершающим
-  переводом строки, а это ровно тот дефект, от которого проверка защищает.
-- `.gitignore` и `.sops.yaml` связны; открытых секретов, ключей и расшифрованного
-  состояния в Git нет.
+- Deterministic rendering is verified by rendering twice and diffing, in both
+  public and trusted CI.
+- `_notice: "GENERATED — DO NOT EDIT"` is asserted by consumers, not merely
+  written: a generated file cannot be hand-edited without failing the run.
+- `roles/compiled_node_plan` compares the plan installed on the host with the
+  deployment's plan before any mutation, so a stale node fails loudly.
+- Secret handling is disciplined: `no_log` on secret-bearing tasks, failures
+  reported by *reference name* rather than value, and the bridge UUID check
+  using `\Z` rather than `$` — because in Python `$` also matches before a
+  trailing newline, which is the exact defect being guarded against.
+- `.gitignore` and `.sops.yaml` are coherent; no plaintext secrets, keys or
+  decrypted state are tracked.
 
-### 6.7. Соответствие требованию о языке
+### 6.7. Language requirement compliance
 
-Требование [1.1](#11-язык) введено этим документом; накопленное ему пока не
-соответствует. Замер на момент введения:
+The requirement in [1.1](#11-language) was introduced by this document; existing
+material does not yet comply. Measurement at the time of introduction:
 
-| Поверхность | Строк комментариев не на русском |
+| Surface | Non-Russian comment lines |
 |---|---|
-| `fleetctl/` (включая docstring'и) | 209 |
+| `fleetctl/` (including docstrings) | 209 |
 | `roles/` | 510 |
 | `tests/` | 167 |
 | `scripts/`, `playbooks/`, workflows | 77 |
 
-Полностью англоязычные документы: `docs/README.md`, `docs/integration/README.md`,
+Fully English documents: `docs/README.md`, `docs/integration/README.md`,
 `docs/operations/SELF_HOSTED_RUNNER.md`, `docs/operations/PLATFORM_BOOTSTRAP.md`,
 `docs/architecture/TRANSITIONAL_GITHUB_RUNNER.md`, `contracts/README.md`,
 `contracts/manifest/README.md`, `contracts/desired-state/README.md`,
 `desired/README.md`, `roles/README.md`, `fleetctl/README.md`.
 
-Приводятся в соответствие при следующей правке каждого файла — см. рассуждение
-в [1.1](#11-язык) о том, почему не одной волной.
+These are brought into line as each file is next edited — see the reasoning in
+[1.1](#11-language) for why not in one wave. This file is exempt by
+[1.1](#11-language) and is not counted above.
 
 ---
 
-## 7. Находки по приоритету
+## 7. Findings by priority
 
-| ID | Важность | Статус | Находка |
+| ID | Severity | Status | Finding |
 |---|---|---|---|
-| ANON-1 | высокая | открыта | Одинаковая маскировка REALITY: флот перечисляется, маскировка не держит активную проверку |
-| CON-1 | высокая | открыта | Адаптеры smoke-проверок живут только на хабе, вне Git |
-| CI-1 | высокая | **исправлено** | `BEFORE` не задавался: push из нескольких коммитов недовыкатывался |
-| NET-3 | средняя | открыта | Гейт публичного пути существует только в мёртвом коде |
-| NET-5 | средняя | открыта | Скомпилированные пробы и health-цели никем не читаются |
-| SEC-1 | средняя | открыта | Ни один контейнер, стоящий в интернете, не ограничен по возможностям |
-| CON-3 | средняя | открыта | `fleetctl/readiness` протестирован и недостижим |
-| NET-2 | средняя | **исправлено** | ICMP как один класс: публичный echo принимался, IPv6 ND ограничивался |
-| NET-1 | средняя | **исправлено** (firewall); `ListenPort` закреплён | Порт WireGuard открыт наружу без необходимости |
-| CON-2 | средняя | **исправлено** | Документы противоречили друг другу; снимок состояния был ложен |
-| NET-4 | низкая | открыта | Проверка публичного порта — поиск подстроки |
-| NET-6 | низкая | открыта | Готовность выхода раскрывает адреса третьей стороне |
-| CI-2 | низкая | открыта | Недостижимая ветка `environment.yml` |
-| CI-3 | низкая | принято | Релизный dispatch двигает digest без ревью |
-| CI-4 | низкая | принято | Гейта одобрения нет; `prod` защищён только ручным запуском |
-| CON-4 | низкая | открыта | `blackbox_exporter` объявлен, не используется |
-| CON-5 | низкая | открыта | `CODEOWNERS` ссылается на несуществующий playbook |
+| ANON-1 | high | open | Identical REALITY mask: the fleet is enumerable and the mask survives no active probe |
+| CON-1 | high | open | Readiness smoke adapters live only on the hub, outside Git |
+| CI-1 | high | **fixed** | `BEFORE` unset: multi-commit pushes were under-deployed |
+| NET-3 | medium | open | The public-path gate exists only in dead code |
+| NET-5 | medium | open | Compiled probes and health targets are read by nobody |
+| SEC-1 | medium | open | No internet-facing container has capability restrictions |
+| CON-3 | medium | open | `fleetctl/readiness` is tested and unreachable |
+| NET-2 | medium | **fixed** | ICMP as one class: public echo answered, IPv6 ND rate-limited |
+| NET-1 | medium | **fixed** (firewall); `ListenPort` pinned | WireGuard port open to the internet needlessly |
+| CON-2 | medium | **fixed** | Documents contradicted each other; the status snapshot was false |
+| NET-4 | low | open | The public-port readiness assertion is a substring match |
+| NET-6 | low | open | Exit readiness discloses addresses to a third party |
+| CI-2 | low | open | Unreachable `environment.yml` branch |
+| CI-3 | low | accepted | Release dispatch moves a digest without review |
+| CI-4 | low | accepted | No approval gate; `prod` is protected only by manual dispatch |
+| CON-4 | low | open | `blackbox_exporter` declared, unused |
+| CON-5 | low | open | `CODEOWNERS` references a non-existent playbook |
 
-Разумный порядок дальше: **ANON-1** (наибольшее влияние, но требует решения о
-содержании маскировки), затем **CON-1 + NET-3 + NET-5 вместе** — это одна
-проблема с трёх сторон, а именно что ничего не проверяет ноду снаружи. Затем
-**SEC-1**, затем мелкое и чистка мёртвого кода.
+A sensible order from here: **ANON-1** (largest impact, but needs a decision
+about mask content), then **CON-1 + NET-3 + NET-5 together** — one problem seen
+from three angles, namely that nothing verifies a node from outside. Then
+**SEC-1**, then the small items and the dead-code cleanup.
 
 ---
 
-## 8. Метод и границы
+## 8. Method and limits
 
-Проверено напрямую: полный прогон тестов и линта; все восемь workflow прочитаны
-целиком; шаблоны firewall, sshd и sysctl прочитаны; все compose-файлы прочитаны;
-роли `common`, `compiled_node_plan`, `control_observability`, `platform_executor`,
-`platform_wireguard`, `xray`, `bootstrap_wireguard` прочитаны; все playbook
-прочитаны; `scripts/platform-remote.sh` и диспетчер форсированных команд
-прочитаны; утверждения о мёртвом коде подтверждены grep'ом по всему дереву.
+Verified directly: full test and lint runs; all eight workflows read end to end;
+the firewall, sshd and sysctl templates read; every compose file read; the
+`common`, `compiled_node_plan`, `control_observability`, `platform_executor`,
+`platform_wireguard`, `xray` and `bootstrap_wireguard` roles read; every
+playbook read; `scripts/platform-remote.sh` and the forced-command dispatcher
+read; dead-code claims confirmed by grep across the whole tree.
 
-Для исправлений: отрендеренный набор правил nftables проверен настоящим `nft` на
-пяти формах входа, затем загружен в сетевое пространство имён и проверен
-настоящими пакетами между двумя пространствами — оверлейный ping в обе стороны,
-публичный ping в обе стороны, публичный TCP на порт данных и на порт метрик.
-Изменение шага определения контуров покрыто существующим поведенческим стендом и
-восемью новыми тестами. На живом хосте не выполнялось ничего.
+For the fixes: the rendered nftables ruleset was checked with real `nft` across
+five input shapes, then loaded into a network namespace and exercised with real
+packets between two namespaces — overlay ping both directions, public ping both
+directions, public TCP to the data port and to the metrics port. The contour
+detection change is covered by the existing behavioural harness plus eight new
+tests. Nothing was executed against a live host.
 
-Выведено, но не проверено: состав флота взят из локальных артефактов `build/`,
-которые могут отставать от `main`. Ни один сервер не опрашивался.
-Предположение в [6.1](#61-con-1-адаптеры-smoke-проверок-не-лежат-в-git) о том,
-что файл готовности на хабе заполнен руками, следует из того, что выкатки с
-выходной нодой проходили, тогда как поставляемый пример падает закрыто, — стоит
-подтвердить на хабе, прежде чем действовать.
+Inferred, not verified: the fleet composition comes from the local `build/`
+artifacts, which may lag `main`. No server was queried. The assumption in
+[6.1](#61-con-1-readiness-smoke-adapters-are-not-in-git) that the hub's
+readiness file was filled in by hand follows from deployments with an exit node
+having succeeded while the shipped example fails closed — worth confirming on
+the hub before acting on it.
 
-Глубоко не разбирались: внутренности `fleetctl/compiler/*` за пределами их
-выходов, путь выпуска сертификатов PKI, шаблоны политик Vault, адаптер
-Cloudflare DNS и контракт манифеста по gRPC.
+Not examined in depth: the internals of `fleetctl/compiler/*` beyond their
+outputs, the PKI issuance path, the Vault policy templates, the Cloudflare DNS
+adapter and the gRPC manifest contract.
