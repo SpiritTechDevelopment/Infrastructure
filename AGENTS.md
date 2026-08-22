@@ -208,7 +208,48 @@ anywhere.** `prod` is protected only by being filtered out of the automatic path
 and requiring a manual dispatch. Whoever can dispatch a workflow can apply
 `prod`. Re-examine when the plan changes.
 
-### 3.6. Minor
+### 3.6. CI-5: the platform access contract now applies from a reviewed commit
+
+Until 2026-08-22 the operator roster reached the hub only through a protected
+operation: an existing operator ran `scripts/platform-bootstrap.sh
+--reuse-tunnel --apply` from their workstation over the management tunnel, and
+`platform-deploy` refused to apply while the Git contract differed from the copy
+that operation had persisted. `materialize_runtime_variables` enforced it with
+byte equality against `/etc/spiritvpn/platform/runtime-vars.yml`.
+
+That refusal is now a report. `platform-deploy` applies
+`inventories/bootstrap/platform.sops.yml` from the deployed commit like
+everything else, and names on stderr which contract fields the run changes —
+field names only, because the projection carries the Alertmanager bot token.
+
+**Stated plainly: a commit merged to `main` is now sufficient to change who has
+root on the management host.** `playbooks/platform/steady.yml` renders
+`common_authorized_keys` from `platform_operator_ssh_public_keys`, and the file
+sits outside `desired/environments/`, so any change to it marks every contour
+and `develop` deploys automatically. Review by CODEOWNERS is the only gate, and
+[3.5](#35-ci-4-environment-separation-rests-on-ssh-not-on-github) already records
+that no approval gate exists and whoever can dispatch a workflow can apply.
+
+The decision was taken deliberately by the repository owner, with the trade-off
+named: the protected path made onboarding depend on one person being available
+with a tunnel up, and a revocation that waits on a human is the revocation that
+does not happen. What it costs is the second, independent gate — the one that
+was not a reviewer but a key holder.
+
+Two properties survive and are worth not losing:
+
+- **The runner still cannot forge the contract.** It is not an age recipient of
+  `inventories/bootstrap/platform.sops.yml` ([.sops.yaml](.sops.yaml)) — only
+  the owner and the management executor are. CI transports the commit; the hub
+  decrypts it with its own identity.
+- **prod is still excluded from the automatic path**, so a merge alone does not
+  move prod access; that needs a manual dispatch.
+
+If an approval gate ever becomes available (see
+[3.5](#35-ci-4-environment-separation-rests-on-ssh-not-on-github)), this is the
+first thing that should sit behind it.
+
+### 3.7. Minor
 
 `platform-readiness.yml` checks out the default branch with no pinned `ref:`,
 unlike every other workflow. Low impact — the step runs only a read-only remote
@@ -721,6 +762,7 @@ These are brought into line as each file is next edited — see the reasoning in
 | CI-2 | low | open | Unreachable `environment.yml` branch |
 | CI-3 | low | accepted | Release dispatch moves a digest without review |
 | CI-4 | low | accepted | No approval gate; `prod` is protected only by manual dispatch |
+| CI-5 | medium | accepted | A merge to `main` now grants hub root; CODEOWNERS review is the only gate |
 | CON-4 | low | open | `blackbox_exporter` declared, unused |
 | CON-5 | low | open | `CODEOWNERS` references a non-existent playbook |
 

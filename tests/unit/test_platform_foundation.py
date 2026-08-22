@@ -414,7 +414,12 @@ all:
         self.assertIn("SOPS_AGE_KEY_FILE", platform_executor)
         self.assertIn("materialize-runtime", platform_executor)
         self.assertIn("inventories/bootstrap/platform.sops.yml", platform_executor)
-        self.assertIn("--require-applied-runtime", platform_executor)
+        self.assertIn("--compare-applied-runtime", platform_executor)
+        # Гейт снят сознательно: apply больше не требует уже применённого
+        # контракта на диске. Проверяется отсутствие обеих его половин, потому
+        # что возврат любой из них молча вернул бы ростер на защищённый путь.
+        self.assertNotIn("--require-applied-runtime", platform_executor)
+        self.assertNotIn("missing explicitly applied management access contract", platform_executor)
         self.assertIn('--extra-vars "@$platform_vars"', platform_executor)
         self.assertNotIn('--extra-vars "@{{ platform_runtime_vars_file }}"', platform_executor)
         self.assertIn("age-keygen -y", readiness)
@@ -1616,7 +1621,15 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
-    def test_runtime_projection_is_private_and_rejects_unapplied_access_changes(self) -> None:
+    def test_runtime_projection_is_private_and_applies_reviewed_access_changes(self) -> None:
+        """Контракт доступа применяется из Git, а расхождение только называется.
+
+        Прежняя версия этого теста закрепляла отказ: расхождение с применённым
+        контрактом останавливало apply, и ростер операторов двигался только
+        защищённой операцией. Отказ снят сознательно (AGENTS.md), поэтому здесь
+        проверяется именно новое поведение — проекция пишется, — а не его
+        отсутствие. Иначе возврат гейта прошёл бы мимо тестов.
+        """
         module = self.load_module()
         inventory = yaml.safe_load(
             (REPO_ROOT / "tests" / "fixtures" / "platform-bootstrap" / "platform.yml").read_text(
@@ -1635,40 +1648,65 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
         }
         expected["platform_wireguard_public_endpoint"] = "1.1.1.1:51820"
 
+        def project(output: Path, applied: Path | None, **keywords: object) -> str:
+            stream = io.StringIO()
+            with contextlib.redirect_stderr(stream):
+                module.materialize_runtime_variables(
+                    Path("ignored.sops.yml"),
+                    output,
+                    compare_applied_runtime=applied,
+                    **keywords,
+                )
+            return stream.getvalue()
+
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             applied = root / "applied.yml"
             applied.write_text(yaml.safe_dump(expected), encoding="utf-8")
             output = root / "projected.yml"
-            module.materialize_runtime_variables(
-                Path("ignored.sops.yml"),
-                output,
-                applied_runtime=applied,
-            )
+            self.assertEqual(project(output, applied), "")
             self.assertEqual(yaml.safe_load(output.read_text(encoding="utf-8")), expected)
             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+            # Ровно то, ради чего гейт снят: новый оператор в ростере доезжает
+            # обычной выкаткой, а не защищённой операцией с рабочей станции.
+            roster = copy.deepcopy(expected)
+            roster["platform_wireguard_operator_peers"] = []
+            applied.write_text(yaml.safe_dump(roster), encoding="utf-8")
+            granted = root / "granted.yml"
+            report = project(granted, applied)
+            self.assertEqual(yaml.safe_load(granted.read_text(encoding="utf-8")), expected)
+            self.assertIn("platform_wireguard_operator_peers", report)
 
             applied_document = copy.deepcopy(expected)
             applied_document["platform_ssh_allowed_cidrs"] = ["10.82.0.0/16"]
             applied.write_text(yaml.safe_dump(applied_document), encoding="utf-8")
-            refused = root / "refused.yml"
-            with self.assertRaises(module.PlatformBundleError) as raised:
-                module.materialize_runtime_variables(
-                    Path("ignored.sops.yml"),
-                    refused,
-                    applied_runtime=applied,
-                )
-            self.assertIn("explicitly applied access contract", str(raised.exception))
-            self.assertFalse(refused.exists())
+            reported = root / "reported.yml"
+            report = project(reported, applied)
+            self.assertIn("platform_ssh_allowed_cidrs", report)
+            self.assertEqual(yaml.safe_load(reported.read_text(encoding="utf-8")), expected)
+
+            # Значения не печатаются никогда: в проекции лежит токен бота, а
+            # транскрипт исполнителя читают и хранят.
+            secret = copy.deepcopy(expected)
+            secret["platform_alertmanager_telegram_bot_token"] = "54321:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            applied.write_text(yaml.safe_dump(secret), encoding="utf-8")
+            quiet = root / "quiet.yml"
+            report = project(quiet, applied)
+            self.assertIn("platform_alertmanager_telegram_bot_token", report)
+            self.assertNotIn(expected["platform_alertmanager_telegram_bot_token"], report)
+            self.assertNotIn("54321:bbbb", report)
+
+            # Первый прогон на чистом хабе: сравнивать не с чем, и это не повод
+            # ни падать, ни жаловаться.
+            missing = root / "never-applied.yml"
+            first = root / "first.yml"
+            self.assertEqual(project(first, missing), "")
+            self.assertEqual(yaml.safe_load(first.read_text(encoding="utf-8")), expected)
 
             legacy_refused = root / "legacy-refused.yml"
             with self.assertRaises(module.PlatformBundleError) as legacy_raised:
-                module.materialize_runtime_variables(
-                    Path("ignored.sops.yml"),
-                    legacy_refused,
-                    applied_runtime=None,
-                    executor_listen_port=51821,
-                )
+                project(legacy_refused, None, executor_listen_port=51821)
             self.assertIn("installed executor listen port", str(legacy_raised.exception))
             self.assertFalse(legacy_refused.exists())
 
@@ -1677,11 +1715,7 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
             legacy_applied.pop("platform_wireguard_runner_peers")
             applied.write_text(yaml.safe_dump(legacy_applied), encoding="utf-8")
             transitioned = root / "transitioned.yml"
-            module.materialize_runtime_variables(
-                Path("ignored.sops.yml"),
-                transitioned,
-                applied_runtime=applied,
-            )
+            self.assertEqual(project(transitioned, applied), "")
             self.assertEqual(
                 yaml.safe_load(transitioned.read_text(encoding="utf-8")),
                 expected,

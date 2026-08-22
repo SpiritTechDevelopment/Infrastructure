@@ -74,12 +74,17 @@ runtime_arguments=(
   --bundle "$worktree/inventories/bootstrap/platform.sops.yml"
   --output "$platform_vars"
 )
+# Контракт доступа применяется из отревьюенного коммита, как и всё остальное в
+# этом прогоне. Раньше здесь стояли два отказа: apply требовал уже применённого
+# контракта на диске и отвергал любое расхождение с Git, поэтому ростер
+# операторов двигался только защищённой операцией с рабочей станции. Оба сняты
+# сознательно — цена и обоснование записаны в AGENTS.md.
+#
+# Файл на диске остаётся, но теперь он — запись о прошлом прогоне, а не гейт:
+# скрипт сравнивает с ним и печатает, какие поля контракта меняет эта выкатка.
+# Его отсутствие на новом хабе больше не повод останавливаться.
 if test "$mode" = apply; then
-  test -s "{{ platform_runtime_vars_file }}" || {
-    printf '%s\n' 'missing explicitly applied management access contract' >&2
-    exit 66
-  }
-  runtime_arguments+=(--require-applied-runtime "{{ platform_runtime_vars_file }}")
+  runtime_arguments+=(--compare-applied-runtime "{{ platform_runtime_vars_file }}")
 fi
 "$python" "${runtime_arguments[@]}"
 
