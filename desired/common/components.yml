@@ -57,6 +57,10 @@ components:
         repository: ENC[AES256_GCM,data:KfLiZDmrc7d8iIX/PwxLmpbtMg==,iv:rhaP0M0CPFHdvdepE9iKRNHnESWXILpSbCJTaSnic7c=,tag:bIGtdGDQM58GPlYarAePGw==,type:str]
         tag: ENC[AES256_GCM,data:1s/DaDUEkQ==,iv:O1iXqlNQ2UqiajDxE5/xn+LrjuJN6h8beBkzcpXvCv4=,tag:o8rynfxx0T5s4YzEq3b8pA==,type:str]
         digest: ENC[AES256_GCM,data:haDU4e/ysfFdsyAhPyhJImMvzUdU77AbmvdVAYw7Xo2sSzV/5LKVVg5zWB4BDuXxtwJSzb1N/PtTSUn2uk3hbM9R1IjF34Q=,iv:ecR1k75wCSFakdGRcJ9p1FDdDDOqgEnKGkiQ+5eMEWc=,tag:BePEUs5ddB4HO5v5WlNLcQ==,type:str]
+    netbird_client:
+        repository: ENC[AES256_GCM,data:4HUWN8vOCK9ChVRI+4nFZAo=,iv:9eGqWA053aa9b4HQaVYDCkUOG7tCUXyKIVWwXnGVomw=,tag:aCgd5csnLKYgSfnpsFaLtw==,type:str]
+        tag: ENC[AES256_GCM,data:5KwUqftX,iv:GMgfIZ086zJzW9VSyOIvOXcqxyi65IwjeXZSlbGX+6o=,tag:h0Yn+7lARDqkHRfrv84a6g==,type:str]
+        digest: ENC[AES256_GCM,data:+MoEAw4G3UZxFRjLObHjFPgOyH5hyVFArdWrDYZ+E/UonRKbQj0wTed2oU5FO1R+hJBIN9HG41uj3e4IQuprsdImNZe2HZc=,iv:H0u1q6qETDU+fM5o3r7kD33tOB9QhEs4G6LUmza/Jd0=,tag:HMMQllZyz84jCVV7mFCAFg==,type:str]
 sops:
     age:
         - enc: |
@@ -86,7 +90,7 @@ sops:
             61t1waEjlucIur2RbZi3qh8d5jygSKkz0PsGpqdBnE0xANBxhU3P+A==
             -----END AGE ENCRYPTED FILE-----
           recipient: age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
-    lastmodified: "2026-08-22T22:50:26Z"
-    mac: ENC[AES256_GCM,data:Gfp9VG2aJIaPXp7A2dB8xoHSxx1W5R6etA66TStTjaZ/3ox00sAvNY0EBM8jHOY6oSME4jjRqZMKGgz5jFHYJEiw+ttdIGtb5qv7TzYpmBez4fu2KlRup2Sqx9SNRBl3msZqd0xzalmzScAt7NjOZywB9fZb7Bl8+UwWvc/fMow=,iv:rtEHglkDVFg0ycBRvsPdc+lHcasYneUk5Tlpd+4Eqzs=,tag:dOEUfEWcXAJ4ZLCQ+PF6Nw==,type:str]
+    lastmodified: "2026-08-23T10:39:11Z"
+    mac: ENC[AES256_GCM,data:fBK+kLmXBUB2fWj7KnVTOl2pD0i0lRUCFE/WOY1Yc9DdkWXEElCfClwWvJ78S5wCEG3BWA/z2f9+nBHrIksRqxkMUBYNJfUg3lNKbZ36KK8ZTNPZhwT/SA5xuNrw0/GNx4nlUyn59/OxjdHC2Q3MHe/8XRo/bwUv3i1LQZgEbSk=,iv:eB2mYk5iVNF9A+LryCoAWRoWmhz/74oBAl7N85qAyr0=,tag:uaLktHnla8hADvvmUCOWrA==,type:str]
     unencrypted_suffix: _unencrypted
     version: 3.13.2
