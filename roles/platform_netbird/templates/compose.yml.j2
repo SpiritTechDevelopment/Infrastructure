@@ -55,7 +55,22 @@ services:
       AUTH_AUTHORITY: "https://{{ platform_netbird_hostname }}/oauth2"
       AUTH_CLIENT_ID: "netbird-dashboard"
       AUTH_AUDIENCE: "netbird-dashboard"
-      AUTH_SUPPORTED_SCOPES: "openid profile email offline_access api"
+      # Без `api`. Этот scope нужен внешним провайдерам, где им выбирается
+      # audience; встроенный Dex его не объявляет — в discovery перечислены
+      # только openid, email, groups, profile и offline_access, — и на
+      # неизвестном scope роняет весь запрос авторизации:
+      #
+      #   ERRO [err: Unrecognized scope(s) ["api"]] failed to parse
+      #   authorization request
+      #
+      # Дашборд получает редирект с `error=invalid_scope` и показывает
+      # «Unauthenticated», что уводит в сторону: отказ выглядит как проблема
+      # учётных данных, хотя до проверки пароля дело не доходит.
+      #
+      # Audience при этом не теряется: сервер приравнивает его к client_id
+      # (`combined/cmd/config.go`, AuthClientID = AuthAudience), поэтому
+      # netbird-dashboard в токене оказывается и без отдельного scope.
+      AUTH_SUPPORTED_SCOPES: "openid profile email offline_access"
       AUTH_REDIRECT_URI: "/nb-auth"
       AUTH_SILENT_REDIRECT_URI: "/nb-silent-auth"
       USE_AUTH0: "false"
