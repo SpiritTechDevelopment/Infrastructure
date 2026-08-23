@@ -598,7 +598,19 @@ all:
         self.assertIn("control_plan.backend.migration_image", compose)
         self.assertIn("control_plan.postgres.image", compose)
         self.assertIn("Refuse an implicit PostgreSQL major-version upgrade", tasks)
-        self.assertNotIn("--force-recreate", tasks)
+        # Пересоздание разрешено ровно условное. Compose хеширует путь к
+        # `env_file`, а не его содержимое, поэтому без флага переписанный
+        # backend.env не доезжает до работающего контейнера, а выкатка выглядит
+        # успешной. Запрет здесь раньше стоял безусловный и вместе с водой
+        # выносил этот случай; смысл был в другом — не класть контур на каждом
+        # прогоне, и его держит условие рядом.
+        self.assertIn(
+            "(['--force-recreate'] if _control_backend_inputs_changed else [])", tasks
+        )
+        self.assertIn(
+            "_control_backend_environment.changed or _control_secret_files.changed",
+            tasks,
+        )
         self.assertNotIn("compose\n      - down", tasks)
 
     def test_optional_platform_component_decouples_two_deployments(self) -> None:
@@ -985,6 +997,43 @@ all:
         # Миграции гоняются только на смене релиза, и признак релиза у бота
         # свой: выкатка бэкенда не должна их повторять.
         self.assertIn("_control_bot_release_changed", apply_tasks)
+
+    def test_env_file_changes_reach_the_running_containers(self) -> None:
+        """Переписанный env-файл обязан пересоздавать контейнер.
+
+        Compose хеширует путь к `env_file`, а не то, что внутри. `up -d` без
+        `--force-recreate` оставляет контейнер со старым окружением, и это
+        худший вид отказа: Ansible сообщает changed, выкатка зелёная, а новый
+        секрет из Vault доезжает до файла на диске и останавливается там до
+        следующей смены образа.
+
+        Проверено `docker compose config --hash`: правка значения внутри
+        env-файла hash сервиса не меняет, а инлайновый `environment` — меняет.
+        """
+        main_tasks = (
+            REPO_ROOT / "roles" / "control_runtime" / "tasks" / "main.yml"
+        ).read_text(encoding="utf-8")
+        apply_tasks = (
+            REPO_ROOT / "roles" / "control_runtime" / "tasks" / "bot-apply.yml"
+        ).read_text(encoding="utf-8")
+        compose = (
+            REPO_ROOT / "roles" / "control_runtime" / "templates" / "compose.yml.j2"
+        ).read_text(encoding="utf-8")
+        tasks = main_tasks + apply_tasks
+
+        for condition in (
+            "(['--force-recreate'] if _control_backend_inputs_changed else [])",
+            "(['--force-recreate'] if _control_bot_inputs_changed else [])",
+            "(['--force-recreate'] if _control_bot_tunnel_environment.changed else [])",
+        ):
+            self.assertIn(condition, tasks)
+
+        # Шесть — это backend, bot, bot-api, bot-tunnel и две миграции.
+        # Миграции запускаются через `run --rm`, где контейнер каждый раз
+        # новый, поэтому пересоздавать нечего. Число зафиксировано намеренно:
+        # седьмой сервис с env_file обязан объяснить, как до него доезжает
+        # изменившееся окружение.
+        self.assertEqual(compose.count("env_file:"), 6)
 
     def test_metrics_surfaces_never_leave_the_management_overlay(self) -> None:
         control_compose = (

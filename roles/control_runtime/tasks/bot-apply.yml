@@ -125,23 +125,21 @@
   changed_when: true
   no_log: true
 
+# Пересоздание при изменившемся bot.env или файлах секретов — по той же
+# причине, что у бэкенда: Compose хеширует путь к `env_file`, а не содержимое.
+# Без этого новый токен или DSN, положенный в Vault, доезжает до bot.env и
+# останавливается там до следующего релиза бота.
 - name: Reconcile the bot and its mini app
   ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - -f
-      - "{{ control_plan.paths.root }}/compose.yml"
-      - up
-      - -d
-      - --no-deps
-      - --wait
-      - --wait-timeout
-      - "60"
-      - --pull
-      - "{{ control_compose_pull_policy }}"
-      - bot
-      - bot-api
+    argv: >-
+      {{ ['docker', 'compose', '-f', control_plan.paths.root ~ '/compose.yml',
+          'up', '-d', '--no-deps']
+         + (['--force-recreate'] if _control_bot_inputs_changed else [])
+         + ['--wait', '--wait-timeout', '60',
+            '--pull', control_compose_pull_policy, 'bot', 'bot-api'] }}
+  vars:
+    _control_bot_inputs_changed: >-
+      {{ _control_bot_environment.changed or _control_bot_secret_files.changed }}
   register: _control_bot_apply
   changed_when: >-
     _control_compose.changed
@@ -158,17 +156,11 @@
 # into a visible outage on the customer's side.
 - name: Reconcile the public tunnel
   ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - -f
-      - "{{ control_plan.paths.root }}/compose.yml"
-      - up
-      - -d
-      - --no-deps
-      - --pull
-      - "{{ control_compose_pull_policy }}"
-      - bot-tunnel
+    argv: >-
+      {{ ['docker', 'compose', '-f', control_plan.paths.root ~ '/compose.yml',
+          'up', '-d', '--no-deps']
+         + (['--force-recreate'] if _control_bot_tunnel_environment.changed else [])
+         + ['--pull', control_compose_pull_policy, 'bot-tunnel'] }}
   register: _control_bot_tunnel_apply
   changed_when: >-
     _control_compose.changed

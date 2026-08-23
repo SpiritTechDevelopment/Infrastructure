@@ -510,22 +510,27 @@
   changed_when: true
   no_log: true
 
+# Пересоздание, а не просто `up`, когда изменилось содержимое env-файла или
+# файлов секретов. Compose хеширует путь к `env_file`, а не то, что внутри:
+# переписанный backend.env оставляет контейнер работать со старым окружением, и
+# выкатка при этом зелёная — Ansible честно сообщает changed, а до процесса
+# ничего не доходит до следующей смены образа. Проверено на `compose config
+# --hash`: правка значения внутри файла hash не меняет, инлайновый
+# `environment` — меняет.
+#
+# Флаг условный намеренно. Безусловный пересоздавал бы контур на каждом прогоне,
+# ради чего он здесь и был запрещён.
 - name: Reconcile only the backend service
   ansible.builtin.command:
-    argv:
-      - docker
-      - compose
-      - -f
-      - "{{ control_plan.paths.root }}/compose.yml"
-      - up
-      - -d
-      - --no-deps
-      - --wait
-      - --wait-timeout
-      - "60"
-      - --pull
-      - "{{ control_compose_pull_policy }}"
-      - backend
+    argv: >-
+      {{ ['docker', 'compose', '-f', control_plan.paths.root ~ '/compose.yml',
+          'up', '-d', '--no-deps']
+         + (['--force-recreate'] if _control_backend_inputs_changed else [])
+         + ['--wait', '--wait-timeout', '60',
+            '--pull', control_compose_pull_policy, 'backend'] }}
+  vars:
+    _control_backend_inputs_changed: >-
+      {{ _control_backend_environment.changed or _control_secret_files.changed }}
   register: _control_backend_apply
   changed_when: >-
     _control_compose.changed
