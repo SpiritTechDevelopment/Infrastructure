@@ -602,6 +602,80 @@ all:
         self.assertNotIn("--force-recreate", tasks)
         self.assertNotIn("compose\n      - down", tasks)
 
+    def test_optional_platform_component_decouples_two_deployments(self) -> None:
+        """Необязательный компонент существует ради порядка выкатки.
+
+        Обязательный компонент, названный в скрипте раньше, чем он появился в
+        зашифрованном `components.yml`, роняет платформенную выкатку целиком —
+        тот же класс, что новое обязательное поле схемы, ломающее план против
+        предыдущей выкатки. Отсюда требование: пока компонента нет, переменная
+        просто отсутствует, а роль отказывается включаться сама.
+
+        Проверяется обе стороны. Без второй тест разрешил бы объявить
+        компонент и не получить пин — то есть молча выкатить роль с пустым
+        образом.
+        """
+        path = REPO_ROOT / "scripts" / "platform-component-vars.py"
+        spec = importlib.util.spec_from_file_location("spiritvpn_component_vars", path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        schema = REPO_ROOT / "contracts" / "desired-state" / "components.schema.json"
+        components = {
+            name: {
+                "repository": f"example.invalid/{name}",
+                "tag": "1",
+                "digest": "sha256:" + "0" * 64,
+            }
+            for name in module.PLATFORM_COMPONENT_VARIABLES
+        }
+        optional = sorted(module.PLATFORM_OPTIONAL_COMPONENT_VARIABLES)
+        self.assertTrue(optional, "необязательных компонентов не осталось")
+        name = optional[0]
+        variable = module.PLATFORM_OPTIONAL_COMPONENT_VARIABLES[name]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            document = Path(temporary) / "components.yml"
+
+            document.write_text(
+                yaml.safe_dump({"schema_version": 1, "components": components}),
+                encoding="utf-8",
+            )
+            without = module.platform_component_variables(document, schema)
+            self.assertNotIn(variable, without)
+            # Обязательные при этом обязаны материализоваться все.
+            self.assertEqual(
+                set(without), set(module.PLATFORM_COMPONENT_VARIABLES.values())
+            )
+
+            declared = dict(components)
+            declared[name] = {
+                "repository": "example.invalid/optional",
+                "tag": "2",
+                "digest": "sha256:" + "1" * 64,
+            }
+            document.write_text(
+                yaml.safe_dump({"schema_version": 1, "components": declared}),
+                encoding="utf-8",
+            )
+            with_optional = module.platform_component_variables(document, schema)
+            self.assertEqual(
+                with_optional[variable],
+                "example.invalid/optional:2@sha256:" + "1" * 64,
+            )
+
+            # Необязательность касается объявления, а не закрепления: объявленный
+            # компонент без digest — это тег, то есть перезапуск, приносящий
+            # другой образ.
+            declared[name] = dict(declared[name], digest=None)
+            document.write_text(
+                yaml.safe_dump({"schema_version": 1, "components": declared}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(module.PlatformComponentError):
+                module.platform_component_variables(document, schema)
+
     def test_control_backup_contract_is_git_owned_and_local_drift_fails_closed(self) -> None:
         path = REPO_ROOT / "scripts" / "control-contract-check.py"
         spec = importlib.util.spec_from_file_location("spiritvpn_control_contract", path)
@@ -1073,7 +1147,41 @@ all:
 
         # Расхождение между bootstrap и steady означало бы хаб, у которого
         # доступ к бэкенду то появляется, то пропадает.
-        self.assertEqual(rules["bootstrap"], rules["steady"])
+        #
+        # Исключение ровно одно — правила оверлея NetBird. Роль
+        # `platform_netbird` входит только в steady: bootstrap поднимает чистую
+        # VPS, где управляющего оверлея ещё нет, и правило не может ссылаться
+        # на переменные не подключённой роли. Отрыва оператора это не создаёт,
+        # потому что на новой машине отрывать нечего, а установившийся контур
+        # обновляет себя через steady.
+        #
+        # Исключение опознаётся по интерфейсу, а не по позиции в списке:
+        # позиция меняется при любой вставке и тихо расширила бы исключение.
+        def without_overlay(entries: list[dict]) -> list[dict]:
+            return [
+                entry
+                for entry in entries
+                if "netbird" not in str(entry.get("interface", ""))
+            ]
+
+        self.assertEqual(without_overlay(rules["bootstrap"]), without_overlay(rules["steady"]))
+
+        # Само исключение проверяется, а не только вычитается: правило оверлея
+        # обязано существовать в steady и отсутствовать в bootstrap. Без этого
+        # вычитание выше стало бы слепым к его пропаже.
+        overlay_rules = {
+            name: [entry for entry in rules[name] if entry not in without_overlay(rules[name])]
+            for name in rules
+        }
+        self.assertEqual(len(overlay_rules["steady"]), 1, rules["steady"])
+        self.assertEqual(overlay_rules["bootstrap"], [])
+        # Сеть оверлея целиком — временное упрощение на срок, пока в нём нет
+        # нод; с их приходом правило заменяется на ACL. Проверяется, что оно
+        # ограничено хотя бы CIDR и портами, а не открыто целиком.
+        self.assertEqual(
+            overlay_rules["steady"][0]["cidrs"], ["{{ platform_netbird_network }}"]
+        )
+        self.assertIn("platform_vault_api_port", overlay_rules["steady"][0]["ports"])
 
         # Правил стало несколько: после того как оверлей перестал быть доверенным
         # целиком, вход на хабе объявляется поимённо. Поэтому правило бэкенда

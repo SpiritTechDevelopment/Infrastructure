@@ -39,6 +39,43 @@
       - platform_netbird_metrics_port | int not in [platform_node_exporter_port | int, platform_alertmanager_port | int]
     fail_msg: "The management overlay inputs are incomplete or unsafe."
 
+# Отдельным блоком, а не строками в общей проверке выше: клиент выключен по
+# умолчанию, и требования к нему предъявляются только когда его включили.
+- name: Validate the overlay client inputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        platform_netbird_client_image
+        is match('^[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}$')
+      - platform_netbird_client_peer_hostname | length > 0
+      - platform_netbird_client_interface | length > 0
+    fail_msg: >-
+      The overlay client is enabled but its image is unpinned or absent.
+      Declare the netbird_client component in the common desired state first;
+      until it is declared the pin stays empty by design.
+  when: platform_netbird_client_enabled
+
+- name: Require the overlay client registration key to be present on the hub
+  ansible.builtin.stat:
+    path: "{{ platform_netbird_client_setup_key_file }}"
+  register: _platform_netbird_client_setup_key
+  when: platform_netbird_client_enabled
+
+# Ключ выпускает сервер, а не объявляет Git, поэтому здесь его отсутствие —
+# незаконченная ручная процедура, а не поломка. Сообщение называет её целиком:
+# оператор читает его в тот момент, когда чинит выкатку.
+- name: Refuse to start the overlay client without a registration key
+  ansible.builtin.assert:
+    that:
+      - _platform_netbird_client_setup_key.stat.exists
+    fail_msg: >-
+      The overlay client registration key is missing at
+      {{ platform_netbird_client_setup_key_file }}.
+      Issue a setup key from the NetBird dashboard and place it there as a
+      single line, readable by root only. The key is a runtime fact issued by
+      the server, so it is delivered as a file and never through Git.
+  when: platform_netbird_client_enabled
+
 - name: Require the TLS material to be present on the hub
   ansible.builtin.stat:
     path: "{{ item }}"
@@ -71,9 +108,9 @@
     owner: root
     group: root
     mode: "0700"
-  loop:
-    - "{{ platform_netbird_dir }}"
-    - "{{ platform_netbird_data_dir }}"
+  loop: >-
+    {{ [platform_netbird_dir, platform_netbird_data_dir]
+       + ([platform_netbird_client_data_dir] if platform_netbird_client_enabled else []) }}
 
 # Секреты заводятся один раз и переживают выкатки. Пересозданный authSecret
 # порвал бы relay для уже подключённых peer'ов, а новый encryptionKey сделал бы
@@ -192,3 +229,52 @@
   until: _platform_netbird_readiness.json.certificate_valid | default(false)
   changed_when: false
   when: not ansible_check_mode
+
+# Утверждается, а не предполагается. Запустившийся контейнер клиента ничего не
+# доказывает: регистрация могла не пройти по протухшему ключу или исчерпанному
+# лимиту использований, и тогда роль осталась бы зелёной при пустом оверлее —
+# ровно тот отказ, который не находится, потому что ничего не ломает.
+#
+# Адрес читается с интерфейса, а не из `netbird status`: интерфейс с адресом и
+# есть то, на что опирается правило firewall.
+#
+# Проверяется наличие адреса, а не его принадлежность объявленной сети. Второе
+# потребовало бы фильтра `ipaddr` из ansible.utils, а этой коллекции в контуре
+# нет — ставить её на хаб ради одной проверки дороже, чем она стоит. Нужный
+# отказ ловится и так: незарегистрировавшийся клиент не поднимает интерфейс
+# вовсе, и адреса нет никакого.
+- name: Require the hub to hold an address in the management overlay
+  ansible.builtin.command:
+    argv:
+      - ip
+      - -4
+      - -oneline
+      - address
+      - show
+      - dev
+      - "{{ platform_netbird_client_interface }}"
+  register: _platform_netbird_client_address
+  retries: 12
+  delay: 5
+  until: >-
+    _platform_netbird_client_address.rc == 0
+    and 'inet ' in _platform_netbird_client_address.stdout
+  changed_when: false
+  failed_when: false
+  when:
+    - platform_netbird_client_enabled
+    - not ansible_check_mode
+
+- name: Report an overlay client that never joined the network
+  ansible.builtin.assert:
+    that:
+      - _platform_netbird_client_address.rc | default(1) == 0
+      - "'inet ' in _platform_netbird_client_address.stdout | default('')"
+    fail_msg: >-
+      The overlay client did not obtain an address on
+      {{ platform_netbird_client_interface }}.
+      The usual cause is a spent or expired setup key; `docker compose -f
+      {{ platform_netbird_dir }}/compose.yml logs client` names it.
+  when:
+    - platform_netbird_client_enabled
+    - not ansible_check_mode

@@ -31,6 +31,21 @@ PLATFORM_COMPONENT_VARIABLES = {
     "nginx_mask": "platform_netbird_proxy_image",
 }
 
+# Компоненты, которых может не быть в общем desired state. Отсутствие такого
+# компонента — не ошибка: переменная просто не задаётся, а роль, которой она
+# нужна, отказывается включаться.
+#
+# Разделение существует ради порядка выкатки. Обязательный компонент,
+# добавленный сюда раньше, чем он появился в зашифрованном components.yml,
+# роняет платформенную выкатку целиком — тот же класс, что новое обязательное
+# поле схемы, ломающее план против предыдущей выкатки. Необязательность
+# развязывает два коммита, которые иначе обязаны быть одним.
+PLATFORM_OPTIONAL_COMPONENT_VARIABLES = {
+    # Клиент оверлея на самом хабе. Отдельный образ, а не тот же, что сервер:
+    # сервер — netbirdio/netbird-server, клиент — netbirdio/netbird.
+    "netbird_client": "platform_netbird_client_image",
+}
+
 
 class PlatformComponentError(Exception):
     """The canonical component declaration cannot drive the platform roles."""
@@ -83,8 +98,13 @@ def platform_component_variables(components_path: Path, schema_path: Path) -> di
             "common desired state is missing platform components: " + ", ".join(missing)
         )
 
+    declared = dict(PLATFORM_COMPONENT_VARIABLES)
+    for component_name, variable_name in PLATFORM_OPTIONAL_COMPONENT_VARIABLES.items():
+        if component_name in components:
+            declared[component_name] = variable_name
+
     variables: dict[str, str] = {}
-    for component_name, variable_name in PLATFORM_COMPONENT_VARIABLES.items():
+    for component_name, variable_name in declared.items():
         component = components[component_name]
         digest = component["digest"]
         if digest is None:

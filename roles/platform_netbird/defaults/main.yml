@@ -45,9 +45,10 @@ platform_netbird_metrics_port: 9099
 platform_netbird_healthcheck_bind_address: 127.0.0.1
 platform_netbird_healthcheck_port: 9000
 
-# TLS терминирует сам сервер — обратный прокси не нужен. Материал подаётся
-# файлами, уже лежащими на хабе, а не переменными: приватный ключ не должен
-# проходить через факты Ansible и через SOPS-бандл третьей копией.
+# TLS терминирует обратный прокси, а не сервер (см. platform_netbird_listen_port
+# выше). Материал подаётся файлами, уже лежащими на хабе, а не переменными:
+# приватный ключ не должен проходить через факты Ansible и через SOPS-бандл
+# третьей копией.
 platform_netbird_tls_certificate_file: /etc/spiritvpn/netbird/tls/fullchain.pem
 platform_netbird_tls_private_key_file: /etc/spiritvpn/netbird/tls/privkey.pem
 
@@ -69,3 +70,40 @@ platform_netbird_network: ""
 platform_netbird_log_level: info
 platform_netbird_log_max_size: 10m
 platform_netbird_log_max_files: "3"
+
+# --- Клиент оверлея на самом хабе --------------------------------------------
+#
+# Сервер NetBird в собственную сеть не входит: сеть образуют клиенты. Без этого
+# блока у хаба нет адреса в оверлее, подключившийся оператор оказывается в сети,
+# где он единственный peer, и до Grafana с Vault добраться нечем.
+#
+# Выключено по умолчанию, потому что включение требует ключа регистрации, а тот
+# выпускается из дашборда уже работающего сервера. Первый прогон роли обязан
+# проходить без него.
+platform_netbird_client_enabled: false
+
+# Пустой по умолчанию, как и остальные образы: приезжает закреплённым по digest.
+# Компонент netbird_client объявлен необязательным в
+# scripts/platform-component-vars.py, поэтому до его появления в общем desired
+# state значение остаётся пустым, а роль отказывается включать клиента.
+platform_netbird_client_image: ""
+
+# Состояние клиента: default.json и active_profile.json. Путь взят из
+# `profilemanager.DefaultConfigPathDir` v0.76.3, а не из документации. `/etc/netbird`
+# там же назван старым путём, с которого делается миграция, — монтировать надо
+# именно этот. Ошибка стоила бы регистрации нового peer'а на каждый перезапуск.
+platform_netbird_client_data_dir: /var/lib/spiritvpn/netbird-client
+
+# Ключ регистрации — рантайм-факт: его выпускает сервер, а не объявляет Git.
+# Подаётся файлом по той же причине и тем же способом, что TLS-материал выше;
+# клиент умеет читать его сам через --setup-key-file, поэтому секрет не проходит
+# ни через compose.yml, ни через окружение контейнера.
+platform_netbird_client_setup_key_file: /var/lib/spiritvpn/netbird-client-setup-key
+
+# Имя хаба как peer'а. Оно же станет именем в DNS оверлея, поэтому меняет смысл
+# при смене: раздел 3.1 документа о переходе строит адресацию по именам.
+platform_netbird_client_peer_hostname: management-1
+
+# Интерфейс, который поднимает клиент. Значение по умолчанию у NetBird — wt0;
+# объявлено здесь, потому что на него ссылается правило firewall.
+platform_netbird_client_interface: wt0

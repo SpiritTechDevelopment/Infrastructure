@@ -15,9 +15,9 @@
     common_manage_sysctl: true
     common_enable_unattended_upgrades: true
     common_enable_auditd: true
-    # 443 — управляющий оверлей NetBird: один порт на Management, Signal и
-    # Relay. Открыт намеренно: в него ходят и ноды, и операторы, а TLS
-    # терминирует сам сервер своим wildcard.
+    # 443 — управляющий оверлей NetBird: один порт на Management, Signal, Relay
+    # и дашборд. Открыт намеренно: в него ходят и ноды, и операторы, а TLS
+    # терминирует обратный прокси своим wildcard — сам сервер этого не делает.
     common_public_tcp_ports: ["{{ platform_netbird_listen_port }}"]
     # STUN проксировать нельзя — обратный прокси обслуживает только TCP.
     # WireGuard остаётся здесь как break-glass: он перестал быть транспортом,
@@ -85,6 +85,27 @@
       - ports: ["{{ platform_loki_port }}"]
         cidrs: "{{ platform_overlay_networks }}"
         interface: "{{ platform_wireguard_interface }}"
+      # Оверлей NetBird, пока в нём нет нод. Политика ACL намеренно не пишется:
+      # peer'ы — операторы, хаб и раннеры, а им тот же доступ уже роздан
+      # WireGuard'ом, поэтому Default-политика NetBird не расширяет поверхность
+      # (раздел 3.9 docs/architecture/NETBIRD_MIGRATION.md).
+      #
+      # Отсюда и грубость правила: разделения операторов и раннеров внутри него
+      # нет. Но доверить интерфейс целиком нельзя даже сейчас — на хабе есть
+      # слушатели на всех интерфейсах, которых нет в этом списке: Loki на
+      # 0.0.0.0, management и метрики самого NetBird на *:8081 и *:9099, где
+      # дисциплины bind не существует. Доверенный интерфейс отдал бы каждому
+      # peer'у management мимо прокси и мимо TLS.
+      #
+      # Заменяется на ACL при вводе первой ноды в оверлей, это предусловие
+      # этапа 6. Тогда же уходит и CIDR: сеть NetBird включает и ноды.
+      - ports: >-
+          {{ (common_ssh_ports | list)
+             + [platform_grafana_port | int,
+                platform_vault_api_port | int,
+                platform_loki_port | int] }}
+        cidrs: ["{{ platform_netbird_network }}"]
+        interface: "{{ platform_netbird_client_interface }}"
     # Grafana слушает управляющий оверлей: операторы достают её оттуда, а не
     # SSH-туннелем. Адрес берётся из контракта; какой именно из адресов хаба —
     # безразлично, они все на одном wg0, и любой операторский peer достаёт

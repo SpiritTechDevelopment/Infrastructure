@@ -74,3 +74,44 @@ services:
     depends_on:
       - netbird
       - dashboard
+{% if platform_netbird_client_enabled %}
+
+  # Клиент оверлея. Отдельный образ, а не тот же, что у сервера: сервер живёт в
+  # netbirdio/netbird-server, клиент — в netbirdio/netbird.
+  #
+  # Он делает хаб участником собственной сети. Без него сервер раздаёт оверлей,
+  # в котором сам не состоит, и подключившемуся оператору не с кем говорить.
+  client:
+    image: {{ platform_netbird_client_image }}
+    restart: unless-stopped
+    logging: *logging
+    # Сеть хоста обязательна: интерфейс оверлея должен появиться в сетевом
+    # пространстве самого хаба, иначе до Grafana и Vault он не доводит.
+    network_mode: host
+    # Набор из client/Dockerfile v0.76.3, где он указан в примере запуска.
+    # NET_ADMIN — интерфейс и маршруты, NET_RAW и BPF — обработка пакетов.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - BPF
+    # Запасной путь на случай ядра без модуля WireGuard: тогда клиент поднимает
+    # интерфейс в userspace через TUN.
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      NB_MANAGEMENT_URL: "https://{{ platform_netbird_hostname }}"
+      NB_HOSTNAME: "{{ platform_netbird_client_peer_hostname }}"
+      NB_SETUP_KEY_FILE: /etc/netbird-setup-key
+      NB_LOG_LEVEL: "{{ platform_netbird_log_level }}"
+      # Образ по умолчанию пишет и в консоль, и в файл внутри контейнера.
+      # Файл никуда не смонтирован и рос бы в слое контейнера без предела,
+      # мимо ограничения json-file выше.
+      NB_LOG_FILE: console
+    volumes:
+      - {{ platform_netbird_client_data_dir }}:/var/lib/netbird
+      # Вне каталога состояния намеренно: вложенный bind поверх тома работает,
+      # но зависит от порядка применения монтирований.
+      - {{ platform_netbird_client_setup_key_file }}:/etc/netbird-setup-key:ro
+    depends_on:
+      - proxy
+{% endif %}
