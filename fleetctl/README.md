@@ -113,7 +113,7 @@ For a destructive impact plan, `ALLOW_DESTRUCTIVE=1` is additionally required;
 the same flag is refused when the plan is non-destructive.
 
 Node plans are separate infrastructure topology projections, not backend
-manifests or `infraagent.v1` requests. They contain secret references, never
+manifests or `nodeagent.v1` requests. They contain secret references, never
 resolved secret values.
 
 ## Manual platform bootstrap
