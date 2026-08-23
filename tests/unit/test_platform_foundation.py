@@ -591,7 +591,6 @@ all:
             "control-contract-check.py",
             "--require-applied",
             "playbooks/control/deploy.yml",
-            "refs/control-deployments/$environment",
         ):
             self.assertIn(required, executor)
         self.assertNotIn('--extra-vars "@$config_dir/control.yml"', executor)

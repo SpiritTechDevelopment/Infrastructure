@@ -126,8 +126,3 @@ if test "$mode" = check; then
 fi
 
 PYTHONPATH="$worktree" "{{ platform_executor_dir }}/venv/bin/ansible-playbook" "${arguments[@]}"
-
-if test "$mode" = apply; then
-  git --git-dir="$repository" update-ref \
-    "refs/control-deployments/$environment" "$source_git_sha"
-fi

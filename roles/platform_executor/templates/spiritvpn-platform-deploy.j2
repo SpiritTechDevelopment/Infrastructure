@@ -107,8 +107,3 @@ fi
 
 cd "$worktree"
 "{{ platform_executor_dir }}/venv/bin/ansible-playbook" "${arguments[@]}"
-
-if test "$mode" = apply; then
-  git --git-dir="$repository" update-ref \
-    "refs/platform-deployments/$environment" "$source_git_sha"
-fi
