@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Pack and update SOPS environment topology without writing plaintext to disk."""
+"""Update the SOPS environment topology without writing plaintext to disk."""
 
 from __future__ import annotations
 
 import argparse
 import copy
-import os
 import re
 import subprocess
 import sys
@@ -15,8 +14,6 @@ from typing import Any
 import yaml
 
 
-API_VERSION = "spiritvpn.io/v1alpha1"
-OBJECT_KINDS = {"Environment", "Fleet", "LogicalNode", "Instance"}
 ENVIRONMENT_RE = re.compile(r"^[a-z0-9-]{1,63}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY_RE = re.compile(r"^ghcr\.io/[a-z0-9._/-]+$")
@@ -81,33 +78,6 @@ def encrypt(root: Path, target: Path, document: dict[str, Any]) -> str:
         ],
         content=plaintext,
     )
-
-
-def pack(root: Path, environment: str) -> str:
-    environment_root = root / "desired" / "environments" / environment
-    target = topology_path(root, environment)
-    if not environment_root.is_dir():
-        fail(f"environment directory does not exist: {environment}")
-    if target.exists():
-        fail(f"encrypted topology already exists for {environment}")
-
-    objects: list[dict[str, Any]] = []
-    paths = sorted((*environment_root.rglob("*.yml"), *environment_root.rglob("*.yaml")))
-    for path in paths:
-        document = load_mapping(path.read_text(encoding="utf-8"), str(path))
-        if document.get("apiVersion") != API_VERSION or document.get("kind") not in OBJECT_KINDS:
-            fail(f"unsupported desired-state object in {path}")
-        objects.append(document)
-    if not objects:
-        fail(f"environment {environment} contains no desired-state objects")
-
-    topology = {
-        "apiVersion": API_VERSION,
-        "kind": "EnvironmentTopology",
-        "metadata": {"id": environment},
-        "spec": {"objects": objects},
-    }
-    return encrypt(root, target, topology)
 
 
 def require_release_value(value: str, pattern: re.Pattern[str], name: str) -> None:
@@ -195,11 +165,6 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     subcommands = result.add_subparsers(dest="command", required=True)
 
-    pack_parser = subcommands.add_parser("pack")
-    pack_parser.add_argument("--root", type=Path, default=Path.cwd())
-    pack_parser.add_argument("--environment", required=True)
-    pack_parser.add_argument("--output", type=Path)
-
     bump_parser = subcommands.add_parser("bump")
     bump_parser.add_argument("--root", type=Path, default=Path.cwd())
     bump_parser.add_argument("--environment", required=True)
@@ -218,23 +183,7 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     arguments = parser().parse_args()
-    root = arguments.root.resolve()
-    if arguments.command == "pack":
-        output = pack(root, arguments.environment)
-    else:
-        output = bump(arguments)
-    if arguments.command == "pack" and arguments.output is not None:
-        target = topology_path(root, arguments.environment).resolve()
-        if arguments.output.resolve() != target:
-            fail("pack output must be the environment topology.sops.yml path")
-        try:
-            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-        except OSError as exc:
-            fail(f"cannot create encrypted topology: {exc}")
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(output)
-    else:
-        sys.stdout.write(output)
+    sys.stdout.write(bump(arguments))
 
 
 if __name__ == "__main__":

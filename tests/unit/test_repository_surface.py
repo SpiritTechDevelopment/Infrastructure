@@ -100,8 +100,8 @@ class RepositorySurfaceTests(unittest.TestCase):
                 # answer decides a write to the repository and has to be testable
                 # without a deployment.
                 "deployment-record.py",
-                # Packs and updates the encrypted environment bundle while
-                # keeping plaintext in process memory.
+                # Updates the encrypted environment bundle while keeping
+                # plaintext in process memory.
                 "topology-release.py",
                 # Public CI can validate ciphertext structure and coverage
                 # without receiving any age identity.

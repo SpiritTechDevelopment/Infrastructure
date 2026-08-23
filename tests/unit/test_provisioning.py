@@ -52,14 +52,6 @@ class ManualProvisioningTests(unittest.TestCase):
         resource = next(check for check in report.checks if check.name == "provider_resource_id")
         self.assertFalse(resource.passed)
 
-    def test_create_and_destroy_only_request_operator_action(self) -> None:
-        create = self.adapter.create(self.instance).to_dict()
-        destroy = self.adapter.destroy(self.instance).to_dict()
-        self.assertEqual(create["status"], "OPERATOR_ACTION_REQUIRED")
-        self.assertEqual(destroy["status"], "OPERATOR_ACTION_REQUIRED")
-        self.assertEqual(create["action"], "create")
-        self.assertEqual(destroy["action"], "destroy")
-
 
 if __name__ == "__main__":
     unittest.main()

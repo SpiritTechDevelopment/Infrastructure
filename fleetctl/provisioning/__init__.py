@@ -1,7 +1,6 @@
 from .manual import ManualProvisioningAdapter
 from .model import (
     InstanceDescription,
-    OperatorActionRequired,
     PreflightCheck,
     ProvisioningAdapter,
     ProvisioningReport,
@@ -10,7 +9,6 @@ from .model import (
 __all__ = [
     "InstanceDescription",
     "ManualProvisioningAdapter",
-    "OperatorActionRequired",
     "PreflightCheck",
     "ProvisioningAdapter",
     "ProvisioningReport",

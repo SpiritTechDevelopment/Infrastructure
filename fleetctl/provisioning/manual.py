@@ -8,7 +8,6 @@ from fleetctl.model import Instance
 
 from .model import (
     InstanceDescription,
-    OperatorActionRequired,
     PreflightCheck,
     ProvisioningReport,
 )
@@ -70,26 +69,6 @@ class ManualProvisioningAdapter:
                     passed=address_valid,
                     diagnostic=address_diagnostic,
                 ),
-            ),
-        )
-
-    def create(self, instance: Instance) -> OperatorActionRequired:
-        return OperatorActionRequired(
-            action="create",
-            instance_id=instance.object_id,
-            diagnostic=(
-                "Create the VPS manually, then record its provider_resource_id and public_address "
-                "in desired state before rerunning preflight."
-            ),
-        )
-
-    def destroy(self, instance: Instance) -> OperatorActionRequired:
-        return OperatorActionRequired(
-            action="destroy",
-            instance_id=instance.object_id,
-            diagnostic=(
-                "Automatic destruction is disabled. Verify retirement and destroy the provider "
-                "resource manually with an independent operator confirmation."
             ),
         )
 

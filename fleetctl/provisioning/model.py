@@ -50,26 +50,7 @@ class ProvisioningReport:
         }
 
 
-@dataclass(frozen=True, slots=True)
-class OperatorActionRequired:
-    action: str
-    instance_id: str
-    diagnostic: str
-
-    def to_dict(self) -> dict[str, str]:
-        return {
-            "status": "OPERATOR_ACTION_REQUIRED",
-            "action": self.action,
-            "instance_id": self.instance_id,
-            "diagnostic": self.diagnostic,
-        }
-
-
 class ProvisioningAdapter(Protocol):
     def describe(self, instance: Instance) -> InstanceDescription: ...
 
     def preflight(self, instance: Instance) -> ProvisioningReport: ...
-
-    def create(self, instance: Instance) -> OperatorActionRequired: ...
-
-    def destroy(self, instance: Instance) -> OperatorActionRequired: ...
