@@ -1,6 +1,7 @@
 ---
-# Управляющий overlay контура. Заменяет WireGuard в роли транспорта; сам
-# WireGuard остаётся спящим break-glass, см. docs/architecture/NETBIRD_MIGRATION.md.
+# Операторский доступ к управляющим поверхностям хаба: Grafana и Vault.
+# WireGuard он не заменяет — тот остаётся транспортом флота, и связь хаб → ноды,
+# выкатка и метрики идут через него. См. docs/architecture/NETBIRD_OVERLAY.md.
 
 # Пустой по умолчанию: образ обязан приезжать закреплённым по digest из
 # desired/common/components.yml через scripts/platform-component-vars.py.
