@@ -1148,40 +1148,29 @@ all:
         # Расхождение между bootstrap и steady означало бы хаб, у которого
         # доступ к бэкенду то появляется, то пропадает.
         #
-        # Исключение ровно одно — правила оверлея NetBird. Роль
-        # `platform_netbird` входит только в steady: bootstrap поднимает чистую
-        # VPS, где управляющего оверлея ещё нет, и правило не может ссылаться
-        # на переменные не подключённой роли. Отрыва оператора это не создаёт,
-        # потому что на новой машине отрывать нечего, а установившийся контур
-        # обновляет себя через steady.
+        self.assertEqual(rules["bootstrap"], rules["steady"])
+
+        # Правил на интерфейс NetBird не должно быть ни в одном из плейбуков, и
+        # это утверждение, а не наблюдение.
         #
-        # Исключение опознаётся по интерфейсу, а не по позиции в списке:
-        # позиция меняется при любой вставке и тихо расширила бы исключение.
-        def without_overlay(entries: list[dict]) -> list[dict]:
-            return [
+        # Агент NetBird сам вставляет в эту цепочку `iifname accept` первым
+        # правилом и восстанавливает его через netlink-монитор, если таблицу
+        # пересоздали (`acceptExternalChainsRules` и `externalChainMonitor`,
+        # v0.76.3). Проверено на живом хабе 2026-08-23. Значит любое правило,
+        # дописанное сюда, встанет ниже и не сработает никогда.
+        #
+        # Опасность не в бесполезности, а в том, что такое правило выглядит
+        # ограничением. Читатель, проверяющий границу доверия оверлея, увидит
+        # перечень портов и сделает неверный вывод — в том самом месте, где
+        # ошибка дороже всего. Ограничение живёт в ACL NetBird; до их появления
+        # его нет вовсе, и firewall не должен притворяться, что оно есть.
+        for name, entries in rules.items():
+            overlay = [
                 entry
                 for entry in entries
-                if "netbird" not in str(entry.get("interface", ""))
+                if "netbird" in str(entry.get("interface", ""))
             ]
-
-        self.assertEqual(without_overlay(rules["bootstrap"]), without_overlay(rules["steady"]))
-
-        # Само исключение проверяется, а не только вычитается: правило оверлея
-        # обязано существовать в steady и отсутствовать в bootstrap. Без этого
-        # вычитание выше стало бы слепым к его пропаже.
-        overlay_rules = {
-            name: [entry for entry in rules[name] if entry not in without_overlay(rules[name])]
-            for name in rules
-        }
-        self.assertEqual(len(overlay_rules["steady"]), 1, rules["steady"])
-        self.assertEqual(overlay_rules["bootstrap"], [])
-        # Сеть оверлея целиком — временное упрощение на срок, пока в нём нет
-        # нод; с их приходом правило заменяется на ACL. Проверяется, что оно
-        # ограничено хотя бы CIDR и портами, а не открыто целиком.
-        self.assertEqual(
-            overlay_rules["steady"][0]["cidrs"], ["{{ platform_netbird_network }}"]
-        )
-        self.assertIn("platform_vault_api_port", overlay_rules["steady"][0]["ports"])
+            self.assertEqual(overlay, [], f"{name}: {overlay}")
 
         # Правил стало несколько: после того как оверлей перестал быть доверенным
         # целиком, вход на хабе объявляется поимённо. Поэтому правило бэкенда
