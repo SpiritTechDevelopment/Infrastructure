@@ -127,6 +127,43 @@
     - "{{ platform_netbird_store_encryption_key_file }}"
     - "{{ platform_netbird_owner_password_file }}"
 
+# Конфигурации отдаётся хеш, а не пароль: ключ `password` у NetBird означает
+# `Hash`, см. комментарий в defaults. Пароль при этом остаётся на диске —
+# оператору он нужен, чтобы войти в первый раз.
+#
+# Соответствие проверяется, а не предполагается. Хеш нельзя привязать к паролю
+# через `creates`: файлы независимы, и ротация пароля оставила бы прежний хеш,
+# то есть вход по новому паролю молча перестал бы работать. `checkpw` ловит
+# рассинхрон в обе стороны и обходится тем, что на хабе уже есть, — модуль
+# bcrypt для Python, без passlib и без apache2-utils.
+- name: Materialize the bcrypt hash of the owner password
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      umask 077
+      python3 - {{ platform_netbird_owner_password_file | quote }} {{ platform_netbird_owner_password_hash_file | quote }} <<'PY'
+      import os
+      import sys
+
+      import bcrypt
+
+      password_path, hash_path = sys.argv[1], sys.argv[2]
+      with open(password_path, "rb") as stream:
+          password = stream.read().strip()
+      if os.path.exists(hash_path):
+          with open(hash_path, "rb") as stream:
+              existing = stream.read().strip()
+          if existing and bcrypt.checkpw(password, existing):
+              print("unchanged")
+              raise SystemExit(0)
+      with open(hash_path, "wb") as stream:
+          stream.write(bcrypt.hashpw(password, bcrypt.gensalt(rounds=10)))
+      print("written")
+      PY
+  register: _platform_netbird_owner_hash
+  changed_when: "'written' in _platform_netbird_owner_hash.stdout"
+  when: not ansible_check_mode
+
 - name: Restrict the overlay secrets to root
   ansible.builtin.file:
     path: "{{ item }}"
@@ -138,13 +175,25 @@
     - "{{ platform_netbird_store_encryption_key_file }}"
     - "{{ platform_netbird_owner_password_file }}"
 
+# Отдельно от остальных: в check-режиме предыдущая задача не выполняется, и
+# файла ещё нет — общий цикл упал бы на несуществующем пути.
+- name: Restrict the owner password hash to root
+  ansible.builtin.file:
+    path: "{{ platform_netbird_owner_password_hash_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: not ansible_check_mode
+
 - name: Read the overlay secrets for the rendered configuration
   ansible.builtin.slurp:
     src: "{{ item }}"
   loop:
     - "{{ platform_netbird_auth_secret_file }}"
     - "{{ platform_netbird_store_encryption_key_file }}"
-    - "{{ platform_netbird_owner_password_file }}"
+    # Хеш, а не пароль: в конфигурацию уходит только он, и открытый пароль
+    # незачем протаскивать через факты Ansible.
+    - "{{ platform_netbird_owner_password_hash_file }}"
   register: _platform_netbird_secrets
   no_log: true
   when: not ansible_check_mode
@@ -162,7 +211,7 @@
       {{ (_platform_netbird_secrets.results[0].content | b64decode) | trim }}
     platform_netbird_store_encryption_key: >-
       {{ (_platform_netbird_secrets.results[1].content | b64decode) | trim }}
-    platform_netbird_owner_password: >-
+    platform_netbird_owner_password_hash: >-
       {{ (_platform_netbird_secrets.results[2].content | b64decode) | trim }}
   no_log: true
   when: not ansible_check_mode

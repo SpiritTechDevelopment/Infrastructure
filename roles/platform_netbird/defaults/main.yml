@@ -59,9 +59,21 @@ platform_netbird_auth_secret_file: /var/lib/spiritvpn/netbird-auth-secret
 platform_netbird_store_encryption_key_file: /var/lib/spiritvpn/netbird-store-encryption-key
 
 # Первый администратор встроенного IdP. Пароль генерируется здесь же и
-# показывается оператору один раз — сменить его следует после первого входа.
+# остаётся лежать файлом на хабе — оператор читает его оттуда для первого входа.
 platform_netbird_owner_email: ""
 platform_netbird_owner_password_file: /var/lib/spiritvpn/netbird-owner-password
+
+# Конфигурации отдаётся не пароль, а его bcrypt-хеш, несмотря на то что ключ в
+# YAML называется `password`. Сервер кладёт это значение в поле `Hash`
+# (`combined/cmd/config.go`), объявленное в `management/server/idp/embedded.go`
+# как «bcrypt hash of the user's password (required)». Открытый текст там даёт
+# отказ входа с `hashedSecret too short to be a bcrypted password`, причём
+# дашборд показывает его как проблему учётных данных.
+#
+# Хеш держится отдельным файлом, а не вычисляется на лету: bcrypt недетерминирован
+# из-за соли, поэтому вычисление на каждом прогоне переписывало бы конфигурацию
+# и пересоздавало контейнер без всякой причины.
+platform_netbird_owner_password_hash_file: /var/lib/spiritvpn/netbird-owner-password-hash
 
 # Оверлейная сеть NetBird. Объявляется, а не выясняется: адрес резолвера и
 # доверенные peer-сети — чистые функции от неё.

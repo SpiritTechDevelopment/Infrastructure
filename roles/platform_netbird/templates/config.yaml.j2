@@ -54,7 +54,13 @@ server:
       - "http://localhost:53000/"
     owner:
       email: "{{ platform_netbird_owner_email }}"
-      password: "{{ platform_netbird_owner_password }}"
+      # Здесь bcrypt-хеш, а не пароль. Имя ключа вводит в заблуждение: сервер
+      # кладёт это значение в поле `Hash` (`combined/cmd/config.go`), которое в
+      # `management/server/idp/embedded.go` объявлено как «bcrypt hash of the
+      # user's password (required)». Открытый текст даёт отказ входа с
+      # `hashedSecret too short to be a bcrypted password`, а дашборд показывает
+      # его как проблему учётных данных — то есть уводит в сторону.
+      password: "{{ platform_netbird_owner_password_hash }}"
 
   store:
     # sqlite, а не Postgres контура control. NetBird обязан подниматься и тогда,
