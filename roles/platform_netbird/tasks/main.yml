@@ -287,11 +287,17 @@
 # Адрес читается с интерфейса, а не из `netbird status`: интерфейс с адресом и
 # есть то, на что опирается правило firewall.
 #
-# Проверяется наличие адреса, а не его принадлежность объявленной сети. Второе
-# потребовало бы фильтра `ipaddr` из ansible.utils, а этой коллекции в контуре
-# нет — ставить её на хаб ради одной проверки дороже, чем она стоит. Нужный
-# отказ ловится и так: незарегистрировавшийся клиент не поднимает интерфейс
-# вовсе, и адреса нет никакого.
+# Проверяется и принадлежность объявленной сети. Ранняя редакция этого места
+# ограничивалась наличием адреса, потому что принадлежность требует фильтра
+# `ipaddr` из ansible.utils, а коллекции в контуре нет. Довод был неверный:
+# `ipaddress` есть в стандартной библиотеке Python, и внешних зависимостей
+# сверка не требует.
+#
+# Цена ошибки уже заплачена. Диапазон тенанту выдаёт сервер, случайно внутри
+# 100.64.0.0/10, а `platform_netbird_network` объявляется в контракте руками —
+# и 2026-08-23 объявленное разошлось с выданным. Отказ при этом молчит целиком:
+# выкатка зелёная, интерфейс поднят, адрес есть, а правило firewall построено
+# по чужой сети и не совпадает ни с одним пакетом.
 - name: Require the hub to hold an address in the management overlay
   ansible.builtin.command:
     argv:
@@ -324,6 +330,35 @@
       {{ platform_netbird_client_interface }}.
       The usual cause is a spent or expired setup key; `docker compose -f
       {{ platform_netbird_dir }}/compose.yml logs client` names it.
+  when:
+    - platform_netbird_client_enabled
+    - not ansible_check_mode
+
+- name: Require the declared overlay network to match the one the server issued
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import ipaddress
+        import re
+        import sys
+
+        declared = ipaddress.ip_network(sys.argv[1], strict=True)
+        match = re.search(r"inet (\d+\.\d+\.\d+\.\d+)/", sys.argv[2])
+        if match is None:
+            raise SystemExit("no IPv4 address on the overlay interface")
+        address = ipaddress.ip_address(match.group(1))
+        if address not in declared:
+            raise SystemExit(
+                f"the overlay interface holds {address}, which is outside the "
+                f"declared platform_netbird_network {declared}. The tenant "
+                f"range is issued by the server, so the declaration is what is "
+                f"wrong, not the address."
+            )
+      - "{{ platform_netbird_network }}"
+      - "{{ _platform_netbird_client_address.stdout | default('') }}"
+  changed_when: false
   when:
     - platform_netbird_client_enabled
     - not ansible_check_mode
