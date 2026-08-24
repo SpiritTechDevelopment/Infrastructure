@@ -1,7 +1,7 @@
 ---
 # Everything the bot needs on disk before anything is started. Included rather
 # than guarded task-by-task: `loop` is templated before `when` is evaluated, so
-# a `when: control_plan.bot` on a task looping over `control_plan.bot.secret_refs`
+# a `when: control_plan.bot` on a task looping over `control_plan.bot.paths`
 # would still fail on an environment that declares no bot.
 
 - name: Validate the generated bot boundary
@@ -22,76 +22,30 @@
       - control_plan.bot.ingress.public_origin.startswith('https://')
     fail_msg: "The generated bot plan is incomplete, unpinned, or collides with the backend."
 
-- name: Require every bot secret reference to be resolved
+# Полнота и форма значений проверены резолвером. Здесь проверяются только
+# файлы: их называет сама роль и указывает на них в bot.env, поэтому пропущенное
+# поле — ошибка проводки, и назвать её надо здесь, а не в Jinja.
+- name: Require the bot secret files this role wires into the container
   ansible.builtin.assert:
     that:
-      - item.value in control_secret_values
-      - control_secret_values[item.value] | string | length > 0
-    fail_msg: "A required bot secret was not resolved: {{ item.value }}"
-  loop: "{{ control_plan.bot.secret_refs | dict2items }}"
-  no_log: true
+      - control_bot_required_files | difference(control_bot_files.keys() | list) | length == 0
+    fail_msg: >-
+      В объекте Vault kv/{{ control_plan.environment }}/control/bot/files нет полей:
+      {{ control_bot_required_files | difference(control_bot_files.keys() | list) | join(', ') }}
 
-# Trimmed, and the trim is the point. A break *inside* a value is what has to be
-# refused: these are written one per line into an env file, so an embedded
-# newline silently corrupts the next variable. A *trailing* one is an artifact
-# of how the value was entered — the operator ceremony reads until EOF, so any
-# paste that ends with Enter carries it. Refusing that taught nothing and cost a
-# deployment; every scalar below is trimmed at the point of use for the same
-# reason, including the passwords bot-apply.yml sets on the PostgreSQL roles,
-# which must match the DSNs byte for byte.
-- name: Refuse line breaks inside bot scalar secrets
-  ansible.builtin.assert:
-    that:
-      - "'\n' not in (control_secret_values[item] | trim)"
-      - "'\r' not in (control_secret_values[item] | trim)"
-    fail_msg: "A scalar bot secret contains a line break."
-  loop:
-    - "{{ control_plan.bot.secret_refs.telegram_bot_token_ref }}"
-    - "{{ control_plan.bot.secret_refs.postgres_owner_password_ref }}"
-    - "{{ control_plan.bot.secret_refs.postgres_runtime_password_ref }}"
-    - "{{ control_plan.bot.secret_refs.migration_database_url_ref }}"
-    - "{{ control_plan.bot.secret_refs.runtime_database_url_ref }}"
-    - "{{ control_plan.bot.secret_refs.subscription_signing_key_ref }}"
-    - "{{ control_plan.bot.secret_refs.friends_shared_code_ref }}"
-    - "{{ control_plan.bot.secret_refs.tunnel_token_ref }}"
-  no_log: true
-
-- name: Validate bot database URLs and the Telegram token shape
-  ansible.builtin.assert:
-    that:
-      # The bot drives both alembic and its runtime through SQLAlchemy's async
-      # engine, so the driver is part of the URL and not an implementation
-      # detail: a bare postgresql:// URL makes the process fail at startup.
-      - >-
-        (control_secret_values[control_plan.bot.secret_refs.migration_database_url_ref] | trim)
-        is match('^postgresql\+asyncpg://\S+$')
-      - >-
-        (control_secret_values[control_plan.bot.secret_refs.runtime_database_url_ref] | trim)
-        is match('^postgresql\+asyncpg://\S+$')
-      - >-
-        (control_secret_values[control_plan.bot.secret_refs.telegram_bot_token_ref] | trim)
-        is match('^[0-9]{5,}:[A-Za-z0-9_-]{30,}$')
-    fail_msg: "A bot database URL or the Telegram token has an invalid format."
-  no_log: true
-
-# A value that is merely non-empty is not a certificate. The write ceremony
-# reads until EOF, so a paste that never landed stores the lone newline the
-# operator typed — one byte, which passes an emptiness check and then fails
-# three tasks later as `Unable to load certificate`, pointing at the file
-# instead of at how it was filled. Naming the shape here says what is actually
-# wrong.
+# Непустое значение — ещё не сертификат. Церемония записи читает до EOF, поэтому
+# невставленный файл сохраняет один перевод строки: он проходит проверку на
+# пустоту и падает тремя тасками позже как `Unable to load certificate`, указывая
+# на файл вместо того, как его заполняли.
 - name: Require bot PEM secrets to actually be PEM
   ansible.builtin.assert:
     that:
-      - "'-----BEGIN ' in control_secret_values[item]"
-      - "'-----END ' in control_secret_values[item]"
+      - "'-----BEGIN ' in control_bot_files[item]"
+      - "'-----END ' in control_bot_files[item]"
     fail_msg: >-
-      A bot PEM secret does not contain a PEM block. Re-store it by redirecting
-      the file into the write ceremony rather than pasting it.
-  loop:
-    - "{{ control_plan.bot.secret_refs.grpc_client_certificate_ref }}"
-    - "{{ control_plan.bot.secret_refs.grpc_client_private_key_ref }}"
-    - "{{ control_plan.bot.secret_refs.grpc_server_ca_ref }}"
+      Поле {{ item }} не содержит блок PEM. Перезапишите его, подав файл в
+      церемонию записи, а не вставкой в терминал.
+  loop: "{{ control_bot_required_files }}"
   no_log: true
 
 - name: Create protected bot runtime directories
@@ -113,18 +67,12 @@
 
 - name: Install protected bot secret files
   ansible.builtin.copy:
-    content: "{{ control_secret_values[item.reference] }}"
-    dest: "{{ control_plan.bot.paths.secrets }}/{{ item.destination }}"
+    content: "{{ item.value }}"
+    dest: "{{ control_plan.bot.paths.secrets }}/{{ item.key }}"
     owner: "{{ control_bot_uid }}"
     group: "{{ control_bot_gid }}"
     mode: "0400"
-  loop:
-    - destination: client.crt
-      reference: "{{ control_plan.bot.secret_refs.grpc_client_certificate_ref }}"
-    - destination: client.key
-      reference: "{{ control_plan.bot.secret_refs.grpc_client_private_key_ref }}"
-    - destination: server-ca.crt
-      reference: "{{ control_plan.bot.secret_refs.grpc_server_ca_ref }}"
+  loop: "{{ control_bot_files | dict2items }}"
   register: _control_bot_secret_files
   no_log: true
   diff: false
@@ -206,27 +154,47 @@
   no_log: true
   when: not ansible_check_mode
 
+# Проводка бота из отревьюенной топологии: адрес бэкенда, порт, пути к файлам
+# внутри контейнера и параметры тарифа. Секретов здесь нет, поэтому и в Vault им
+# не место — иначе адрес, на который бот ходит, менялся бы без диффа.
+- name: Collect the bot environment owned by the reviewed topology
+  ansible.builtin.set_fact:
+    _control_bot_wiring: >-
+      {{
+        {
+          'BOT_SPIRITVPND_GRPC_TARGET': control_plan.bot.network.backend_target,
+          'BOT_SPIRITVPND_TLS_CLIENT_CERT_FILE': '/secrets/client.crt',
+          'BOT_SPIRITVPND_TLS_CLIENT_KEY_FILE': '/secrets/client.key',
+          'BOT_SPIRITVPND_TLS_CA_FILE': '/secrets/server-ca.crt',
+          'BOT_SUBSCRIPTION_BASE_URL': control_plan.bot.settings.subscription_base_url,
+          'BOT_MINI_APP_URL': control_plan.bot.settings.mini_app_url,
+          'BOT_MINI_APP_HTTP_PORT': control_plan.bot.network.http_port,
+          'BOT_FRIENDS_PLAN_FLEET_ID': control_plan.bot.settings.friends_plan_fleet_id,
+        }
+        | combine(
+            {'BOT_FRIENDS_PLAN_QUOTA_BYTES': control_plan.bot.settings.friends_plan_quota_bytes}
+            if 'friends_plan_quota_bytes' in control_plan.bot.settings else {}
+          )
+        | combine(
+            {'BOT_FRIENDS_PLAN_DURATION_DAYS': control_plan.bot.settings.friends_plan_duration_days}
+            if 'friends_plan_duration_days' in control_plan.bot.settings else {}
+          )
+      }}
+
+- name: Refuse a bot key claimed by both the topology and Vault
+  ansible.builtin.assert:
+    that:
+      - _control_bot_wiring.keys() | list | intersect(control_bot_env.keys() | list) | length == 0
+    fail_msg: >-
+      Ключ объявлен и в топологии, и в Vault:
+      {{ _control_bot_wiring.keys() | list | intersect(control_bot_env.keys() | list) | join(', ') }}
+
 - name: Render protected bot environment
   ansible.builtin.copy:
     content: |
-      BOT_TELEGRAM_BOT_TOKEN={{ control_secret_values[control_plan.bot.secret_refs.telegram_bot_token_ref] | trim }}
-      BOT_DATABASE_URL={{ control_secret_values[control_plan.bot.secret_refs.runtime_database_url_ref] | trim }}
-      BOT_SPIRITVPND_GRPC_TARGET={{ control_plan.bot.network.backend_target }}
-      BOT_SPIRITVPND_TLS_CLIENT_CERT_FILE=/secrets/client.crt
-      BOT_SPIRITVPND_TLS_CLIENT_KEY_FILE=/secrets/client.key
-      BOT_SPIRITVPND_TLS_CA_FILE=/secrets/server-ca.crt
-      BOT_SUBSCRIPTION_BASE_URL={{ control_plan.bot.settings.subscription_base_url }}
-      BOT_MINI_APP_URL={{ control_plan.bot.settings.mini_app_url }}
-      BOT_MINI_APP_HTTP_PORT={{ control_plan.bot.network.http_port }}
-      BOT_SUBSCRIPTION_SIGNING_KEY={{ control_secret_values[control_plan.bot.secret_refs.subscription_signing_key_ref] | trim }}
-      BOT_FRIENDS_PLAN_FLEET_ID={{ control_plan.bot.settings.friends_plan_fleet_id }}
-      {% if 'friends_plan_quota_bytes' in control_plan.bot.settings %}
-      BOT_FRIENDS_PLAN_QUOTA_BYTES={{ control_plan.bot.settings.friends_plan_quota_bytes }}
-      {% endif %}
-      {% if 'friends_plan_duration_days' in control_plan.bot.settings %}
-      BOT_FRIENDS_PLAN_DURATION_DAYS={{ control_plan.bot.settings.friends_plan_duration_days }}
-      {% endif %}
-      BOT_FRIENDS_SHARED_CODE={{ control_secret_values[control_plan.bot.secret_refs.friends_shared_code_ref] | trim }}
+      {% for key, value in (_control_bot_wiring | combine(control_bot_env)) | dictsort %}
+      {{ key }}={{ value }}
+      {% endfor %}
     dest: "{{ control_plan.bot.paths.root }}/bot.env"
     owner: root
     group: root
@@ -238,7 +206,9 @@
 - name: Render protected bot migration environment
   ansible.builtin.copy:
     content: |
-      BOT_DATABASE_URL={{ control_secret_values[control_plan.bot.secret_refs.migration_database_url_ref] | trim }}
+      {% for key, value in control_bot_migration_env | dictsort %}
+      {{ key }}={{ value }}
+      {% endfor %}
     dest: "{{ control_plan.bot.paths.root }}/migration.env"
     owner: root
     group: root
@@ -249,7 +219,9 @@
 - name: Render the protected tunnel environment
   ansible.builtin.copy:
     content: |
-      TUNNEL_TOKEN={{ control_secret_values[control_plan.bot.secret_refs.tunnel_token_ref] | trim }}
+      {% for key, value in control_bot_tunnel_env | dictsort %}
+      {{ key }}={{ value }}
+      {% endfor %}
     dest: "{{ control_plan.bot.paths.root }}/tunnel.env"
     owner: root
     group: root

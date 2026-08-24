@@ -1,6 +1,35 @@
 ---
 control_plan_file: ""
-control_secret_values: "{{ spiritvpn_secret_values | default({}) }}"
+# Секреты контура читаются из Vault объектами целиком: один путь наполняет один
+# файл. Состав здесь не объявлен и не проверяется — его знает компонент, а не
+# инфраструктура. Роль знает только то, куда эти поля лечь: какой файл получает
+# окружение, а какие поля становятся файлами в защищённом каталоге.
+control_secrets: "{{ spiritvpn_control_secrets | default({}) }}"
+control_backend_env: "{{ (control_secrets.backend | default({})).env | default({}) }}"
+control_backend_migration_env: "{{ (control_secrets.backend | default({})).migration_env | default({}) }}"
+control_backend_files: "{{ (control_secrets.backend | default({})).files | default({}) }}"
+control_backend_postgres: "{{ (control_secrets.backend | default({})).postgres | default({}) }}"
+control_bot_postgres: "{{ (control_secrets.bot | default({})).postgres | default({}) }}"
+control_bot_env: "{{ (control_secrets.bot | default({})).env | default({}) }}"
+control_bot_migration_env: "{{ (control_secrets.bot | default({})).migration_env | default({}) }}"
+control_bot_tunnel_env: "{{ (control_secrets.bot | default({})).tunnel_env | default({}) }}"
+control_bot_files: "{{ (control_secrets.bot | default({})).files | default({}) }}"
+# Файлы, на которые роль указывает контейнеру в его окружении. Это проводка, а
+# не состав секретов: путь `/secrets/server.crt` записан здесь же, в env-файле,
+# поэтому отсутствие файла — ошибка проводки, и назвать её надо в выкатке, а не
+# в логе упавшего контейнера.
+control_backend_required_files:
+  - server.crt
+  - server.key
+  - clients-ca.crt
+  - agent-client.crt
+  - agent-client.key
+  - agents-ca.crt
+  - client_uuid.key
+control_bot_required_files:
+  - client.crt
+  - client.key
+  - server-ca.crt
 control_postgres_uid: "999"
 control_postgres_gid: "999"
 control_backend_uid: "10001"

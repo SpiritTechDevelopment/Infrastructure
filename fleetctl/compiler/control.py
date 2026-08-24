@@ -67,7 +67,6 @@ def compile_control_plan(state: DesiredState) -> dict[str, Any] | None:
             "external_backup_command_argv": list(control.external_backup_command_argv),
         },
         "observability": _observability_projection(state),
-        "secret_refs": dict(sorted(control.secret_refs.items())),
         "bot": _bot_projection(state),
     }
 
@@ -128,7 +127,6 @@ def _bot_projection(state: DesiredState) -> dict[str, Any] | None:
             "public_origin": public_origin,
         },
         "settings": settings,
-        "secret_refs": dict(sorted(bot.secret_refs.items())),
     }
 
 

@@ -28,9 +28,112 @@ REFERENCE = re.compile(
     r"^secret://kv/(develop|prod)/([A-Za-z0-9._/-]+)#([A-Za-z_][A-Za-z0-9_]*)$"
 )
 
+# Один путь Vault — один файл на диске. Инфраструктура знает, какой путь
+# наполняет какой файл, и не знает, что внутри: состав окружения принадлежит
+# компоненту, а не топологии. Поэтому здесь нет ни перечня переменных, ни
+# схемы для них — только адреса.
+#
+# `files` держит материал, который раздаётся файлами, а не переменными:
+# имя поля становится именем файла. Он вынесен отдельным путём намеренно —
+# признак «в файл или в окружение» иначе пришлось бы кодировать соглашением
+# об именах полей, то есть магией внутри значения, которое пишет оператор.
+CONTROL_OBJECTS: dict[str, dict[str, str]] = {
+    "backend": {
+        "env": "control/backend/env",
+        "migration_env": "control/backend/migration-env",
+        "files": "control/backend/files",
+        "postgres": "control/backend/postgres",
+    },
+    "bot": {
+        "env": "control/bot/env",
+        "migration_env": "control/bot/migration-env",
+        "tunnel_env": "control/bot/tunnel-env",
+        "files": "control/bot/files",
+        "postgres": "control/bot/postgres",
+    },
+}
+
+# Единственный объект с объявленным составом, и на то есть причина. Остальные
+# инфраструктура переносит, не читая; эти два пароля она выполняет сама —
+# `ALTER ROLE <роль> PASSWORD` при провизионинге, — поэтому обязана знать, какой
+# из них owner, а какой runtime. Пароль внутри DATABASE_URL для этого не годится.
+POSTGRES_FIELDS = ("owner_password", "runtime_password")
+
+ENVIRONMENT_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
 
 class ResolverError(Exception):
     pass
+
+
+def clean_environment_object(path: str, data: dict[str, Any]) -> dict[str, str]:
+    """Проверяет форму объекта, который целиком станет env-файлом.
+
+    Перевод строки внутри значения отвергается, а хвостовой — срезается. Это
+    не вкусовщина, а формат: значения пишутся по одному на строку, поэтому
+    разрыв внутри значения молча съедает следующую переменную. Хвостовой при
+    этом появляется от того, как значение вводили — церемония записи читает до
+    EOF, и любая вставка, законченная Enter, несёт его с собой.
+    """
+    cleaned: dict[str, str] = {}
+    for key, value in sorted(data.items()):
+        if not ENVIRONMENT_KEY.fullmatch(key):
+            raise ResolverError(f"kv/{path}: invalid environment key {key!r}")
+        if not isinstance(value, str):
+            raise ResolverError(f"kv/{path}#{key} must be a string")
+        stripped = value.strip()
+        if not stripped:
+            raise ResolverError(f"kv/{path}#{key} is empty")
+        if "\n" in stripped or "\r" in stripped:
+            raise ResolverError(f"kv/{path}#{key} contains a line break")
+        cleaned[key] = stripped
+    return cleaned
+
+
+def clean_postgres_object(path: str, data: dict[str, Any]) -> dict[str, str]:
+    """Проверяет два пароля, которые исполнитель применяет сам.
+
+    Состав здесь закрыт: лишнее поле — это либо опечатка, либо секрет, который
+    оператор положил не туда и считает применённым. Перевод строки отвергается
+    так же, как в окружении: пароль должен совпадать с тем, что внутри DSN,
+    байт в байт, иначе роль создаётся с одним значением, а подключение идёт с
+    другим — отказ аутентификации с двумя одинаковыми на вид строками.
+    """
+    missing = [field for field in POSTGRES_FIELDS if field not in data]
+    if missing:
+        raise ResolverError(f"kv/{path}: missing field(s): {', '.join(missing)}")
+    unexpected = sorted(set(data) - set(POSTGRES_FIELDS))
+    if unexpected:
+        raise ResolverError(f"kv/{path}: unexpected field(s): {', '.join(unexpected)}")
+    cleaned: dict[str, str] = {}
+    for field in POSTGRES_FIELDS:
+        value = data[field]
+        if not isinstance(value, str):
+            raise ResolverError(f"kv/{path}#{field} must be a string")
+        stripped = value.strip()
+        if not stripped:
+            raise ResolverError(f"kv/{path}#{field} is empty")
+        if "\n" in stripped or "\r" in stripped:
+            raise ResolverError(f"kv/{path}#{field} contains a line break")
+        cleaned[field] = stripped
+    return cleaned
+
+
+def clean_file_object(path: str, data: dict[str, Any]) -> dict[str, str]:
+    """Проверяет объект, каждое поле которого станет отдельным файлом.
+
+    Здесь перевод строки законен — это PEM. Проверяется имя: оно становится
+    именем файла в защищённом каталоге, поэтому косая черта и `..` отвергаются.
+    """
+    cleaned: dict[str, str] = {}
+    for key, value in sorted(data.items()):
+        if not FILE_NAME.fullmatch(key) or ".." in key:
+            raise ResolverError(f"kv/{path}: invalid file name {key!r}")
+        if not isinstance(value, str) or not value.strip():
+            raise ResolverError(f"kv/{path}#{key} must be a non-empty string")
+        cleaned[key] = value
+    return cleaned
 
 
 def parse_reference(reference: str, environment: str) -> tuple[str, str]:
@@ -68,11 +171,30 @@ def desired_references(
             for fleet in state.fleets
             for bridge in fleet.bridges
         )
-    if scope in {"all", "control"} and state.environment.control is not None:
-        references.update(state.environment.control.secret_refs.values())
-        if state.environment.control.bot is not None:
-            references.update(state.environment.control.bot.secret_refs.values())
+    # Контур control ссылок в топологии больше не объявляет: его секреты
+    # читаются объектами целиком по адресам из CONTROL_OBJECTS.
     return sorted(references)
+
+
+def control_object_paths(root: Path, environment: str, desired_root: Path | None) -> dict[str, dict[str, str]]:
+    """Адреса объектов Vault, которые наполняют файлы контура control.
+
+    Бот объявлен не в каждом окружении, поэтому его пути возвращаются только
+    когда он есть: чтение отсутствующего пути иначе валило бы выкатку там, где
+    бота и не должно быть.
+    """
+    state = validate_environment(root, environment, desired_root=desired_root)
+    control = state.environment.control
+    if control is None:
+        return {}
+    components = ["backend"] if control.bot is None else ["backend", "bot"]
+    return {
+        component: {
+            kind: f"{environment}/{suffix}"
+            for kind, suffix in CONTROL_OBJECTS[component].items()
+        }
+        for component in components
+    }
 
 
 class VaultClient:
@@ -141,6 +263,22 @@ class VaultClient:
             raise ResolverError(f"Vault field must be a non-empty string: kv/{path}#{field}")
         return value
 
+    def read_object(self, path: str) -> dict[str, Any]:
+        """Читает путь Vault целиком.
+
+        Пустой или отсутствующий путь — отказ, а не пустой файл. Молча
+        отрендерить env-файл без переменных значит выкатить контейнер, который
+        упадёт на старте, и разбираться потом с симптомом вместо причины.
+        """
+        response = self._request("GET", f"/v1/kv/data/{path}")
+        try:
+            data = response["data"]["data"]
+        except (KeyError, TypeError) as exc:
+            raise ResolverError(f"Vault path holds no data: kv/{path}") from exc
+        if not isinstance(data, dict) or not data:
+            raise ResolverError(f"Vault path is empty: kv/{path}")
+        return data
+
 
 def write_private(path: Path, value: str) -> None:
     if path.is_symlink():
@@ -172,6 +310,7 @@ def main() -> int:
     parser.add_argument("--ssh-private-key", type=Path)
     parser.add_argument("--scope", choices=("all", "fleet", "control"), default="all")
     parser.add_argument("--list-references", action="store_true")
+    parser.add_argument("--list-objects", action="store_true")
     parser.add_argument("--vault-address", default="https://127.0.0.1:8200")
     parser.add_argument(
         "--vault-ca",
@@ -187,12 +326,23 @@ def main() -> int:
             args.scope,
         )
         ssh_reference = f"secret://kv/{args.environment}/executor/ansible#private_key"
+        objects: dict[str, dict[str, str]] = {}
+        if args.scope in {"all", "control"}:
+            objects = control_object_paths(args.root, args.environment, args.desired_root)
         if args.list_references:
             listed_references = references
             if args.scope in {"all", "fleet"}:
                 listed_references = [*references, ssh_reference]
             for reference in listed_references:
                 print(reference)
+            return 0
+        if args.list_objects:
+            # Отдельно от ссылок намеренно: это разные сущности. Ссылка
+            # адресует поле, путь — объект целиком, и смешивать их в одном
+            # списке значит заставить читателя различать их по форме строки.
+            for component in sorted(objects):
+                for kind in sorted(objects[component]):
+                    print(f"kv/{objects[component][kind]}")
             return 0
         if args.credentials_dir is None or args.compiled_secrets is None:
             raise ResolverError(
@@ -208,8 +358,22 @@ def main() -> int:
             for reference in references:
                 path, field = parse_reference(reference, args.environment)
                 resolved[reference] = client.read(path, field)
+            control_secrets: dict[str, dict[str, dict[str, str]]] = {}
+            for component in sorted(objects):
+                collected: dict[str, dict[str, str]] = {}
+                for kind, path in sorted(objects[component].items()):
+                    data = client.read_object(path)
+                    cleaner = {
+                        "files": clean_file_object,
+                        "postgres": clean_postgres_object,
+                    }.get(kind, clean_environment_object)
+                    collected[kind] = cleaner(path, data)
+                control_secrets[component] = collected
+            document: dict[str, Any] = {"spiritvpn_secret_values": resolved}
+            if control_secrets:
+                document["spiritvpn_control_secrets"] = control_secrets
             payload = yaml.safe_dump(
-                {"spiritvpn_secret_values": resolved},
+                document,
                 allow_unicode=True,
                 sort_keys=True,
             )
@@ -232,7 +396,13 @@ def main() -> int:
     except (OSError, ResolverError, DesiredStateInvalid, ValueError) as exc:
         print(f"secret resolution failed: {exc}", file=sys.stderr)
         return 2
-    print(f"{args.environment}: resolved {len(resolved)} desired-state secret reference(s)")
+    # Печатается количество, не состав: транскрипт исполнителя читают и хранят,
+    # а имена переменных бота — уже подсказка о его устройстве.
+    objects_read = sum(len(kinds) for kinds in objects.values())
+    print(
+        f"{args.environment}: resolved {len(resolved)} desired-state secret reference(s) "
+        f"and {objects_read} control secret object(s)"
+    )
     return 0
 
 

@@ -25,6 +25,21 @@ from fleetctl.validation import validate_environment
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_script(file_name: str, module_name: str) -> object:
+    """Импортирует скрипт из scripts/ как модуль.
+
+    Файлы там названы через дефис и не импортируются обычным путём, а проверять
+    их логику по подстрокам в тексте — способ получить зелёный тест, который
+    ничего не выполняет.
+    """
+    path = REPO_ROOT / "scripts" / file_name
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 VALID_DESIRED = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
 LIVE_DESIRED_SKIP_REASON = "encrypted repository desired state requires a trusted SOPS identity"
 
@@ -834,44 +849,35 @@ all:
         # Раскатка при этом остаётся последней: арендатор не роняет хозяина.
         self.assertEqual(names[-1], "Reconcile the bot beside the backend")
 
-    def test_every_scalar_bot_secret_is_trimmed_at_the_point_of_use(self) -> None:
+    def test_every_scalar_secret_is_trimmed_the_same_way(self) -> None:
         """Обрезка обязана быть одинаковой везде, иначе пароль расходится с DSN.
 
         Церемония записи читает значение до EOF, поэтому вставка, законченная
         Enter, приносит завершающий перенос — это артефакт ввода, а не угроза.
         Опасен перенос внутри значения: env-файл построчный.
 
-        Но главное здесь — согласованность. Обрезать DSN и не обрезать пароль
-        значит записать в PostgreSQL пароль с переносом, а подключаться без
-        него: отказ аутентификации при двух значениях, неразличимых в логах.
+        Инвариант переехал из роли в резолвер вместе с обрезкой, и тест едет
+        следом. Оставить его проверять текст роли значило бы получить зелёный
+        тест, не находящий ничего: подстроки, которую он искал, там больше нет.
         """
-        pem_refs = {
-            "grpc_client_certificate_ref",
-            "grpc_client_private_key_ref",
-            "grpc_server_ca_ref",
-        }
-        pattern = re.compile(
-            r"control_secret_values\[control_plan\.bot\.secret_refs\.(\w+)\]\s*(\|\s*trim)?"
+        resolver = _load_script("vault-secret-resolver.py", "spiritvpn_resolver")
+        # Хвост срезается, разрыв внутри — отказ. Обе функции обязаны вести
+        # себя одинаково: обрезать DSN и не обрезать пароль значит записать в
+        # PostgreSQL одно значение, а подключаться другим.
+        env = resolver.clean_environment_object("p", {"BOT_DATABASE_URL": "postgresql://x\n"})
+        postgres = resolver.clean_postgres_object(
+            "p", {"owner_password": "s3cret\n", "runtime_password": "other\n"}
         )
-        untrimmed: list[str] = []
-        for name in ("bot-prepare.yml", "bot-apply.yml"):
-            source = (
-                REPO_ROOT / "roles" / "control_runtime" / "tasks" / name
-            ).read_text(encoding="utf-8")
-            for reference, trimmed in pattern.findall(source):
-                # PEM многострочен по своей природе и пишется файлом, не в env.
-                if reference in pem_refs or trimmed:
-                    continue
-                untrimmed.append(f"{name}: {reference}")
-        self.assertEqual(untrimmed, [])
+        self.assertEqual(env["BOT_DATABASE_URL"], "postgresql://x")
+        self.assertEqual(postgres["owner_password"], "s3cret")
+        self.assertEqual(postgres["runtime_password"], "other")
 
-        prepare = (
-            REPO_ROOT / "roles" / "control_runtime" / "tasks" / "bot-prepare.yml"
-        ).read_text(encoding="utf-8")
-        # \S, а не [^ ]: последний пропускает перенос внутри значения, потому что
-        # в Python `$` совпадает и перед завершающим переводом строки.
-        self.assertIn(r"^postgresql\+asyncpg://\S+$", prepare)
-        self.assertNotIn(r"[^ ]+$", prepare)
+        for cleaner, payload in (
+            (resolver.clean_environment_object, {"BOT_A": "a\nb"}),
+            (resolver.clean_postgres_object, {"owner_password": "a\nb", "runtime_password": "c"}),
+        ):
+            with self.assertRaises(resolver.ResolverError):
+                cleaner("p", payload)
 
     def test_bot_pem_secrets_are_checked_for_being_pem(self) -> None:
         """Непустое — ещё не сертификат.
@@ -890,13 +896,9 @@ all:
         guard = names.index("Require bot PEM secrets to actually be PEM")
         # Раньше записи файлов: смысл в том, чтобы не дойти до openssl.
         self.assertLess(guard, names.index("Install protected bot secret files"))
-        checked = str(prepare[guard]["loop"])
-        for reference in (
-            "grpc_client_certificate_ref",
-            "grpc_client_private_key_ref",
-            "grpc_server_ca_ref",
-        ):
-            self.assertIn(reference, checked)
+        # Проверяются те же файлы, которые роль объявляет своей проводкой, —
+        # один список, а не два расходящихся.
+        self.assertIn("control_bot_required_files", str(prepare[guard]["loop"]))
 
     def test_every_required_node_component_is_actually_deployed(self) -> None:
         """Обязательный компонент, который никто не разворачивает, — ложь.
@@ -1557,6 +1559,24 @@ all:
             "secret://kv/develop/executor/ansible#private_key",
         )
 
+    def run_resolver(self, *flags: str) -> str:
+        result = subprocess.run(
+            [
+                "python3",
+                str(REPO_ROOT / "scripts" / "vault-secret-resolver.py"),
+                "--root", str(REPO_ROOT),
+                "--desired-root", str(REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"),
+                "--environment", "develop",
+                *flags,
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
     def test_control_secret_scope_excludes_fleet_and_executor_credentials(self) -> None:
         result = subprocess.run(
             [
@@ -1579,15 +1599,22 @@ all:
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         references = result.stdout.splitlines()
-        # 11 бэкенда и 11 бота. Бот резолвится тем же scope: он разворачивается
-        # тем же control-deploy, и его секреты обязаны доехать тем же проходом —
-        # иначе роль упадёт на нерезолвленной ссылке уже на хосте.
-        self.assertEqual(len(references), 22)
+        # Контур control ссылок больше не объявляет: его секреты читаются
+        # объектами целиком.
+        self.assertEqual(references, [])
+
+        objects = self.run_resolver("--scope", "control", "--list-objects").splitlines()
+        # Бот идёт тем же scope: он разворачивается тем же control-deploy, и
+        # его секреты обязаны доехать тем же проходом — иначе роль упадёт уже
+        # на хосте, на пустом объекте.
+        self.assertEqual(len(objects), 9)
         self.assertTrue(
-            all(reference.startswith("secret://kv/develop/control/") for reference in references)
+            all(item.startswith("kv/develop/control/") for item in objects)
         )
-        self.assertTrue(any("/bot#telegram_bot_token" in item for item in references))
-        self.assertFalse(any("executor/ansible" in reference for reference in references))
+        self.assertIn("kv/develop/control/bot/env", objects)
+        # Чужие поддеревья сюда попасть не должны ни в каком виде.
+        for foreign in ("executor/", "bridges/", "nodes/"):
+            self.assertFalse(any(foreign in item for item in objects), foreign)
 
     def test_private_writer_refuses_symlink_and_sets_mode(self) -> None:
         script = REPO_ROOT / "scripts" / "vault-secret-resolver.py"

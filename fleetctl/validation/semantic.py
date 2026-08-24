@@ -259,15 +259,6 @@ def _validate_environment(environment: Environment, issues: list[ValidationIssue
                 "a required control backup must declare an external backup command",
             )
         )
-    for reference in control.secret_refs.values():
-        if not reference.startswith(f"secret://kv/{env}/control/"):
-            issues.append(
-                ValidationIssue.at(
-                    environment.source,
-                    "CONTROL_SECRET_ENV",
-                    f"control secret reference must belong to environment {env}",
-                )
-            )
     for identity in (*control.customer_access_writers, *control.customer_access_readers):
         if "," in identity or identity != identity.strip():
             issues.append(
@@ -293,7 +284,6 @@ def _validate_bot(state: DesiredState, issues: list[ValidationIssue]) -> None:
     control = environment.control
     if control is None or control.bot is None:
         return
-    env = environment.object_id
     bot = control.bot
     source = environment.source
 
@@ -322,15 +312,6 @@ def _validate_bot(state: DesiredState, issues: list[ValidationIssue]) -> None:
                 "bot PostgreSQL roles must not reuse the backend roles",
             )
         )
-    for reference in bot.secret_refs.values():
-        if not reference.startswith(f"secret://kv/{env}/control/"):
-            issues.append(
-                ValidationIssue.at(
-                    source,
-                    "BOT_SECRET_ENV",
-                    f"bot secret reference must belong to environment {env}",
-                )
-            )
     if bot.friends_plan_fleet not in state.fleet_ids:
         issues.append(
             ValidationIssue.at(

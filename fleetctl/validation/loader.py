@@ -331,7 +331,6 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                     external_backup_command_argv=tuple(
                         control_spec["postgres"].get("external_backup_command_argv", [])
                     ),
-                    secret_refs=dict(control_spec["secrets"]),
                     customer_access_writers=tuple(
                         control_spec["authorization"]["customer_access_writers"]
                     ),
@@ -436,7 +435,6 @@ def _to_bot(bot_spec: dict[str, Any] | None) -> BotRuntime | None:
         friends_plan_duration_days=settings.get("friends_plan_duration_days"),
         tunnel_image=ImmutableImage(**bot_spec["ingress"]["image"]),
         public_hostname=bot_spec["ingress"]["hostname"],
-        secret_refs=dict(bot_spec["secrets"]),
     )
 
 

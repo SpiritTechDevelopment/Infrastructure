@@ -168,24 +168,21 @@ class LocalPkiTests(unittest.TestCase):
 
     @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_issuance_names_where_the_bot_certificate_belongs(self) -> None:
-        """Оператор получает путь из desired state, а не из головы.
+        """Оператор получает путь из соглашения, а не из головы.
 
-        Секреты бота живут в своём поддереве, поэтому профиль customer-service
-        читается оттуда. Пустой ответ здесь означал бы церемонию, после которой
-        оператор сам догадывается, в какое поле Vault класть файл, — и путь
-        разошёлся бы с тем, что потребует роль.
+        Имя поля становится именем файла, и те же имена перечислены в роли
+        control_runtime как проводка. Пустой ответ здесь означал бы церемонию,
+        после которой оператор сам догадывается, в какое поле Vault класть
+        файл, — и путь разошёлся бы с тем, что потребует выкатка.
         """
         state = validate_environment(REPO_ROOT, "develop")
         targets = _vault_targets(state, "customer-service")
-        bot = state.environment.control.bot
-        self.assertEqual(targets["certificate"], bot.secret_refs["grpc_client_certificate_ref"])
-        self.assertEqual(targets["private_key"], bot.secret_refs["grpc_client_private_key_ref"])
-        self.assertEqual(targets["ca_certificate"], [bot.secret_refs["grpc_server_ca_ref"]])
-        # Ссылки бэкенда сюда попасть не должны: это разные личности.
-        self.assertNotIn(
-            state.environment.control.secret_refs["grpc_tls_certificate_ref"],
-            targets.values(),
-        )
+        path = "kv/develop/control/bot/files"
+        self.assertEqual(targets["certificate"], f"{path}#client.crt")
+        self.assertEqual(targets["private_key"], f"{path}#client.key")
+        self.assertEqual(targets["ca_certificate"], [f"{path}#server-ca.crt"])
+        # Поддерево бэкенда сюда попасть не должно: это разные личности.
+        self.assertNotIn("control/backend/", str(targets))
 
     def test_client_profiles_carry_their_service_identity_only(self) -> None:
         expected = {

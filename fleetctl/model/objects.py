@@ -51,7 +51,6 @@ class BotRuntime:
     friends_plan_duration_days: int | None
     tunnel_image: ImmutableImage
     public_hostname: str
-    secret_refs: dict[str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +66,6 @@ class ControlPlane:
     postgres_runtime_user: str
     backup_required: bool
     external_backup_command_argv: tuple[str, ...]
-    secret_refs: dict[str, str]
     customer_access_writers: tuple[str, ...]
     customer_access_readers: tuple[str, ...]
     # Optional, and it has to stay that way. `plan` compares a Git source with

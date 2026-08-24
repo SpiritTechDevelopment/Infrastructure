@@ -25,38 +25,31 @@ from .model import CertificateRequest, PkiError
 # its key is generated on the node by roles/pki_agent and only its CSR travels.
 CONTROL_PROFILES = ("backend-server", "backend-client", "manifest-writer", "customer-service")
 
-# Which declared secret each artifact belongs in. Read back from the environment
-# rather than reconstructed, so a renamed path in desired state cannot drift
-# from what this command tells the operator to fill.
-VAULT_FIELDS = {
-    "backend-server": {
-        "certificate": "grpc_tls_certificate_ref",
-        "private_key": "grpc_tls_private_key_ref",
-    },
-    "backend-client": {
-        "certificate": "agent_tls_certificate_ref",
-        "private_key": "agent_tls_private_key_ref",
-    },
+# Профиль -> компонент, имена файлов для сертификата и ключа, имена якорей CA.
+# Имена совпадают с `control_backend_required_files` и
+# `control_bot_required_files` в роли control_runtime: это одни и те же файлы,
+# названные один раз выпуском и один раз проводкой.
+VAULT_FILES: dict[str, tuple[str, dict[str, str], tuple[str, ...]]] = {
+    "backend-server": (
+        "backend",
+        {"certificate": "server.crt", "private_key": "server.key"},
+        ("clients-ca.crt", "agents-ca.crt"),
+    ),
+    "backend-client": (
+        "backend",
+        {"certificate": "agent-client.crt", "private_key": "agent-client.key"},
+        ("clients-ca.crt", "agents-ca.crt"),
+    ),
+    "customer-service": (
+        "bot",
+        {"certificate": "client.crt", "private_key": "client.key"},
+        ("server-ca.crt",),
+    ),
 }
 
-# The bot keeps its own secrets under spec.control.bot, so its artifacts are
-# looked up there rather than beside the backend's. Same rule as above: the
-# operator is told a path read back from desired state, not one retyped.
-BOT_VAULT_FIELDS = {
-    "customer-service": {
-        "certificate": "grpc_client_certificate_ref",
-        "private_key": "grpc_client_private_key_ref",
-    },
-}
-
-# One root per environment means both trust anchors hold the same bytes today.
-# The fields stay separate so the roots can be split later without a schema
-# change, and both are filled from every issuance.
-CA_FIELDS = ("grpc_tls_client_ca_ref", "agent_tls_ca_ref")
-
-# The bot verifies the backend's server certificate, so it needs the same root
-# under its own reference.
-BOT_CA_FIELDS = ("grpc_server_ca_ref",)
+# Один корень на окружение означает, что оба якоря сегодня держат одни и те же
+# байты. Имена оставлены разными, чтобы корни можно было развести позже без
+# смены схемы, и оба заполняются каждым выпуском.
 
 
 def issue_control_certificate(
@@ -205,29 +198,26 @@ def _require_authorised(state: DesiredState, profile: str, identity: str | None)
 
 
 def _vault_targets(state: DesiredState, profile: str) -> dict[str, Any]:
+    """Куда оператору положить выпущенное.
+
+    Адрес больше не объявляется в топологии — он выводится из соглашения: поля
+    объекта `.../files` становятся файлами в защищённом каталоге, а имя поля —
+    именем файла. Те же имена перечислены в `control_runtime` как проводка, и
+    расхождение между ними означало бы выпуск, который выкатка не найдёт.
+    """
     control = state.environment.control
     if control is None:
         return {}
-    if profile in BOT_VAULT_FIELDS:
-        if control.bot is None:
-            return {}
-        fields = BOT_VAULT_FIELDS[profile]
-        references = control.bot.secret_refs
-        ca_fields: tuple[str, ...] = BOT_CA_FIELDS
-    elif profile in VAULT_FIELDS:
-        fields = VAULT_FIELDS[profile]
-        references = control.secret_refs
-        ca_fields = CA_FIELDS
-    else:
+    if profile not in VAULT_FILES:
         return {}
+    component, artifacts, anchor_names = VAULT_FILES[profile]
+    if component == "bot" and control.bot is None:
+        return {}
+    path = f"kv/{state.environment.object_id}/control/{component}/files"
     targets: dict[str, Any] = {
-        artifact: references[field]
-        for artifact, field in fields.items()
-        if field in references
+        artifact: f"{path}#{name}" for artifact, name in artifacts.items()
     }
-    # The same PEM goes into both anchors; listing them makes the duplication
-    # explicit rather than something an operator has to remember.
-    anchors = [references[field] for field in ca_fields if field in references]
-    if anchors:
-        targets["ca_certificate"] = anchors
+    # Один и тот же PEM ложится в оба якоря; перечисление делает дублирование
+    # явным, вместо того чтобы оператор помнил о нём сам.
+    targets["ca_certificate"] = [f"{path}#{name}" for name in anchor_names]
     return targets

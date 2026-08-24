@@ -35,42 +35,30 @@
         == 'spiffe://spiritvpn/' ~ control_plan.environment ~ '/service/backend'
     fail_msg: "The control plan is incomplete, unpinned, or does not belong to this management host."
 
-- name: Require every control secret reference to be resolved
+# Полнота и форма значений проверены резолвером: он отвергает пустое поле,
+# перевод строки внутри значения и небезопасное имя. Состав окружения здесь не
+# проверяется намеренно — его знает бэкенд, а не выкатка.
+#
+# Проверяются только файлы, потому что их называет сама роль и указывает на них
+# в env-файле. Отсутствие проверки дало бы отказ на первом обращении к
+# несуществующему ключу — с сообщением про Jinja вместо пропущенного поля.
+- name: Require the backend secret files this role wires into the container
   ansible.builtin.assert:
     that:
-      - item.value in control_secret_values
-      - control_secret_values[item.value] | string | length > 0
-    fail_msg: "A required control secret was not resolved: {{ item.value }}"
-  loop: "{{ control_plan.secret_refs | dict2items }}"
-  no_log: true
+      - control_backend_required_files | difference(control_backend_files.keys() | list) | length == 0
+    fail_msg: >-
+      В объекте Vault kv/{{ control_plan.environment }}/control/backend/files нет полей:
+      {{ control_backend_required_files | difference(control_backend_files.keys() | list) | join(', ') }}
 
-- name: Refuse multiline values in control scalar secrets
-  ansible.builtin.assert:
-    that:
-      - "'\n' not in control_secret_values[item]"
-      - "'\r' not in control_secret_values[item]"
-    fail_msg: "A scalar control secret contains a line break."
-  loop:
-    - "{{ control_plan.secret_refs.postgres_owner_password_ref }}"
-    - "{{ control_plan.secret_refs.postgres_runtime_password_ref }}"
-    - "{{ control_plan.secret_refs.migration_database_url_ref }}"
-    - "{{ control_plan.secret_refs.runtime_database_url_ref }}"
-    - "{{ control_plan.secret_refs.client_uuid_key_ref }}"
-  no_log: true
-
-- name: Validate control database URLs and the UUID encryption key shape
+# Значение неверной формы принимается контейнером и ломается позже, на первом
+# шифровании, — то есть далеко от места, где его вводили.
+- name: Validate the shape of the UUID encryption key
   ansible.builtin.assert:
     that:
       - >-
-        control_secret_values[control_plan.secret_refs.migration_database_url_ref]
-        is match('^postgres(?:ql)?://[^ ]+$')
-      - >-
-        control_secret_values[control_plan.secret_refs.runtime_database_url_ref]
-        is match('^postgres(?:ql)?://[^ ]+$')
-      - >-
-        control_secret_values[control_plan.secret_refs.client_uuid_key_ref]
+        control_backend_files['client_uuid.key']
         is match('^[A-Za-z0-9._-]{1,64}:[A-Za-z0-9+/]{43}=$')
-    fail_msg: "A control database URL or UUID encryption key has an invalid format."
+    fail_msg: "The UUID encryption key has an invalid format."
   no_log: true
 
 - name: Inspect existing PostgreSQL state
@@ -123,7 +111,7 @@
 - name: Install the protected PostgreSQL owner password file
   ansible.builtin.copy:
     content: >-
-      {{ control_secret_values[control_plan.secret_refs.postgres_owner_password_ref] }}
+      {{ control_backend_postgres.owner_password }}
     dest: "{{ control_plan.paths.secrets }}/postgres-owner-password"
     owner: root
     group: "{{ control_postgres_gid }}"
@@ -134,47 +122,12 @@
 
 - name: Install protected backend secret files
   ansible.builtin.copy:
-    content: "{{ control_secret_values[item.reference] }}"
-    dest: "{{ control_plan.paths.secrets }}/{{ item.destination }}"
-    owner: "{{ item.owner }}"
-    group: "{{ item.group }}"
-    mode: "{{ item.mode }}"
-  loop:
-    - destination: server.crt
-      reference: "{{ control_plan.secret_refs.grpc_tls_certificate_ref }}"
-      owner: "{{ control_backend_uid }}"
-      group: "{{ control_backend_gid }}"
-      mode: "0400"
-    - destination: server.key
-      reference: "{{ control_plan.secret_refs.grpc_tls_private_key_ref }}"
-      owner: "{{ control_backend_uid }}"
-      group: "{{ control_backend_gid }}"
-      mode: "0400"
-    - destination: clients-ca.crt
-      reference: "{{ control_plan.secret_refs.grpc_tls_client_ca_ref }}"
-      owner: "{{ control_backend_uid }}"
-      group: "{{ control_backend_gid }}"
-      mode: "0400"
-    - destination: agent-client.crt
-      reference: "{{ control_plan.secret_refs.agent_tls_certificate_ref }}"
-      owner: "{{ control_backend_uid }}"
-      group: "{{ control_backend_gid }}"
-      mode: "0400"
-    - destination: agent-client.key
-      reference: "{{ control_plan.secret_refs.agent_tls_private_key_ref }}"
-      owner: "{{ control_backend_uid }}"
-      group: "{{ control_backend_gid }}"
-      mode: "0400"
-    - destination: agents-ca.crt
-      reference: "{{ control_plan.secret_refs.agent_tls_ca_ref }}"
-      owner: "{{ control_backend_uid }}"
-      group: "{{ control_backend_gid }}"
-      mode: "0400"
-    - destination: client_uuid.key
-      reference: "{{ control_plan.secret_refs.client_uuid_key_ref }}"
-      owner: "{{ control_backend_uid }}"
-      group: "{{ control_backend_gid }}"
-      mode: "0400"
+    content: "{{ item.value }}"
+    dest: "{{ control_plan.paths.secrets }}/{{ item.key }}"
+    owner: "{{ control_backend_uid }}"
+    group: "{{ control_backend_gid }}"
+    mode: "0400"
+  loop: "{{ control_backend_files | dict2items }}"
   register: _control_secret_files
   no_log: true
   diff: false
@@ -269,24 +222,44 @@
   no_log: true
   when: not ansible_check_mode
 
+# Проводка бэкенда: адреса, лимиты, роли и пути к файлам внутри контейнера.
+# Всё это описывает топология и проходит ревью, поэтому в Vault ему не место —
+# там живут только значения, которые нельзя показывать.
+- name: Collect the backend environment owned by the reviewed topology
+  ansible.builtin.set_fact:
+    _control_backend_wiring:
+      SPIRIT_DB_MAX_CONNS: "{{ control_plan.backend.database_max_connections }}"
+      SPIRIT_LOG_LEVEL: "{{ control_plan.backend.log_level }}"
+      SPIRIT_GRPC_LISTEN: ":8443"
+      SPIRIT_HTTP_LISTEN: ":8080"
+      SPIRIT_GRPC_TLS_CERT_FILE: /secrets/server.crt
+      SPIRIT_GRPC_TLS_KEY_FILE: /secrets/server.key
+      SPIRIT_GRPC_TLS_CLIENT_CA_FILE: /secrets/clients-ca.crt
+      SPIRIT_AGENT_TLS_CERT_FILE: /secrets/agent-client.crt
+      SPIRIT_AGENT_TLS_KEY_FILE: /secrets/agent-client.key
+      SPIRIT_AGENT_TLS_CA_FILE: /secrets/agents-ca.crt
+      SPIRIT_ROLE_CUSTOMER_ACCESS_WRITER: "{{ control_plan.backend.customer_access_writers | join(',') }}"
+      SPIRIT_ROLE_CUSTOMER_ACCESS_READER: "{{ control_plan.backend.customer_access_readers | join(',') }}"
+      SPIRIT_ROLE_MANIFEST_WRITER: "{{ control_plan.backend.manifest_writer_identity }}"
+      SPIRIT_CLIENT_UUID_KEY_FILE: /secrets/client_uuid.key
+
+# Коллизия — отказ, а не приоритет. Молчаливое старшинство одного источника
+# означало бы, что отревьюенный адрес слушателя можно переопределить записью в
+# Vault, которую никто не увидит в диффе.
+- name: Refuse a backend key claimed by both the topology and Vault
+  ansible.builtin.assert:
+    that:
+      - _control_backend_wiring.keys() | list | intersect(control_backend_env.keys() | list) | length == 0
+    fail_msg: >-
+      Ключ объявлен и в топологии, и в Vault:
+      {{ _control_backend_wiring.keys() | list | intersect(control_backend_env.keys() | list) | join(', ') }}
+
 - name: Render protected backend environment
   ansible.builtin.copy:
     content: |
-      SPIRIT_DATABASE_URL={{ control_secret_values[control_plan.secret_refs.runtime_database_url_ref] }}
-      SPIRIT_DB_MAX_CONNS={{ control_plan.backend.database_max_connections }}
-      SPIRIT_LOG_LEVEL={{ control_plan.backend.log_level }}
-      SPIRIT_GRPC_LISTEN=:8443
-      SPIRIT_HTTP_LISTEN=:8080
-      SPIRIT_GRPC_TLS_CERT_FILE=/secrets/server.crt
-      SPIRIT_GRPC_TLS_KEY_FILE=/secrets/server.key
-      SPIRIT_GRPC_TLS_CLIENT_CA_FILE=/secrets/clients-ca.crt
-      SPIRIT_AGENT_TLS_CERT_FILE=/secrets/agent-client.crt
-      SPIRIT_AGENT_TLS_KEY_FILE=/secrets/agent-client.key
-      SPIRIT_AGENT_TLS_CA_FILE=/secrets/agents-ca.crt
-      SPIRIT_ROLE_CUSTOMER_ACCESS_WRITER={{ control_plan.backend.customer_access_writers | join(',') }}
-      SPIRIT_ROLE_CUSTOMER_ACCESS_READER={{ control_plan.backend.customer_access_readers | join(',') }}
-      SPIRIT_ROLE_MANIFEST_WRITER={{ control_plan.backend.manifest_writer_identity }}
-      SPIRIT_CLIENT_UUID_KEY_FILE=/secrets/client_uuid.key
+      {% for key, value in (_control_backend_wiring | combine(control_backend_env)) | dictsort %}
+      {{ key }}={{ value }}
+      {% endfor %}
     dest: "{{ control_plan.paths.root }}/backend.env"
     owner: root
     group: root
@@ -298,7 +271,9 @@
 - name: Render protected migration environment
   ansible.builtin.copy:
     content: |
-      DATABASE_URL={{ control_secret_values[control_plan.secret_refs.migration_database_url_ref] }}
+      {% for key, value in control_backend_migration_env | dictsort %}
+      {{ key }}={{ value }}
+      {% endfor %}
     dest: "{{ control_plan.paths.root }}/migration.env"
     owner: root
     group: root
@@ -433,7 +408,7 @@
       - "{{ control_plan.postgres.database }}"
     stdin: >-
       ALTER ROLE {{ control_plan.postgres.owner_user }} PASSWORD
-      '{{ control_secret_values[control_plan.secret_refs.postgres_owner_password_ref] | replace("'", "''") }}';
+      '{{ control_backend_postgres.owner_password | replace("'", "''") }}';
   when:
     - not ansible_check_mode
     - _control_postgres_owner_password.changed
@@ -495,7 +470,7 @@
         END IF;
       END
       $do$;
-      ALTER ROLE {{ control_plan.postgres.runtime_user }} PASSWORD '{{ control_secret_values[control_plan.secret_refs.postgres_runtime_password_ref] | replace("'", "''") }}';
+      ALTER ROLE {{ control_plan.postgres.runtime_user }} PASSWORD '{{ control_backend_postgres.runtime_password | replace("'", "''") }}';
       GRANT CONNECT ON DATABASE {{ control_plan.postgres.database }} TO {{ control_plan.postgres.runtime_user }};
       GRANT USAGE ON SCHEMA public TO {{ control_plan.postgres.runtime_user }};
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {{ control_plan.postgres.runtime_user }};

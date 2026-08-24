@@ -31,18 +31,6 @@ spec:
       runtime_user: spiritvpn_runtime
       backup_required: false
       external_backup_command_argv: []
-    secrets:
-      postgres_owner_password_ref: secret://kv/develop/control/postgres#owner_password
-      postgres_runtime_password_ref: secret://kv/develop/control/postgres#runtime_password
-      migration_database_url_ref: secret://kv/develop/control/postgres#migration_database_url
-      runtime_database_url_ref: secret://kv/develop/control/postgres#runtime_database_url
-      client_uuid_key_ref: secret://kv/develop/control/backend#client_uuid_key
-      grpc_tls_certificate_ref: secret://kv/develop/control/backend-tls#server_certificate
-      grpc_tls_private_key_ref: secret://kv/develop/control/backend-tls#server_private_key
-      grpc_tls_client_ca_ref: secret://kv/develop/control/backend-tls#clients_ca
-      agent_tls_certificate_ref: secret://kv/develop/control/backend-tls#agent_client_certificate
-      agent_tls_private_key_ref: secret://kv/develop/control/backend-tls#agent_client_private_key
-      agent_tls_ca_ref: secret://kv/develop/control/backend-tls#agents_ca
     authorization:
       customer_access_writers: [spiffe://spiritvpn/develop/service/product]
       customer_access_readers: [spiffe://spiritvpn/develop/service/product]
@@ -59,18 +47,6 @@ spec:
         database: spiritvpn_bot
         owner_user: spiritvpn_bot_owner
         runtime_user: spiritvpn_bot_runtime
-      secrets:
-        telegram_bot_token_ref: secret://kv/develop/control/bot#telegram_bot_token
-        postgres_owner_password_ref: secret://kv/develop/control/bot-postgres#owner_password
-        postgres_runtime_password_ref: secret://kv/develop/control/bot-postgres#runtime_password
-        migration_database_url_ref: secret://kv/develop/control/bot-postgres#migration_database_url
-        runtime_database_url_ref: secret://kv/develop/control/bot-postgres#runtime_database_url
-        subscription_signing_key_ref: secret://kv/develop/control/bot#subscription_signing_key
-        friends_shared_code_ref: secret://kv/develop/control/bot#friends_shared_code
-        grpc_client_certificate_ref: secret://kv/develop/control/bot-tls#client_certificate
-        grpc_client_private_key_ref: secret://kv/develop/control/bot-tls#client_private_key
-        grpc_server_ca_ref: secret://kv/develop/control/bot-tls#server_ca
-        tunnel_token_ref: secret://kv/develop/control/bot-ingress#tunnel_token
       settings:
         client_identity: spiffe://spiritvpn/develop/service/product
         friends_plan_fleet: develop-fleet-eu

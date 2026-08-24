@@ -36,7 +36,7 @@
         "control": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["backend_release", "postgres", "secrets", "authorization"],
+          "required": ["backend_release", "postgres", "authorization"],
           "properties": {
             "backend_release": {
               "type": "object",
@@ -67,36 +67,6 @@
                 }
               }
             },
-            "secrets": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "postgres_owner_password_ref",
-                "postgres_runtime_password_ref",
-                "migration_database_url_ref",
-                "runtime_database_url_ref",
-                "client_uuid_key_ref",
-                "grpc_tls_certificate_ref",
-                "grpc_tls_private_key_ref",
-                "grpc_tls_client_ca_ref",
-                "agent_tls_certificate_ref",
-                "agent_tls_private_key_ref",
-                "agent_tls_ca_ref"
-              ],
-              "properties": {
-                "postgres_owner_password_ref": {"$ref": "#/$defs/secretRef"},
-                "postgres_runtime_password_ref": {"$ref": "#/$defs/secretRef"},
-                "migration_database_url_ref": {"$ref": "#/$defs/secretRef"},
-                "runtime_database_url_ref": {"$ref": "#/$defs/secretRef"},
-                "client_uuid_key_ref": {"$ref": "#/$defs/secretRef"},
-                "grpc_tls_certificate_ref": {"$ref": "#/$defs/secretRef"},
-                "grpc_tls_private_key_ref": {"$ref": "#/$defs/secretRef"},
-                "grpc_tls_client_ca_ref": {"$ref": "#/$defs/secretRef"},
-                "agent_tls_certificate_ref": {"$ref": "#/$defs/secretRef"},
-                "agent_tls_private_key_ref": {"$ref": "#/$defs/secretRef"},
-                "agent_tls_ca_ref": {"$ref": "#/$defs/secretRef"}
-              }
-            },
             "authorization": {
               "type": "object",
               "additionalProperties": false,
@@ -118,7 +88,7 @@
             "bot": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["release", "postgres", "secrets", "settings", "ingress"],
+              "required": ["release", "postgres", "settings", "ingress"],
               "properties": {
                 "release": {
                   "type": "object",
@@ -137,36 +107,6 @@
                     "database": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
                     "owner_user": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"},
                     "runtime_user": {"type": "string", "pattern": "^[a-z_][a-z0-9_]{0,62}$"}
-                  }
-                },
-                "secrets": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "telegram_bot_token_ref",
-                    "postgres_owner_password_ref",
-                    "postgres_runtime_password_ref",
-                    "migration_database_url_ref",
-                    "runtime_database_url_ref",
-                    "subscription_signing_key_ref",
-                    "friends_shared_code_ref",
-                    "grpc_client_certificate_ref",
-                    "grpc_client_private_key_ref",
-                    "grpc_server_ca_ref",
-                    "tunnel_token_ref"
-                  ],
-                  "properties": {
-                    "telegram_bot_token_ref": {"$ref": "#/$defs/secretRef"},
-                    "postgres_owner_password_ref": {"$ref": "#/$defs/secretRef"},
-                    "postgres_runtime_password_ref": {"$ref": "#/$defs/secretRef"},
-                    "migration_database_url_ref": {"$ref": "#/$defs/secretRef"},
-                    "runtime_database_url_ref": {"$ref": "#/$defs/secretRef"},
-                    "subscription_signing_key_ref": {"$ref": "#/$defs/secretRef"},
-                    "friends_shared_code_ref": {"$ref": "#/$defs/secretRef"},
-                    "grpc_client_certificate_ref": {"$ref": "#/$defs/secretRef"},
-                    "grpc_client_private_key_ref": {"$ref": "#/$defs/secretRef"},
-                    "grpc_server_ca_ref": {"$ref": "#/$defs/secretRef"},
-                    "tunnel_token_ref": {"$ref": "#/$defs/secretRef"}
                   }
                 },
                 "settings": {
@@ -206,10 +146,6 @@
         "repository": {"type": "string", "minLength": 1},
         "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       }
-    },
-    "secretRef": {
-      "type": "string",
-      "pattern": "^secret://kv/(develop|prod)/control/[A-Za-z0-9._/-]+#[A-Za-z_][A-Za-z0-9_]*$"
     }
   }
 }

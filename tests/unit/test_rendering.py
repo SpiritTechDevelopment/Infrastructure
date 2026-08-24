@@ -48,9 +48,10 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("@sha256:", plan["backend"]["migration_image"])
         self.assertIn("@sha256:", plan["postgres"]["image"])
         self.assertEqual(plan["postgres"]["external_backup_command_argv"], [])
-        self.assertTrue(
-            all(reference.startswith("secret://") for reference in plan["secret_refs"].values())
-        )
+        # Ссылок на секреты в плане нет и быть не должно: состав окружения
+        # читается из Vault объектом целиком, а план его не проецирует.
+        self.assertNotIn("secret_refs", plan)
+        self.assertNotIn("secret_refs", plan["bot"])
 
     def test_control_plan_projects_the_bot_beside_the_backend(self) -> None:
         plan = json.loads(render_files(self.state)["control-plan.json"])
