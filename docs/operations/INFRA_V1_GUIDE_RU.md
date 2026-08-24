@@ -473,6 +473,18 @@ python3 scripts/vault-secret-resolver.py \
   --list-references
 ```
 
+Так адресуются секреты флота и исполнителя — по полю на ссылку. Контур control
+устроен иначе: его секреты читаются объектами Vault целиком, один путь на файл
+на диске, и состав в Git не объявлен. Пути перечисляются отдельно:
+
+```bash
+python3 scripts/vault-secret-resolver.py \
+  --root . \
+  --environment develop \
+  --scope control \
+  --list-objects
+```
+
 Записать значение интерактивно на management host:
 
 ```bash

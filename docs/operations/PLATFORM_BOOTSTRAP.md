@@ -220,6 +220,16 @@ python3 scripts/vault-secret-resolver.py \
   --root . --environment develop --list-references
 ```
 
+Fleet and executor secrets are addressed field by field and appear above. The
+control contour is different: its secrets are read as whole Vault objects, one
+path per file on disk, and the composition is not declared in Git. List those
+paths separately:
+
+```bash
+python3 scripts/vault-secret-resolver.py \
+  --root . --environment develop --scope control --list-objects
+```
+
 Import each value interactively. The final reference in the list is the private
 SSH identity used by Ansible; its public half must be authorized on the fleet
 hosts. The value is read from standard input and is not placed in the command

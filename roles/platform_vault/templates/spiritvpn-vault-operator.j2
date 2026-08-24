@@ -165,6 +165,43 @@ case "$command" in
     unset root_token
     printf '%s\n' "$reference stored"
     ;;
+  put-object)
+    # Запись пути целиком, из JSON на stdin. Секреты контура читаются объектами,
+    # и по одному полю их 23: столько же вводов корневого токена, а токен,
+    # набранный двадцать третий раз, набирают вставкой из буфера.
+    #
+    # `put`, а не `patch`: объект и есть единица, лишнее поле в нём — не остаток
+    # прошлой записи, а то, чего в файле быть не должно.
+    [[ $# -eq 3 ]] || { printf '%s\n' 'usage: spiritvpn-vault-operator put-object <environment> <relative/path>' >&2; exit 64; }
+    environment="$2"
+    relative_path="$3"
+    require_environment "$environment"
+    if [[ ! "$relative_path" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+      printf '%s\n' 'invalid object path' >&2
+      exit 64
+    fi
+    [[ "/$relative_path/" != *'/../'* && "/$relative_path/" != *'//'* ]] || exit 64
+    payload="$(mktemp)"
+    trap 'rm -f -- "$payload"' EXIT
+    printf 'Paste the JSON object for kv/%s/%s and finish with Ctrl-D:\n' "$environment" "$relative_path" >/dev/tty
+    cat > "$payload"
+    test -s "$payload" || { printf '%s\n' 'empty object refused' >&2; exit 65; }
+    # Разбор до записи: сломанный JSON, замеченный Vault, даёт диагностику про
+    # синтаксис и не говорит, какой путь остался незаполненным.
+    python3 -c 'import json,sys
+try:
+    d = json.load(open(sys.argv[1]))
+except ValueError as exc:
+    sys.exit(f"not valid JSON: {exc}")
+if not isinstance(d, dict) or not d or not all(isinstance(v, str) for v in d.values()):
+    sys.exit("object must be a non-empty JSON mapping of strings")' "$payload" || exit 65
+    read_root_token
+    vault_as_root_with_input "$payload" kv put -mount=kv "$environment/$relative_path" - >/dev/null
+    unset root_token
+    printf 'kv/%s/%s stored (%s field(s))\n' "$environment" "$relative_path" \
+      "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$payload")"
+    ;;
+
   snapshot)
     [[ $# -eq 1 ]] || exit 64
     read_root_token
@@ -175,7 +212,7 @@ case "$command" in
     printf '%s\n' "snapshot created at {{ platform_vault_dir }}/snapshots/vault-$timestamp.snap"
     ;;
   *)
-    printf '%s\n' 'usage: spiritvpn-vault-operator <status|init|unseal|configure|put|snapshot>' >&2
+    printf '%s\n' 'usage: spiritvpn-vault-operator <status|init|unseal|configure|put|put-object|snapshot>' >&2
     exit 64
     ;;
 esac

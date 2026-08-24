@@ -86,7 +86,8 @@ desired-state-deploy для точного SHA текущего main
 | Стабильные идентификаторы флотов | `desired/fleet-ids.yml`, зашифровано SOPS |
 | Первичная настройка управления, доступ и контракт раннера | `inventories/bootstrap/platform.sops.yml` |
 | Схемы, компилятор, роли, playbooks и workflows | Git |
-| Runtime-секреты сред | Vault; в Git находятся только ссылки `secret://` |
+| Секреты флота: ключи нод, материал маскировки, учётные данные мостов | Vault; в Git объявлены ссылки `secret://` |
+| Секреты сервисов: бэкенд и бот | Vault; в Git не объявлены вовсе |
 | Входные данные первичной настройки и доступа | SOPS-контракт платформы |
 | Закрытые ключи машин и локальные TLS-ключи | Только соответствующий сервер |
 | Применённая fleet-база | `refs/deployments/<environment>` |
@@ -95,6 +96,64 @@ desired-state-deploy для точного SHA текущего main
 
 `build/`, расшифрованные YAML, временные Ansible vars и планы раннера являются
 производными артефактами. Их нельзя коммитить или прикладывать к workflow.
+
+## Секреты контура control в Vault
+
+Состав окружения бэкенда и бота в Git не объявлен. Топология описывает
+проводку — адреса, порты, пути к файлам внутри контейнера, — а значения и их
+перечень живут в Vault. Добавить переменную значит записать её в Vault: правки
+схемы, топологии или роли для этого не нужны.
+
+Раскладка: **один путь Vault наполняет один файл на диске.** Имя поля в объекте
+`.../files` становится именем файла.
+
+| Путь | Что наполняет |
+|---|---|
+| `kv/<env>/control/backend/env` | `backend.env` |
+| `kv/<env>/control/backend/migration-env` | `migration.env` бэкенда |
+| `kv/<env>/control/backend/files` | файлы в защищённом каталоге бэкенда |
+| `kv/<env>/control/backend/postgres` | пароли ролей PostgreSQL бэкенда |
+| `kv/<env>/control/bot/env` | `bot.env` |
+| `kv/<env>/control/bot/migration-env` | `migration.env` бота |
+| `kv/<env>/control/bot/tunnel-env` | `tunnel.env` |
+| `kv/<env>/control/bot/files` | файлы в защищённом каталоге бота |
+| `kv/<env>/control/bot/postgres` | пароли ролей PostgreSQL бота |
+
+Файлы, на которые роль указывает контейнеру, обязаны присутствовать:
+`server.crt`, `server.key`, `clients-ca.crt`, `agent-client.crt`,
+`agent-client.key`, `agents-ca.crt`, `client_uuid.key` у бэкенда и `client.crt`,
+`client.key`, `server-ca.crt` у бота. Пропущенный файл называет отказ выкатки.
+
+Объекты `postgres` — единственные с объявленным составом, `owner_password` и
+`runtime_password`. Исполнитель выполняет `ALTER ROLE` сам и обязан различать
+роли; пароль внутри DSN для этого не годится. Он должен совпадать с тем, что
+внутри соответствующего DSN, байт в байт.
+
+Ключ, который ставит топология, класть в Vault нельзя: выкатка откажет и назовёт
+его. Это касается всех `SPIRIT_*_FILE`, `SPIRIT_ROLE_*`, `SPIRIT_GRPC_LISTEN`,
+`SPIRIT_HTTP_LISTEN`, `SPIRIT_DB_MAX_CONNS`, `SPIRIT_LOG_LEVEL` и, у бота,
+`BOT_SPIRITVPND_*`, `BOT_SUBSCRIPTION_BASE_URL`, `BOT_MINI_APP_*`,
+`BOT_FRIENDS_PLAN_*`. Молчаливое старшинство одного источника означало бы, что
+отревьюенный адрес переопределяется записью, которой нет в диффе.
+
+Перечень путей для окружения печатает сам резолвер, не раскрывая значений:
+
+```bash
+python3 scripts/vault-secret-resolver.py \
+  --root . --environment develop --scope control --list-objects
+```
+
+Запись — церемонией на управляющем сервере. Значение читается со stdin до EOF и
+не попадает ни в историю оболочки, ни в `argv`:
+
+```bash
+sudo spiritvpn-vault-operator put-object develop control/bot/env   # объект целиком, JSON
+sudo spiritvpn-vault-operator put develop 'secret://kv/develop/control/bot/files#client.crt' < client.crt
+```
+
+PEM подавать файлом, а не вставкой: церемония читает до EOF, и несработавшая
+вставка сохраняет один перевод строки, который проходит проверку на непустоту и
+падает позже в openssl как «Unable to load certificate».
 
 ## Структура репозитория
 
