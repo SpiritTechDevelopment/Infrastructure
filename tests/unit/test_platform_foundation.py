@@ -44,6 +44,19 @@ VALID_DESIRED = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
 LIVE_DESIRED_SKIP_REASON = "encrypted repository desired state requires a trusted SOPS identity"
 
 
+FIXTURE_SSH_HOST_KEY = (
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPlgC4pKbumsHqX4D4GEiRDU90RKBfde5VuAfNXQ281T"
+)
+
+# Приватные половины пар REALITY, объявленных в tests/fixtures/valid/desired.
+# Значения выведены из фиксированных семян, чтобы фикстура была воспроизводима и
+# читалась в диффе; публичные половины лежат в файлах нод рядом.
+REALITY_PRIVATE_KEYS = {
+    "develop-entry-nl": "ERERERERERERERERERERERERERERERERERERERERERE",
+    "develop-exit-de": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI",
+}
+
+
 class RecordingVault(BaseHTTPRequestHandler):
     """A stand-in Vault that records the calls the resolver actually makes."""
 
@@ -72,6 +85,19 @@ class RecordingVault(BaseHTTPRequestHandler):
         type(self).calls.append(("GET", self.path, self.headers.get("X-Vault-Token")))
         if type(self).fail_reads:
             self._respond(500, b'{"errors":["unavailable"]}')
+            return
+        # Путь `reality` отвечает настоящим ключом X25519, парным к тому, что
+        # объявлен в фикстуре топологии. Заглушка, отдающая PEM на всё подряд,
+        # проносила бы мимо сверку пары — то есть тест ходил бы по коду, ничего
+        # в нём не проверяя.
+        if self.path.rstrip("/").endswith("/reality"):
+            node = self.path.rstrip("/").rsplit("/", 2)[-2]
+            self._respond(
+                200,
+                json.dumps(
+                    {"data": {"data": {"private_key": REALITY_PRIVATE_KEYS[node]}}}
+                ).encode(),
+            )
             return
         self._respond(
             200,
@@ -879,6 +905,132 @@ all:
             with self.assertRaises(resolver.ResolverError):
                 cleaner("p", payload)
 
+    def test_reality_pair_must_match_between_git_and_vault(self) -> None:
+        """Половинки пары живут в разных хранилищах и до резолвера не встречаются.
+
+        Публичный ключ объявлен в топологии, приватный лежит в Vault, и схема
+        принуждает только форму ссылки — не то, что одно выведено из другого.
+        Разошедшаяся пара не роняет ничего заметного: нода поднимается, метрики
+        зелёные, а REALITY отдаёт клиентов маскировочному сайту. Тот же ключ
+        служит паролем на входе, поэтому расхождение рвёт и мосты к выходу.
+
+        Резолвер — единственное место, где обе половинки есть одновременно и
+        ещё до того, как выкатка тронет ноду.
+        """
+        resolver = _load_script("vault-secret-resolver.py", "spiritvpn_resolver")
+        from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding,
+            NoEncryption,
+            PrivateFormat,
+            PublicFormat,
+        )
+
+        def encode(raw: bytes) -> str:
+            return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+        key = X25519PrivateKey.generate()
+        private = encode(
+            key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+        )
+        public = encode(key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw))
+        other = encode(
+            X25519PrivateKey.generate()
+            .public_key()
+            .public_bytes(Encoding.Raw, PublicFormat.Raw)
+        )
+
+        # Форма важна не меньше значения: ровно так ключ лежит в Vault, в
+        # топологии и в конфиге xray, поэтому сравнение идёт по строкам.
+        self.assertEqual(resolver.derive_reality_public_key(private), public)
+        self.assertEqual(len(public), 43)
+
+        reference = "secret://kv/develop/nodes/develop-exit-ro/reality#private_key"
+        # Совпавшая пара проходит молча, в том числе с хвостовым переносом:
+        # он появляется от того, как значение вводили в церемонию.
+        resolver.verify_reality_pairs({reference: private + "\n"}, {reference: public})
+
+        with self.assertRaises(resolver.ResolverError) as mismatched:
+            resolver.verify_reality_pairs({reference: private}, {reference: other})
+        self.assertIn(reference, str(mismatched.exception))
+
+        with self.assertRaises(resolver.ResolverError):
+            resolver.verify_reality_pairs({reference: "не base64"}, {reference: public})
+        with self.assertRaises(resolver.ResolverError):
+            resolver.verify_reality_pairs({reference: encode(b"\x00" * 31)}, {reference: public})
+
+        # Ссылка, которой нет в разрешённых, — не расхождение: так выглядит
+        # прогон с --scope control, где ключей нод не запрашивали вовсе.
+        resolver.verify_reality_pairs({}, {reference: public})
+
+    def test_node_prepare_emits_a_declaration_the_contract_accepts(self) -> None:
+        """Фрагмент, который не грузится, бесполезен — и это единственная проверка.
+
+        Генератор пишет объявление руками, а форму объявления знает схема.
+        Проверять его сравнением с ожидаемым текстом значило бы закрепить то,
+        что написал автор, а не то, что примет контур: расхождение вылезло бы
+        на операторе, уже создавшем VPS.
+
+        Тест ловил уже одно такое: `target_state: provisioning` выглядит честнее
+        для ещё не поднятой машины, но `SERVING_COUNT` требует ровно один
+        обслуживающий инстанс на ноду и отвергает объявление с нулём.
+        """
+        from fleetctl.validation import validate_environment
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            desired_root = root / "desired"
+            shutil.copytree(VALID_DESIRED, desired_root)
+            secret_output = root / "reality.json"
+            fragment = subprocess.run(
+                [
+                    "python3",
+                    str(REPO_ROOT / "scripts" / "node-prepare.py"),
+                    "--environment", "develop",
+                    "--node-id", "develop-exit-se",
+                    "--role", "exit",
+                    "--region", "se",
+                    "--hostname", "edge-se.develop.example.invalid",
+                    "--display-name", "Sweden",
+                    "--address", "192.0.2.30",
+                    "--slot", "3",
+                    "--ssh-host-key", FIXTURE_SSH_HOST_KEY,
+                    "--secret-output", str(secret_output),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            node, instance = list(yaml.safe_load_all(fragment))
+            environment_root = desired_root / "environments" / "develop"
+            (environment_root / "nodes" / "develop-exit-se.yml").write_text(
+                yaml.safe_dump(node, sort_keys=False), encoding="utf-8"
+            )
+            (environment_root / "instances" / "develop-exit-se-03.yml").write_text(
+                yaml.safe_dump(instance, sort_keys=False), encoding="utf-8"
+            )
+            # Грузится реальной валидацией, вместе с уже объявленными нодами.
+            state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+            self.assertIn(
+                "develop-exit-se", {declared.object_id for declared in state.nodes}
+            )
+
+            # Обе половины выпущены здесь и здесь же расходятся по хранилищам.
+            # Если они не парные уже в момент выпуска, сверка перед выкаткой
+            # отвергнет ноду, которую оператор к тому времени уже создал.
+            resolver = _load_script("vault-secret-resolver.py", "spiritvpn_resolver")
+            private_key = json.loads(secret_output.read_text(encoding="utf-8"))["private_key"]
+            self.assertEqual(
+                resolver.derive_reality_public_key(private_key),
+                node["spec"]["reality"]["public_key"],
+            )
+            resolver.verify_reality_pairs(
+                {node["spec"]["reality"]["private_key_ref"]: private_key},
+                {node["spec"]["reality"]["private_key_ref"]: node["spec"]["reality"]["public_key"]},
+            )
+            # Приватный ключ ложится в файл, который оператор понесёт в церемонию.
+            self.assertEqual(secret_output.stat().st_mode & 0o777, 0o600)
+
     def test_bot_pem_secrets_are_checked_for_being_pem(self) -> None:
         """Непустое — ещё не сертификат.
 
@@ -1530,6 +1682,30 @@ all:
         self.assertIn('[[ "$auth_json" != *\'"approle/"\'* ]]', operator)
         self.assertIn('path "kv/data/{{ policy_environment }}/*"', policy)
         self.assertNotIn('capabilities = ["create"', policy)
+
+    def test_prepare_node_creates_and_refuses_to_regenerate(self) -> None:
+        """Перегенерация ключа живой ноды убивает её молча.
+
+        Нода с новым приватным ключом и старым публичным поднимается рабочей на
+        вид: метрики зелёные, а REALITY отдаёт клиентов маскировочному сайту, и
+        вместе с ней отваливаются все входы, у которых её публичный ключ служит
+        паролем. Поэтому существующий путь останавливает операцию, а не
+        перезаписывается — второй запуск обязан быть отказом, а не сюрпризом.
+        """
+        operator = (
+            REPO_ROOT / "roles" / "platform_vault" / "templates" / "spiritvpn-vault-operator.j2"
+        ).read_text(encoding="utf-8")
+        self.assertIn("refusing to regenerate", operator)
+        # Проверка идёт до обеих записей: отказ после первой оставил бы половину
+        # результата — ключ без сертификата.
+        refusal = operator.index("refusing to regenerate")
+        for write in ('"$environment/nodes/$node_id/reality" -', '"$environment/nodes/$node_id/mask" -'):
+            self.assertGreater(operator.index(write), refusal)
+        # Источник маски читается тоже до записей: ненайденный сертификат должен
+        # остановить операцию раньше, чем в Vault появится первая половина.
+        self.assertLess(operator.index("nodes/$source_node/mask"), refusal + operator[refusal:].index("kv put"))
+        # Токен спрашивается один раз на обе записи.
+        self.assertEqual(operator.count("read_root_token"), 6)
 
     def test_secret_reference_listing_is_offline_and_environment_scoped(self) -> None:
         result = subprocess.run(

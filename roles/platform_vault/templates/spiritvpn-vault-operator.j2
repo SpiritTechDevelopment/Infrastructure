@@ -202,6 +202,87 @@ if not isinstance(d, dict) or not d or not all(isinstance(v, str) for v in d.val
       "$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$payload")"
     ;;
 
+  prepare-node)
+    # Выпуск материала новой ноды одним заходом: пара REALITY рождается здесь,
+    # приватная половина остаётся здесь же, оператор уносит только объявление
+    # для Git. Аргументы после <environment> и <source-node> уходят генератору
+    # как есть — он и владеет формой объявления.
+    #
+    # Токен спрашивается один раз на обе записи. Разбить на два `put-object`
+    # значило бы спросить его дважды за одну операцию, а токен, набираемый
+    # повторно, набирают вставкой из буфера.
+    [[ $# -ge 3 ]] || {
+      printf '%s\n' 'usage: spiritvpn-vault-operator prepare-node <environment> <source-node-id> [generator options...]' >&2
+      exit 64
+    }
+    environment="$2"
+    source_node="$3"
+    shift 3
+    require_environment "$environment"
+    if [[ ! "$source_node" =~ ^[a-z0-9-]+$ ]]; then
+      printf '%s\n' 'invalid source node id' >&2
+      exit 64
+    fi
+
+    workspace="$(mktemp -d)"
+    trap 'rm -rf -- "$workspace"' EXIT
+    # Генератор печатает объявление в stdout, а приватный ключ кладёт в файл.
+    # Держим их порознь до самого конца: объявление уходит на терминал, ключ —
+    # только в Vault, и перепутать их местами нечем.
+    if ! python3 "{{ platform_vault_dir }}/node-prepare.py" \
+        --environment "$environment" \
+        --secret-output "$workspace/reality.json" \
+        "$@" > "$workspace/fragment.yml"; then
+      printf '%s\n' 'generator refused; nothing was written' >&2
+      exit 65
+    fi
+    node_id="$(python3 -c 'import sys,yaml
+for document in yaml.safe_load_all(open(sys.argv[1])):
+    if document.get("kind") == "LogicalNode":
+        print(document["metadata"]["id"]); break' "$workspace/fragment.yml")"
+    test -n "$node_id" || { printf '%s\n' 'generator emitted no LogicalNode' >&2; exit 65; }
+
+    read_root_token
+    # Только создание. Перегенерация ключа живой ноды убивает её вместе со
+    # всеми входами, которые на неё смотрят, и делает это молча — поэтому
+    # существующий путь останавливает операцию, а не перезаписывается.
+    if vault_as_root kv get -mount=kv "$environment/nodes/$node_id/reality" >/dev/null 2>&1; then
+      unset root_token
+      printf 'kv/%s/nodes/%s/reality already exists; refusing to regenerate\n' \
+        "$environment" "$node_id" >&2
+      exit 65
+    fi
+    # Сертификат маски — wildcard на весь флот, поэтому новой ноде нужен не
+    # выпуск, а копия. Читается до записи ключа: отсутствующий источник должен
+    # остановить операцию раньше, чем в Vault появится половина результата.
+    if ! vault_as_root kv get -mount=kv -format=json "$environment/nodes/$source_node/mask" \
+        > "$workspace/source-mask.json" 2>/dev/null; then
+      unset root_token
+      printf 'kv/%s/nodes/%s/mask not found; name a node whose mask certificate covers %s\n' \
+        "$environment" "$source_node" "$node_id" >&2
+      exit 65
+    fi
+    python3 -c 'import json,sys
+source = json.load(open(sys.argv[1]))["data"]["data"]
+missing = [name for name in ("fullchain", "private_key") if not source.get(name)]
+if missing:
+    sys.exit("source mask object lacks: " + ", ".join(missing))
+json.dump({name: source[name] for name in ("fullchain", "private_key")}, open(sys.argv[2], "w"))' \
+      "$workspace/source-mask.json" "$workspace/mask.json" || { unset root_token; exit 65; }
+
+    vault_as_root_with_input "$workspace/reality.json" kv put -mount=kv \
+      "$environment/nodes/$node_id/reality" - >/dev/null
+    vault_as_root_with_input "$workspace/mask.json" kv put -mount=kv \
+      "$environment/nodes/$node_id/mask" - >/dev/null
+    unset root_token
+
+    printf 'kv/%s/nodes/%s/{reality,mask} stored; mask copied from %s\n\n' \
+      "$environment" "$node_id" "$source_node" >&2
+    printf 'Объявление для desired/environments/%s/topology — коммит и ревью за вами:\n\n' \
+      "$environment" >&2
+    cat "$workspace/fragment.yml"
+    ;;
+
   snapshot)
     [[ $# -eq 1 ]] || exit 64
     read_root_token
@@ -212,7 +293,7 @@ if not isinstance(d, dict) or not d or not all(isinstance(v, str) for v in d.val
     printf '%s\n' "snapshot created at {{ platform_vault_dir }}/snapshots/vault-$timestamp.snap"
     ;;
   *)
-    printf '%s\n' 'usage: spiritvpn-vault-operator <status|init|unseal|configure|put|put-object|snapshot>' >&2
+    printf '%s\n' 'usage: spiritvpn-vault-operator <status|init|unseal|configure|put|put-object|prepare-node|snapshot>' >&2
     exit 64
     ;;
 esac

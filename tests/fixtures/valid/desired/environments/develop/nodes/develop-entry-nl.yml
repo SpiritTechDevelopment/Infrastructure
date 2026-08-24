@@ -13,7 +13,7 @@ spec:
     fingerprint: chrome
     server_name: edge-a7.develop.example.invalid
   reality:
-    public_key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    public_key: e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM
     short_id: 0123abcd
     private_key_ref: secret://kv/develop/nodes/develop-entry-nl/reality#private_key
   mask:

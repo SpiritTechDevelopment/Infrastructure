@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import os
 import re
@@ -16,6 +18,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
@@ -174,6 +178,68 @@ def desired_references(
     # Контур control ссылок в топологии больше не объявляет: его секреты
     # читаются объектами целиком по адресам из CONTROL_OBJECTS.
     return sorted(references)
+
+
+def reality_public_keys(
+    root: Path,
+    environment: str,
+    desired_root: Path | None = None,
+) -> dict[str, str]:
+    """Ссылка на приватный ключ REALITY → публичный ключ, объявленный в Git.
+
+    Половинки пары живут в разных хранилищах намеренно, и до этого места они
+    ни разу не встречаются: схема принуждает объявить ссылку, Vault хранит
+    значение, и никто не сверяет, что одно выведено из другого.
+    """
+    state = validate_environment(root, environment, desired_root=desired_root)
+    return {node.private_key_ref: node.reality_public_key for node in state.nodes}
+
+
+def verify_reality_pairs(resolved: dict[str, str], declared: dict[str, str]) -> None:
+    """Отвергает пару, в которой публичный ключ не выводится из приватного.
+
+    Разошедшаяся пара не ломает ничего заметного: нода поднимается, метрики
+    зелёные, а REALITY молча отдаёт клиентов маскировочному сайту. Тот же
+    публичный ключ служит паролем на входе, поэтому расхождение рвёт и мосты
+    к этому выходу. Отказ здесь — единственное место, где это видно до того,
+    как выкатка тронет ноду.
+    """
+    for reference, public_key in sorted(declared.items()):
+        private_key = resolved.get(reference)
+        if private_key is None:
+            continue
+        try:
+            derived = derive_reality_public_key(private_key)
+        except ValueError as exc:
+            raise ResolverError(f"{reference}: {exc}") from exc
+        if derived != public_key.strip():
+            raise ResolverError(
+                f"{reference}: объявленный reality.public_key не соответствует "
+                "приватному ключу в Vault; нода поднялась бы рабочей на вид и "
+                "отдавала бы клиентов маскировочному сайту"
+            )
+
+
+def derive_reality_public_key(private_key: str) -> str:
+    """base64url приватного ключа X25519 → base64url публичного, как у xray.
+
+    Без padding и с urlsafe-алфавитом — в этой форме ключ лежит в Vault, в
+    топологии и в конфиге xray, поэтому сравнение идёт по строкам, а не по
+    байтам: любая другая форма означала бы, что сверяется не то, что поедет.
+    """
+    raw = private_key.strip()
+    try:
+        decoded = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("приватный ключ REALITY не является base64url") from exc
+    if len(decoded) != 32:
+        raise ValueError(
+            f"приватный ключ REALITY должен быть 32 байта, получено {len(decoded)}"
+        )
+    public = X25519PrivateKey.from_private_bytes(decoded).public_key().public_bytes(
+        Encoding.Raw, PublicFormat.Raw
+    )
+    return base64.urlsafe_b64encode(public).decode("ascii").rstrip("=")
 
 
 def control_object_paths(root: Path, environment: str, desired_root: Path | None) -> dict[str, dict[str, str]]:
@@ -358,6 +424,11 @@ def main() -> int:
             for reference in references:
                 path, field = parse_reference(reference, args.environment)
                 resolved[reference] = client.read(path, field)
+            if args.scope in {"all", "fleet"}:
+                verify_reality_pairs(
+                    resolved,
+                    reality_public_keys(args.root, args.environment, args.desired_root),
+                )
             control_secrets: dict[str, dict[str, dict[str, str]]] = {}
             for component in sorted(objects):
                 collected: dict[str, dict[str, str]] = {}
