@@ -3,9 +3,17 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# Свой каталог на пути явно: тесты запускаются и через `unittest discover`,
+# и как `tests.unit.<модуль>`, и во втором случае соседний модуль иначе не
+# находится.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import topology_fixture
 
 import yaml
 
@@ -83,10 +91,11 @@ class KnownHostsCompilerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="known-hosts-") as temporary:
             desired = Path(temporary) / "desired"
             shutil.copytree(VALID_DESIRED, desired)
-            path = desired / "environments/develop/instances/develop-exit-de-01.yml"
-            document = yaml.safe_load(path.read_text(encoding="utf-8"))
-            del document["spec"]["ssh_host_key"]
-            path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            topology_fixture.edit(
+                desired,
+                "develop-exit-de-01",
+                lambda document: document["spec"].pop("ssh_host_key"),
+            )
             # Схему и семантику проходит — иначе базовый коммит было бы не прочитать.
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired)
             with self.assertRaisesRegex(KnownHostsError, "develop-exit-de-01"):
@@ -98,18 +107,13 @@ class KnownHostsCompilerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="known-hosts-") as temporary:
             desired = Path(temporary) / "desired"
             shutil.copytree(VALID_DESIRED, desired)
-            instances = desired / "environments/develop/instances"
-            document = yaml.safe_load(
-                (instances / "develop-exit-de-01.yml").read_text(encoding="utf-8")
-            )
+            document = topology_fixture.get(desired, "develop-exit-de-01")
             document["metadata"]["id"] = "develop-exit-de-02"
             document["spec"]["target_state"] = "retired"
             document["spec"]["public_address"] = "192.0.2.21"
             document["spec"]["provider"]["resource_id"] = "fixture-exit-02"
             del document["spec"]["ssh_host_key"]
-            (instances / "develop-exit-de-02.yml").write_text(
-                yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
-            )
+            topology_fixture.put(desired, document)
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired)
 
             entries = self.entries(compile_known_hosts(state))
@@ -131,17 +135,12 @@ class KnownHostsCompilerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="known-hosts-") as temporary:
             desired = Path(temporary) / "desired"
             shutil.copytree(VALID_DESIRED, desired)
-            instances = desired / "environments/develop/instances"
-            document = yaml.safe_load(
-                (instances / "develop-entry-nl-01.yml").read_text(encoding="utf-8")
-            )
+            document = topology_fixture.get(desired, "develop-entry-nl-01")
             document["metadata"]["id"] = "develop-entry-nl-02"
             document["spec"]["target_state"] = "retired"
             document["spec"]["public_address"] = "192.0.2.11"
             document["spec"]["provider"]["resource_id"] = "fixture-entry-02"
-            (instances / "develop-entry-nl-02.yml").write_text(
-                yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
-            )
+            topology_fixture.put(desired, document)
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired)
 
             entries = self.entries(compile_known_hosts(state))

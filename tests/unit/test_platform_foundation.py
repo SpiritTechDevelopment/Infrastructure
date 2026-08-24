@@ -12,11 +12,19 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+# Свой каталог на пути явно: тесты запускаются и через `unittest discover`,
+# и как `tests.unit.<модуль>`, и во втором случае соседний модуль иначе не
+# находится.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import topology_fixture
 
 import yaml
 from jinja2 import Environment
@@ -1006,13 +1014,8 @@ all:
             # 22 — умолчание, и в объявлении его быть не должно: явное значение
             # по умолчанию превращает «здесь особый порт» в шум.
             self.assertNotIn("bootstrap_port", instance["spec"])
-            environment_root = desired_root / "environments" / "develop"
-            (environment_root / "nodes" / "develop-exit-se.yml").write_text(
-                yaml.safe_dump(node, sort_keys=False), encoding="utf-8"
-            )
-            (environment_root / "instances" / "develop-exit-se-03.yml").write_text(
-                yaml.safe_dump(instance, sort_keys=False), encoding="utf-8"
-            )
+            topology_fixture.put(desired_root, node)
+            topology_fixture.put(desired_root, instance)
             # Грузится реальной валидацией, вместе с уже объявленными нодами.
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             self.assertIn(

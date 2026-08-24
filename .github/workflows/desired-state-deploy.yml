@@ -181,27 +181,15 @@ jobs:
                   echo "$environment" >> "$control_list"
                   echo "$environment" >> "$fleet_list"
                   ;;
-                # Релиз бэкенда и релиз агента живут в одном файле: первый в
-                # spec.control, второй в spec.common_overrides. По имени файла
-                # их не различить, поэтому сравниваются поддеревья. Control не
-                # вызывает передеплой нод по построению компилятора.
-                */environment.yml)
-                  before_doc=$(git show "$BEFORE:$file" 2>/dev/null || printf '{}\n')
-                  after_doc=$(git show "$AFTER:$file" 2>/dev/null || printf '{}\n')
-                  if [ "$(yq '.spec.control' <<<"$before_doc")" \
-                    != "$(yq '.spec.control' <<<"$after_doc")" ]; then
-                    echo "$environment" >> "$control_list"
-                  fi
-                  if [ "$(yq 'del(.spec.control)' <<<"$before_doc")" \
-                    != "$(yq 'del(.spec.control)' <<<"$after_doc")" ]; then
-                    echo "$environment" >> "$fleet_list"
-                  fi
-                  ;;
                 */platform/*)
                   echo "$environment" >> "$platform_list"
                   ;;
-                # nodes/, fleets/, instances/ и всё, что появится рядом:
-                # описание флота, то есть fleet-deploy.
+                # Раскладка по объектам снята: окружение объявляется одним
+                # `topology.yml`, и ветки под `environment.yml` и под
+                # `nodes/`|`fleets/`|`instances/` вместе с ней. Всё, что
+                # появится рядом с топологией и не будет опознано, попадает
+                # сюда — и трактуется как описание флота, потому что
+                # under-deployment здесь дороже лишнего прогона.
                 *)
                   echo "$environment" >> "$fleet_list"
                   ;;

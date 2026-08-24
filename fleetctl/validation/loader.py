@@ -121,7 +121,15 @@ def load_environment_objects(
     if not environment_root.is_dir():
         return [], [ValidationIssue.at(environment_root, "ENVIRONMENT_MISSING", "environment directory does not exist")]
 
-    standalone: list[tuple[dict[str, Any], Path]] = []
+    # Окружение объявляется одним документом. Раскладка по объектам —
+    # `environment.yml` плюс каталоги `nodes/`, `fleets/`, `instances/` — снята:
+    # она пережила свой смысл, оставшись только в синтетических фикстурах, а
+    # плата за неё была в двух ветках загрузки, отказе на их смешение и правиле
+    # «имя файла обязано совпадать с идентификатором».
+    #
+    # Свободностоящий объект теперь не вторая раскладка, а ошибка, и говорит об
+    # этом прямо: файл, оставшийся от прежнего формата, иначе просто не читался
+    # бы никем и молча выпал из выкатки.
     topologies: list[tuple[dict[str, Any], Path]] = []
     paths = sorted((*environment_root.rglob("*.yml"), *environment_root.rglob("*.yaml")))
     for path in paths:
@@ -132,7 +140,13 @@ def load_environment_objects(
         if kind == TOPOLOGY_KIND:
             topologies.append((document, path))
         elif kind in OBJECT_KINDS:
-            standalone.append((document, path))
+            issues.append(
+                ValidationIssue.at(
+                    path,
+                    "STANDALONE_OBJECT",
+                    f"{kind} must be declared inside topology.yml, not as its own file",
+                )
+            )
         else:
             issues.append(ValidationIssue.at(path, "UNKNOWN_KIND", f"unsupported kind {kind!r}"))
     if len(topologies) > 1:
@@ -143,18 +157,8 @@ def load_environment_objects(
                 f"expected at most one {TOPOLOGY_KIND} document, found {len(topologies)}",
             )
         )
-    if topologies and standalone:
-        issues.append(
-            ValidationIssue.at(
-                environment_root,
-                "TOPOLOGY_MIXED",
-                "an environment must use either topology.yml or standalone objects, never both",
-            )
-        )
 
-    documents: list[tuple[dict[str, Any], Path, bool]] = [
-        (document, path, True) for document, path in standalone
-    ]
+    documents: list[tuple[dict[str, Any], Path]] = []
     for topology, path in topologies:
         validator = validators.get(TOPOLOGY_KIND)
         if validator is None:
@@ -194,12 +198,9 @@ def load_environment_objects(
                 )
             )
             continue
-        documents.extend(
-            (embedded, path, False)
-            for embedded in topology["spec"]["objects"]
-        )
+        documents.extend((embedded, path) for embedded in topology["spec"]["objects"])
 
-    for document, path, require_filename in documents:
+    for document, path in documents:
         kind = document.get("kind")
         if kind not in OBJECT_KINDS:
             issues.append(
@@ -237,17 +238,6 @@ def load_environment_objects(
         if override_errors:
             continue
 
-        object_id = document["metadata"]["id"]
-        expected_filename = "environment.yml" if kind == "Environment" else f"{object_id}.yml"
-        if require_filename and path.name != expected_filename:
-            issues.append(
-                ValidationIssue.at(
-                    path,
-                    "FILENAME",
-                    f"{kind} {object_id!r} must be stored as {expected_filename!r}",
-                )
-            )
-            continue
         objects.append(_to_model(document, path))
     return objects, issues
 

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import yaml
+
+# Свой каталог на пути явно: тесты запускаются и через `unittest discover -s
+# tests/unit`, и как `tests.unit.test_planning`, и во втором случае соседний
+# модуль иначе не находится.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import topology_fixture
 
 from fleetctl.planning import PlanningError, build_impact_plan
 from fleetctl.validation import validate_environment
@@ -44,14 +52,12 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            instances = current_root / "environments" / "develop" / "instances"
-            old_path = instances / "develop-exit-de-01.yml"
-            replacement = load_yaml(old_path)
-            old_path.unlink()
+            replacement = topology_fixture.get(current_root, "develop-exit-de-01")
+            topology_fixture.drop(current_root, "develop-exit-de-01")
             replacement["metadata"]["id"] = "develop-exit-de-02"
             replacement["spec"]["public_address"] = "192.0.2.21"
             replacement["spec"]["provider"]["resource_id"] = "fixture-exit-02"
-            save_yaml(instances / "develop-exit-de-02.yml", replacement)
+            topology_fixture.put(current_root, replacement)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -74,14 +80,12 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            instances = current_root / "environments" / "develop" / "instances"
-            old_path = instances / "develop-entry-nl-01.yml"
-            replacement = load_yaml(old_path)
-            old_path.unlink()
+            replacement = topology_fixture.get(current_root, "develop-entry-nl-01")
+            topology_fixture.drop(current_root, "develop-entry-nl-01")
             replacement["metadata"]["id"] = "develop-entry-nl-02"
             replacement["spec"]["public_address"] = "192.0.2.11"
             replacement["spec"]["provider"]["resource_id"] = "fixture-entry-02"
-            save_yaml(instances / "develop-entry-nl-02.yml", replacement)
+            topology_fixture.put(current_root, replacement)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -117,13 +121,12 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            instances = current_root / "environments" / "develop" / "instances"
-            candidate = load_yaml(instances / "develop-entry-nl-01.yml")
+            candidate = topology_fixture.get(current_root, "develop-entry-nl-01")
             candidate["metadata"]["id"] = "develop-entry-nl-02"
             candidate["spec"]["target_state"] = "candidate"
             candidate["spec"]["public_address"] = "192.0.2.11"
             candidate["spec"]["provider"]["resource_id"] = "fixture-entry-02"
-            save_yaml(instances / "develop-entry-nl-02.yml", candidate)
+            topology_fixture.put(current_root, candidate)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -160,10 +163,9 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            environment_path = current_root / "environments" / "develop" / "environment.yml"
-            environment = load_yaml(environment_path)
+            environment = topology_fixture.get(current_root, "develop")
             environment["spec"]["control"]["public_endpoint"]["address"] = "192.0.2.2"
-            save_yaml(environment_path, environment)
+            topology_fixture.put(current_root, environment)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -178,10 +180,9 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            node_path = current_root / "environments" / "develop" / "nodes" / "develop-entry-nl.yml"
-            node = load_yaml(node_path)
+            node = topology_fixture.get(current_root, "develop-entry-nl")
             node["spec"]["common_overrides"] = {"networking": {"agent": {"port": 9555}}}
-            save_yaml(node_path, node)
+            topology_fixture.put(current_root, node)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -201,10 +202,9 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            environment_path = current_root / "environments" / "develop" / "environment.yml"
-            environment = load_yaml(environment_path)
+            environment = topology_fixture.get(current_root, "develop")
             environment["spec"]["common_overrides"] = {"networking": {"agent": {"port": 9443}}}
-            save_yaml(environment_path, environment)
+            topology_fixture.put(current_root, environment)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -218,12 +218,11 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            environment_path = current_root / "environments" / "develop" / "environment.yml"
-            environment = load_yaml(environment_path)
+            environment = topology_fixture.get(current_root, "develop")
             environment["spec"]["control"]["backend_release"]["backend_image"]["digest"] = (
                 "sha256:" + "f" * 64
             )
-            save_yaml(environment_path, environment)
+            topology_fixture.put(current_root, environment)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -238,10 +237,9 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            fleet_path = current_root / "environments" / "develop" / "fleets" / "develop-fleet-eu.yml"
-            fleet = load_yaml(fleet_path)
+            fleet = topology_fixture.get(current_root, "develop-fleet-eu")
             fleet["spec"]["bridges"] = []
-            save_yaml(fleet_path, fleet)
+            topology_fixture.put(current_root, fleet)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -256,14 +254,12 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            environment = current_root / "environments" / "develop"
-            (environment / "nodes" / "develop-exit-de.yml").unlink()
-            (environment / "instances" / "develop-exit-de-01.yml").unlink()
-            fleet_path = environment / "fleets" / "develop-fleet-eu.yml"
-            fleet = load_yaml(fleet_path)
+            topology_fixture.drop(current_root, "develop-exit-de")
+            topology_fixture.drop(current_root, "develop-exit-de-01")
+            fleet = topology_fixture.get(current_root, "develop-fleet-eu")
             fleet["spec"]["exits"] = []
             fleet["spec"]["bridges"] = []
-            save_yaml(fleet_path, fleet)
+            topology_fixture.put(current_root, fleet)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
@@ -278,12 +274,14 @@ class ImpactPlanningTests(unittest.TestCase):
             root = Path(temporary_directory)
             baseline_root = copy_valid_desired(root, "baseline")
             current_root = copy_valid_desired(root, "current")
-            environment = current_root / "environments" / "develop"
-            (environment / "fleets" / "develop-fleet-eu.yml").unlink()
-            (environment / "nodes" / "develop-entry-nl.yml").unlink()
-            (environment / "nodes" / "develop-exit-de.yml").unlink()
-            (environment / "instances" / "develop-entry-nl-01.yml").unlink()
-            (environment / "instances" / "develop-exit-de-01.yml").unlink()
+            for object_id in (
+                "develop-fleet-eu",
+                "develop-entry-nl",
+                "develop-exit-de",
+                "develop-entry-nl-01",
+                "develop-exit-de-01",
+            ):
+                topology_fixture.drop(current_root, object_id)
 
             baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
             current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)

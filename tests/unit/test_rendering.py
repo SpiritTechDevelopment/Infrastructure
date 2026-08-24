@@ -4,10 +4,18 @@ from dataclasses import replace
 import ipaddress
 import json
 import shutil
+import sys
 import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
+
+# Свой каталог на пути явно: тесты запускаются и через `unittest discover`,
+# и как `tests.unit.<модуль>`, и во втором случае соседний модуль иначе не
+# находится.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import topology_fixture
 
 import yaml
 
@@ -84,10 +92,11 @@ class RenderingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(VALID_DESIRED, desired_root)
-            target = desired_root / "environments" / "develop" / "environment.yml"
-            document = yaml.safe_load(target.read_text(encoding="utf-8"))
-            del document["spec"]["control"]["bot"]
-            target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            topology_fixture.edit(
+                desired_root,
+                "develop",
+                lambda document: document["spec"]["control"].pop("bot"),
+            )
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
         plan = json.loads(render_files(state)["control-plan.json"])
         self.assertIsNone(plan["bot"])
@@ -212,18 +221,12 @@ class RenderingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(VALID_DESIRED, desired_root)
-            instances = desired_root / "environments" / "develop" / "instances"
-            candidate = yaml.safe_load(
-                (instances / "develop-entry-nl-01.yml").read_text(encoding="utf-8")
-            )
+            candidate = topology_fixture.get(desired_root, "develop-entry-nl-01")
             candidate["metadata"]["id"] = "develop-entry-nl-02"
             candidate["spec"]["target_state"] = "candidate"
             candidate["spec"]["public_address"] = "192.0.2.11"
             candidate["spec"]["provider"]["resource_id"] = "fixture-entry-02"
-            (instances / "develop-entry-nl-02.yml").write_text(
-                yaml.safe_dump(candidate, sort_keys=False),
-                encoding="utf-8",
-            )
+            topology_fixture.put(desired_root, candidate)
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             files = render_files(state)
 
@@ -248,17 +251,10 @@ class RenderingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(VALID_DESIRED, desired_root)
-            fleet_path = (
-                desired_root
-                / "environments"
-                / "develop"
-                / "fleets"
-                / "develop-fleet-eu.yml"
-            )
-            fleet = yaml.safe_load(fleet_path.read_text(encoding="utf-8"))
+            fleet = topology_fixture.get(desired_root, "develop-fleet-eu")
             fleet["spec"]["entries"] = []
             fleet["spec"]["bridges"] = []
-            fleet_path.write_text(yaml.safe_dump(fleet, sort_keys=False), encoding="utf-8")
+            topology_fixture.put(desired_root, fleet)
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             files = render_files(state)
             monitoring = json.loads(files["monitoring-targets.json"])
@@ -376,8 +372,7 @@ class RenderingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(VALID_DESIRED, desired_root)
-            node_path = desired_root / "environments" / "develop" / "nodes" / "develop-entry-nl.yml"
-            node = yaml.safe_load(node_path.read_text(encoding="utf-8"))
+            node = topology_fixture.get(desired_root, "develop-entry-nl")
             node["spec"]["common_overrides"] = {
                 "components": {
                     "xray": {"digest": "sha256:" + "f" * 64},
@@ -385,7 +380,7 @@ class RenderingTests(unittest.TestCase):
                 "networking": {"agent": {"port": 9555}},
                 "observability": {"ports": {"node_exporter": 9200}},
             }
-            node_path.write_text(yaml.safe_dump(node, sort_keys=False), encoding="utf-8")
+            topology_fixture.put(desired_root, node)
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             files = render_files(state)
 

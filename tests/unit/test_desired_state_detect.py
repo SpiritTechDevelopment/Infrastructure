@@ -6,11 +6,10 @@ deploys nothing looks exactly like a change that needed nothing. So the step is
 exercised against real commits in a throwaway repository rather than asserted
 against its own source text.
 
-`yq` is not installed on every workstation, so the two expressions the step uses
-on `environment.yml` — `.spec.control` and `del(.spec.control)` — are served by a
-small stand-in on PATH. The step only ever compares their output for equality,
-which is what the stand-in reproduces; everything else under test is the
-classification of paths, which is the part that changed.
+Сравнение поддеревьев `environment.yml` — и заглушка `yq`, которая его
+обслуживала, — снято вместе с раскладкой по объектам: окружение объявляется
+одним `topology.yml`, а зашифрованную топологию на публичном раннере всё равно
+нечем разобрать по полям. Под тестом остаётся классификация путей.
 """
 
 from __future__ import annotations
@@ -26,36 +25,24 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-YQ_STAND_IN = """#!/usr/bin/env python3
-import sys
-import yaml
-
-expression = sys.argv[1]
-document = yaml.safe_load(sys.stdin.read()) or {}
-if expression == ".spec.control":
-    selected = (document.get("spec") or {}).get("control")
-elif expression == "del(.spec.control)":
-    selected = document
-    if isinstance(selected, dict) and isinstance(selected.get("spec"), dict):
-        selected = dict(selected)
-        selected["spec"] = {k: v for k, v in selected["spec"].items() if k != "control"}
-else:
-    raise SystemExit(f"stand-in does not implement: {expression}")
-print(yaml.safe_dump(selected, sort_keys=True, allow_unicode=True))
-"""
-
-ENVIRONMENT_DOCUMENT = """apiVersion: spiritvpn.io/v1alpha1
-kind: Environment
+TOPOLOGY_DOCUMENT = """apiVersion: spiritvpn.io/v1alpha1
+kind: EnvironmentTopology
 metadata:
   id: {environment}
 spec:
-  control:
-    backend_release:
-      digest: {digest}
-  common_overrides:
-    components:
-      node_agent:
-        digest: {agent_digest}
+  objects:
+    - apiVersion: spiritvpn.io/v1alpha1
+      kind: Environment
+      metadata:
+        id: {environment}
+      spec:
+        control:
+          backend_release:
+            digest: {digest}
+        common_overrides:
+          components:
+            node_agent:
+              digest: {agent_digest}
 """
 
 
@@ -96,13 +83,6 @@ class DesiredStateDetectTest(unittest.TestCase):
         self.runner_temp = root / "runner-temp"
         self.runner_temp.mkdir()
 
-        binaries = root / "bin"
-        binaries.mkdir()
-        stand_in = binaries / "yq"
-        stand_in.write_text(YQ_STAND_IN, encoding="utf-8")
-        stand_in.chmod(0o755)
-        self.path = f"{binaries}{os.pathsep}{os.environ['PATH']}"
-
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.name", "detect-test")
         self.git("config", "user.email", "detect@spiritvpn.invalid")
@@ -112,8 +92,8 @@ class DesiredStateDetectTest(unittest.TestCase):
                     parents=True
                 )
             self.write(
-                f"desired/environments/{environment}/environment.yml",
-                ENVIRONMENT_DOCUMENT.format(
+                f"desired/environments/{environment}/topology.yml",
+                TOPOLOGY_DOCUMENT.format(
                     environment=environment, digest="sha256:aaa", agent_digest="sha256:bbb"
                 ),
             )
@@ -144,7 +124,6 @@ class DesiredStateDetectTest(unittest.TestCase):
             cwd=self.repository,
             env={
                 **os.environ,
-                "PATH": self.path,
                 "BEFORE": before,
                 "AFTER": after,
                 "RUNNER_TEMP": str(self.runner_temp),
@@ -211,30 +190,6 @@ class DesiredStateDetectTest(unittest.TestCase):
         )
 
     # Разделение по поддеревьям сохраняется: релиз бэкенда не передеплоивает ноды.
-    def test_a_backend_release_reaches_control_only(self) -> None:
-        self.write(
-            "desired/environments/develop/environment.yml",
-            ENVIRONMENT_DOCUMENT.format(
-                environment="develop", digest="sha256:ccc", agent_digest="sha256:bbb"
-            ),
-        )
-        head = self.commit("backend release")
-        self.assert_areas(
-            self.detect(self.base, head), platform=[], control=["develop"], fleet=[]
-        )
-
-    def test_an_agent_release_reaches_the_fleet_only(self) -> None:
-        self.write(
-            "desired/environments/develop/environment.yml",
-            ENVIRONMENT_DOCUMENT.format(
-                environment="develop", digest="sha256:aaa", agent_digest="sha256:ddd"
-            ),
-        )
-        head = self.commit("agent release")
-        self.assert_areas(
-            self.detect(self.base, head), platform=[], control=[], fleet=["develop"]
-        )
-
     # Неопознанный путь означает «может задеть что угодно», а не «ничего».
     def test_a_role_change_reaches_every_contour(self) -> None:
         self.write("roles/xray/tasks/main.yml", "- name: changed\n")
@@ -352,7 +307,6 @@ class DesiredStateDetectTest(unittest.TestCase):
             cwd=self.repository,
             env={
                 **os.environ,
-                "PATH": self.path,
                 "AFTER": self.base,
                 "RUNNER_TEMP": str(self.runner_temp),
                 "GITHUB_OUTPUT": str(output),

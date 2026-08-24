@@ -5,9 +5,17 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# Свой каталог на пути явно: тесты запускаются и через `unittest discover`,
+# и как `tests.unit.<модуль>`, и во втором случае соседний модуль иначе не
+# находится.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import topology_fixture
 
 import yaml
 
@@ -52,17 +60,11 @@ class TemporaryFleetRepository:
         return self.git("rev-parse", "HEAD")
 
     def change_entry_address_and_commit(self, address: str = "192.0.2.11") -> str:
-        path = (
-            self.root
-            / "desired"
-            / "environments"
-            / "develop"
-            / "instances"
-            / "develop-entry-nl-01.yml"
+        topology_fixture.edit(
+            self.root / "desired",
+            "develop-entry-nl-01",
+            lambda document: document["spec"].__setitem__("public_address", address),
         )
-        document = yaml.safe_load(path.read_text(encoding="utf-8"))
-        document["spec"]["public_address"] = address
-        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
         self.git("add", "desired")
         self.git("commit", "-qm", "change source")
         return self.head()

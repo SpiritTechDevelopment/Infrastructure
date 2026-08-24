@@ -1,0 +1,150 @@
+apiVersion: spiritvpn.io/v1alpha1
+kind: EnvironmentTopology
+metadata:
+  id: develop
+spec:
+  objects:
+  - apiVersion: spiritvpn.io/v1alpha1
+    kind: Environment
+    metadata:
+      id: develop
+    spec:
+      dns_zone: develop.example.invalid
+      management_network: 10.80.0.0/16
+      backend_endpoint: backend.develop.internal:9443
+      secret_store:
+        kv: kv/develop
+        pki: pki/develop
+      control:
+        backend_release:
+          source_git_sha: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          backend_image:
+            repository: example.invalid/spiritvpn-backend
+            digest: sha256:1000000000000000000000000000000000000000000000000000000000000001
+          migration_image:
+            repository: example.invalid/spiritvpn-migrate
+            digest: sha256:1000000000000000000000000000000000000000000000000000000000000002
+        postgres:
+          image:
+            repository: example.invalid/postgres
+            digest: sha256:1000000000000000000000000000000000000000000000000000000000000003
+          exporter_image:
+            repository: example.invalid/postgres-exporter
+            digest: sha256:1000000000000000000000000000000000000000000000000000000000000004
+          major_version: 17
+          database: spiritvpn
+          owner_user: spiritvpn_owner
+          runtime_user: spiritvpn_runtime
+          backup_required: false
+          external_backup_command_argv: []
+        authorization:
+          customer_access_writers:
+          - spiffe://spiritvpn/develop/service/product
+          customer_access_readers:
+          - spiffe://spiritvpn/develop/service/product
+        public_endpoint:
+          hostname: control.develop.example.invalid
+          address: 192.0.2.1
+        bot:
+          release:
+            source_git_sha: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+            image:
+              repository: example.invalid/spiritvpn-bot
+              digest: sha256:1000000000000000000000000000000000000000000000000000000000000005
+          postgres:
+            database: spiritvpn_bot
+            owner_user: spiritvpn_bot_owner
+            runtime_user: spiritvpn_bot_runtime
+          settings:
+            client_identity: spiffe://spiritvpn/develop/service/product
+            friends_plan_fleet: develop-fleet-eu
+          ingress:
+            image:
+              repository: example.invalid/cloudflared
+              digest: sha256:1000000000000000000000000000000000000000000000000000000000000006
+            hostname: bot.develop.example.invalid
+  - apiVersion: spiritvpn.io/v1alpha1
+    kind: LogicalNode
+    metadata:
+      id: develop-entry-nl
+    spec:
+      role: entry
+      region: nl
+      public:
+        hostname: edge-a7.develop.example.invalid
+        port: 443
+        transport: tcp
+        flow: xtls-rprx-vision
+        fingerprint: chrome
+        server_name: edge-a7.develop.example.invalid
+      reality:
+        public_key: e06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxM
+        short_id: 0123abcd
+        private_key_ref: secret://kv/develop/nodes/develop-entry-nl/reality#private_key
+      mask:
+        certificate_ref: secret://kv/develop/nodes/develop-entry-nl/mask#fullchain
+        private_key_ref: secret://kv/develop/nodes/develop-entry-nl/mask#private_key
+      display_name: Netherlands
+  - apiVersion: spiritvpn.io/v1alpha1
+    kind: LogicalNode
+    metadata:
+      id: develop-exit-de
+    spec:
+      role: exit
+      region: de
+      public:
+        hostname: edge-b4.develop.example.invalid
+        port: 443
+        transport: tcp
+        flow: xtls-rprx-vision
+        fingerprint: chrome
+        server_name: edge-b4.develop.example.invalid
+      reality:
+        public_key: D6poTtKIZ7l_Smot7l34zpdOdrcBjj8iocTPJnhXDyA
+        short_id: 4567cdef
+        private_key_ref: secret://kv/develop/nodes/develop-exit-de/reality#private_key
+      mask:
+        certificate_ref: secret://kv/develop/nodes/develop-exit-de/mask#fullchain
+        private_key_ref: secret://kv/develop/nodes/develop-exit-de/mask#private_key
+      display_name: Germany
+  - apiVersion: spiritvpn.io/v1alpha1
+    kind: Fleet
+    metadata:
+      id: develop-fleet-eu
+    spec:
+      entries:
+      - develop-entry-nl
+      exits:
+      - develop-exit-de
+      bridges:
+      - routing_key: develop-entry-nl.to-develop-exit-de
+        entry: develop-entry-nl
+        exit: develop-exit-de
+        display_name: Netherlands via Germany
+        service_credential_ref: secret://kv/develop/bridges/develop-entry-nl.to-develop-exit-de#service_uuid
+  - apiVersion: spiritvpn.io/v1alpha1
+    kind: Instance
+    metadata:
+      id: develop-entry-nl-01
+    spec:
+      logical_node: develop-entry-nl
+      target_state: serving
+      public_address: 192.0.2.10
+      ssh_host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO/bJ1VpSI+1ILrrizOi8GYzc/gHkzYK7aSK870neakM
+      bandwidth_profile: vps-1g
+      provider:
+        name: manual
+        resource_id: fixture-entry-01
+  - apiVersion: spiritvpn.io/v1alpha1
+    kind: Instance
+    metadata:
+      id: develop-exit-de-01
+    spec:
+      logical_node: develop-exit-de
+      target_state: serving
+      public_address: 192.0.2.20
+      ssh_host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPlgC4pKbumsHqX4D4GEiRDU90RKBfde5VuAfNXQ281T
+      bandwidth_profile: vps-1g
+      provider:
+        name: manual
+        resource_id: fixture-exit-01

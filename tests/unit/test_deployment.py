@@ -5,9 +5,17 @@ import fcntl
 import hashlib
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# Свой каталог на пути явно: тесты запускаются и через `unittest discover`,
+# и как `tests.unit.<модуль>`, и во втором случае соседний модуль иначе не
+# находится.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import topology_fixture
 from unittest import mock
 
 import yaml
@@ -49,15 +57,18 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
         root = parent / "repository"
         root.mkdir()
         repository = TemporaryFleetRepository(root)
-        instances = repository.root / "desired" / "environments" / "develop" / "instances"
-        for name, address in (
-            ("develop-entry-nl-01.yml", "1.1.1.1"),
-            ("develop-exit-de-01.yml", "8.8.8.8"),
+        desired_root = repository.root / "desired"
+        for object_id, address in (
+            ("develop-entry-nl-01", "1.1.1.1"),
+            ("develop-exit-de-01", "8.8.8.8"),
         ):
-            path = instances / name
-            document = yaml.safe_load(path.read_text(encoding="utf-8"))
-            document["spec"]["public_address"] = address
-            path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            topology_fixture.edit(
+                desired_root,
+                object_id,
+                lambda document, address=address: document["spec"].__setitem__(
+                    "public_address", address
+                ),
+            )
         repository.git("add", "desired")
         repository.git("commit", "-qm", "use routable fixture addresses")
         return repository
@@ -136,17 +147,13 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
             repository = self.prepare_repository(Path(temporary))
             coordinator = DeploymentCoordinator(repository.root)
             first = coordinator.run(DeploymentOptions(environment="develop", initial=True))
-            node_path = (
-                repository.root
-                / "desired"
-                / "environments"
-                / "develop"
-                / "nodes"
-                / "develop-entry-nl.yml"
+            topology_fixture.edit(
+                repository.root / "desired",
+                "develop-entry-nl",
+                lambda document: document["spec"].__setitem__(
+                    "display_name", "Netherlands updated"
+                ),
             )
-            node = yaml.safe_load(node_path.read_text(encoding="utf-8"))
-            node["spec"]["display_name"] = "Netherlands updated"
-            node_path.write_text(yaml.safe_dump(node, sort_keys=False), encoding="utf-8")
             repository.git("add", "desired")
             repository.git("commit", "-qm", "change manifest payload")
             second = coordinator.run(DeploymentOptions(environment="develop", initial=True))
@@ -163,18 +170,10 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
             repository = self.prepare_repository(Path(temporary))
             baseline = repository.head()
             repository.git("update-ref", "refs/deployments/develop", baseline)
-            fleet_path = (
-                repository.root
-                / "desired"
-                / "environments"
-                / "develop"
-                / "fleets"
-                / "develop-fleet-eu.yml"
-            )
-            fleet = yaml.safe_load(fleet_path.read_text(encoding="utf-8"))
+            fleet = topology_fixture.get(repository.root / "desired", "develop-fleet-eu")
             fleet["spec"]["entries"] = []
             fleet["spec"]["bridges"] = []
-            fleet_path.write_text(yaml.safe_dump(fleet, sort_keys=False), encoding="utf-8")
+            topology_fixture.put(repository.root / "desired", fleet)
             repository.git("add", "desired")
             repository.git("commit", "-qm", "begin two-phase node decommission")
 

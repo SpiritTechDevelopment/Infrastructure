@@ -3,9 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# Свой каталог на пути явно: тесты запускаются и через `unittest discover`,
+# и как `tests.unit.<модуль>`, и во втором случае соседний модуль иначе не
+# находится.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import topology_fixture
 
 import yaml
 
@@ -152,17 +160,10 @@ class BackendManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(VALID_DESIRED, desired_root)
-            fleet_path = (
-                desired_root
-                / "environments"
-                / "develop"
-                / "fleets"
-                / "develop-fleet-eu.yml"
-            )
-            fleet = yaml.safe_load(fleet_path.read_text(encoding="utf-8"))
+            fleet = topology_fixture.get(desired_root, "develop-fleet-eu")
             fleet["spec"]["entries"] = []
             fleet["spec"]["bridges"] = []
-            fleet_path.write_text(yaml.safe_dump(fleet, sort_keys=False), encoding="utf-8")
+            topology_fixture.put(desired_root, fleet)
             current = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
 
         plan = build_impact_plan(current, self.state)
@@ -182,10 +183,9 @@ class BackendManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(VALID_DESIRED, desired_root)
-            node_path = desired_root / "environments" / "develop" / "nodes" / "develop-entry-nl.yml"
-            node = yaml.safe_load(node_path.read_text(encoding="utf-8"))
+            node = topology_fixture.get(desired_root, "develop-entry-nl")
             node["spec"]["display_name"] = "Changed after planning"
-            node_path.write_text(yaml.safe_dump(node, sort_keys=False), encoding="utf-8")
+            topology_fixture.put(desired_root, node)
             changed = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
 
         with self.assertRaisesRegex(BackendManifestError, "does not describe"):

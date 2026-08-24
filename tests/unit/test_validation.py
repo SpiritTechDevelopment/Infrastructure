@@ -5,10 +5,18 @@ import io
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
+
+# Свой каталог на пути явно: тесты запускаются и через `unittest discover`,
+# и как `tests.unit.<модуль>`, и во втором случае соседний модуль иначе не
+# находится.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import topology_fixture
 
 import yaml
 
@@ -22,35 +30,46 @@ LIVE_DESIRED_SKIP_REASON = "encrypted repository desired state requires a truste
 
 
 class DesiredStateValidationTests(unittest.TestCase):
-    def topology_bundle(self, desired_root: Path) -> Path:
-        environment_root = desired_root / "environments" / "develop"
-        paths = sorted(
-            path
-            for path in environment_root.rglob("*.yml")
-            if path.name not in ("topology.yml", "topology.sops.yml")
-        )
-        documents = [yaml.safe_load(path.read_text(encoding="utf-8")) for path in paths]
-        for path in paths:
-            path.unlink()
-        topology = {
-            "apiVersion": "spiritvpn.io/v1alpha1",
-            "kind": "EnvironmentTopology",
-            "metadata": {"id": "develop"},
-            "spec": {"objects": documents},
-        }
-        target = environment_root / "topology.yml"
-        target.write_text(yaml.safe_dump(topology, sort_keys=False), encoding="utf-8")
-        return target
+    @staticmethod
+    def mutate_declaration(desired_root: Path, relative_path: str, mutate: object) -> None:
+        """Правит объявление, где бы оно ни лежало.
+
+        Объекты окружения переехали в один `topology.yml`, но обращаться к ним
+        по прежнему пути — `environments/develop/nodes/develop-exit-de.yml` —
+        удобнее и читается лучше, чем «третий элемент spec.objects». Путь здесь
+        и превращается в поиск по виду и идентификатору: имя файла было именем
+        объекта, поэтому отображение однозначно и обратимо.
+        """
+        target = desired_root / relative_path
+        if target.exists():
+            document = yaml.safe_load(target.read_text(encoding="utf-8"))
+            mutate(document)
+            target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            return
+
+        parts = Path(relative_path).parts
+        if parts[0] != "environments":
+            raise AssertionError(f"нет такого объявления: {relative_path}")
+        environment = parts[1]
+        stem = Path(parts[-1]).stem
+        wanted = environment if stem == "environment" else stem
+
+        bundle_path = desired_root / "environments" / environment / "topology.yml"
+        bundle = yaml.safe_load(bundle_path.read_text(encoding="utf-8"))
+        for document in bundle["spec"]["objects"]:
+            if document["metadata"]["id"] == wanted:
+                mutate(document)
+                break
+        else:
+            raise AssertionError(f"в бандле нет объекта {wanted!r}")
+        bundle_path.write_text(yaml.safe_dump(bundle, sort_keys=False), encoding="utf-8")
 
     def validate_mutated_fixture(self, relative_path: str, mutate: object) -> set[str]:
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            target = desired_root / relative_path
-            document = yaml.safe_load(target.read_text(encoding="utf-8"))
-            mutate(document)
-            target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            self.mutate_declaration(desired_root, relative_path, mutate)
             with self.assertRaises(DesiredStateInvalid) as raised:
                 validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             return {issue.code for issue in raised.exception.issues}
@@ -102,49 +121,36 @@ class DesiredStateValidationTests(unittest.TestCase):
         profile = state.common.limits.bandwidth_profiles["vps-1g"]
         self.assertEqual(profile.egress_limit_mbps, 900)
 
-    def test_topology_bundle_preserves_existing_fleet_compilation(self) -> None:
-        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
-        legacy = validate_environment(REPO_ROOT, "develop", desired_root=source)
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            desired_root = Path(temporary_directory) / "desired"
-            shutil.copytree(source, desired_root)
-            self.topology_bundle(desired_root)
-            bundled = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+    def test_a_standalone_object_is_refused_rather_than_ignored(self) -> None:
+        """Файл прежнего формата обязан ронять валидацию, а не выпадать молча.
 
-        self.assertEqual(render_files(bundled), render_files(legacy))
-
-    def test_topology_bundle_cannot_be_mixed_with_standalone_objects(self) -> None:
+        Раскладка по объектам снята, и без этого отказа `nodes/foo.yml`,
+        оставшийся от неё или написанный по памяти, просто не читался бы никем:
+        нода объявлена, в выкатку не попала, и заметить это можно только по её
+        отсутствию на хостах.
+        """
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            environment_root = desired_root / "environments" / "develop"
-            documents = [
-                yaml.safe_load(path.read_text(encoding="utf-8"))
-                for path in sorted(environment_root.rglob("*.yml"))
-            ]
-            topology = {
-                "apiVersion": "spiritvpn.io/v1alpha1",
-                "kind": "EnvironmentTopology",
-                "metadata": {"id": "develop"},
-                "spec": {"objects": documents},
-            }
-            (environment_root / "topology.yml").write_text(
-                yaml.safe_dump(topology, sort_keys=False),
-                encoding="utf-8",
+            node = topology_fixture.get(desired_root, "develop-entry-nl")
+            stray = desired_root / "environments" / "develop" / "nodes"
+            stray.mkdir()
+            (stray / "develop-entry-nl.yml").write_text(
+                yaml.safe_dump(node, sort_keys=False), encoding="utf-8"
             )
             with self.assertRaises(DesiredStateInvalid) as raised:
                 validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
 
-        self.assertIn("TOPOLOGY_MIXED", {issue.code for issue in raised.exception.issues})
+        self.assertIn("STANDALONE_OBJECT", {issue.code for issue in raised.exception.issues})
 
     def test_topology_bundle_validates_every_embedded_object(self) -> None:
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            target = self.topology_bundle(desired_root)
-            topology = yaml.safe_load(target.read_text(encoding="utf-8"))
+            target = topology_fixture.path(desired_root)
+            topology = topology_fixture.load(desired_root)
             node = next(
                 item for item in topology["spec"]["objects"] if item["kind"] == "LogicalNode"
             )
@@ -157,11 +163,11 @@ class DesiredStateValidationTests(unittest.TestCase):
 
     def test_sops_topology_is_decrypted_only_in_memory(self) -> None:
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
-        legacy = validate_environment(REPO_ROOT, "develop", desired_root=source)
+        plain = validate_environment(REPO_ROOT, "develop", desired_root=source)
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            target = self.topology_bundle(desired_root)
+            target = topology_fixture.path(desired_root)
             plaintext = target.read_text(encoding="utf-8")
             encrypted_path = target.with_name("topology.sops.yml")
             target.rename(encrypted_path)
@@ -196,14 +202,14 @@ class DesiredStateValidationTests(unittest.TestCase):
             capture_output=True,
             check=False,
         )
-        self.assertEqual(render_files(bundled), render_files(legacy))
+        self.assertEqual(render_files(bundled), render_files(plain))
 
     def test_sops_decryption_failure_is_fail_closed(self) -> None:
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            target = self.topology_bundle(desired_root)
+            target = topology_fixture.path(desired_root)
             encrypted_path = target.with_name("topology.sops.yml")
             target.rename(encrypted_path)
             encrypted_path.write_text("sops: {}\n", encoding="utf-8")
@@ -229,11 +235,10 @@ class DesiredStateValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            fleet_path = desired_root / "environments" / "develop" / "fleets" / "develop-fleet-eu.yml"
-            fleet = yaml.safe_load(fleet_path.read_text(encoding="utf-8"))
+            fleet = topology_fixture.get(desired_root, "develop-fleet-eu")
             fleet["spec"]["entries"] = []
             fleet["spec"]["bridges"] = []
-            fleet_path.write_text(yaml.safe_dump(fleet, sort_keys=False), encoding="utf-8")
+            topology_fixture.put(desired_root, fleet)
 
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
 
@@ -254,19 +259,17 @@ class DesiredStateValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            environment_path = desired_root / "environments" / "develop" / "environment.yml"
-            environment = yaml.safe_load(environment_path.read_text(encoding="utf-8"))
+            environment = topology_fixture.get(desired_root, "develop")
             environment["spec"]["common_overrides"] = {
                 "networking": {"agent": {"port": 9555}},
             }
-            environment_path.write_text(yaml.safe_dump(environment, sort_keys=False), encoding="utf-8")
-            node_path = desired_root / "environments" / "develop" / "nodes" / "develop-entry-nl.yml"
-            node = yaml.safe_load(node_path.read_text(encoding="utf-8"))
+            topology_fixture.put(desired_root, environment)
+            node = topology_fixture.get(desired_root, "develop-entry-nl")
             node["spec"]["common_overrides"] = {
                 "networking": {"agent": {"port": 9666}},
                 "limits": {"bandwidth_profiles": {"vps-1g": {"port_capacity_mbps": 2000}}},
             }
-            node_path.write_text(yaml.safe_dump(node, sort_keys=False), encoding="utf-8")
+            topology_fixture.put(desired_root, node)
 
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
 
@@ -456,10 +459,11 @@ class DesiredStateValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            target = desired_root / "environments/develop/environment.yml"
-            document = yaml.safe_load(target.read_text(encoding="utf-8"))
-            del document["spec"]["control"]["public_endpoint"]
-            target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+            topology_fixture.edit(
+                desired_root,
+                "develop",
+                lambda document: document["spec"]["control"].pop("public_endpoint"),
+            )
             state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
         self.assertIsNone(state.environment.control.public_hostname)
         self.assertEqual(compile_dns_plan(state)["records"][0]["id"], "develop-entry-nl")
@@ -537,14 +541,10 @@ class DesiredStateValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             desired_root = Path(temporary_directory) / "desired"
             shutil.copytree(source, desired_root)
-            instances = desired_root / "environments" / "develop" / "instances"
-            first = yaml.safe_load((instances / "develop-entry-nl-01.yml").read_text(encoding="utf-8"))
+            first = topology_fixture.get(desired_root, "develop-entry-nl-01")
             first["metadata"]["id"] = "develop-entry-nl-02"
             first["spec"]["provider"]["resource_id"] = "fixture-entry-02"
-            (instances / "develop-entry-nl-02.yml").write_text(
-                yaml.safe_dump(first, sort_keys=False),
-                encoding="utf-8",
-            )
+            topology_fixture.put(desired_root, first)
             with self.assertRaises(DesiredStateInvalid) as raised:
                 validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
             self.assertIn("SERVING_COUNT", {issue.code for issue in raised.exception.issues})
@@ -558,17 +558,6 @@ class DesiredStateValidationTests(unittest.TestCase):
             mutate,
         )
         self.assertIn("MANAGEMENT_COLLISION", codes)
-
-    def test_filename_must_match_object_id(self) -> None:
-        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            desired_root = Path(temporary_directory) / "desired"
-            shutil.copytree(source, desired_root)
-            nodes = desired_root / "environments" / "develop" / "nodes"
-            (nodes / "develop-entry-nl.yml").rename(nodes / "wrong-name.yml")
-            with self.assertRaises(DesiredStateInvalid) as raised:
-                validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
-            self.assertIn("FILENAME", {issue.code for issue in raised.exception.issues})
 
     @unittest.skipIf(os.environ.get("SPIRITVPN_SKIP_LIVE_DESIRED") == "1", LIVE_DESIRED_SKIP_REASON)
     def test_cli_reports_success(self) -> None:
