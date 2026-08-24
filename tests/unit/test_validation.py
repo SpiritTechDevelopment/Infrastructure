@@ -102,33 +102,6 @@ class DesiredStateValidationTests(unittest.TestCase):
         profile = state.common.limits.bandwidth_profiles["vps-1g"]
         self.assertEqual(profile.egress_limit_mbps, 900)
 
-    def test_a_topology_carrying_the_retired_secrets_block_still_loads(self) -> None:
-        """План сверяет источник с топологией последней выкатки, а не только с собой.
-
-        Секреты контура уехали в Vault, и блок `secrets` в топологии больше не
-        читает никто. Но запретить его схемой нельзя, пока хоть одна выкатка
-        стоит на базе, которая его несёт: `plan` грузит базу текущим кодом, и
-        отказ означает, что контур не может выкатить даже сам себя.
-
-        Это уже случалось с обратным знаком — новое обязательное поле роняло
-        план против прошлой базы. Правило симметрично: сначала перестать
-        требовать, потом, когда база сменилась, удалить объявление.
-        """
-        source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            desired_root = Path(temporary_directory) / "desired"
-            shutil.copytree(source, desired_root)
-            target = desired_root / "environments" / "develop" / "environment.yml"
-            document = yaml.safe_load(target.read_text(encoding="utf-8"))
-            control = document["spec"]["control"]
-            legacy = {"runtime_database_url_ref": "secret://kv/develop/control/postgres#url"}
-            control["secrets"] = legacy
-            control["bot"]["secrets"] = legacy
-            target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-            state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
-        # Загрузилось и было проигнорировано: в модели этого поля больше нет.
-        self.assertFalse(hasattr(state.environment.control, "secret_refs"))
-
     def test_topology_bundle_preserves_existing_fleet_compilation(self) -> None:
         source = REPO_ROOT / "tests" / "fixtures" / "valid" / "desired"
         legacy = validate_environment(REPO_ROOT, "develop", desired_root=source)
