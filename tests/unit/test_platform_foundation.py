@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import base64
 import contextlib
 import copy
@@ -981,27 +982,30 @@ all:
             root = Path(temporary)
             desired_root = root / "desired"
             shutil.copytree(VALID_DESIRED, desired_root)
-            secret_output = root / "reality.json"
-            fragment = subprocess.run(
-                [
-                    "python3",
-                    str(REPO_ROOT / "scripts" / "node-prepare.py"),
-                    "--environment", "develop",
-                    "--node-id", "develop-exit-se",
-                    "--role", "exit",
-                    "--region", "se",
-                    "--hostname", "edge-se.develop.example.invalid",
-                    "--display-name", "Sweden",
-                    "--address", "192.0.2.30",
-                    "--slot", "3",
-                    "--ssh-host-key", FIXTURE_SSH_HOST_KEY,
-                    "--secret-output", str(secret_output),
-                ],
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout
-            node, instance = list(yaml.safe_load_all(fragment))
+            module = _load_script("node-prepare.py", "spiritvpn_node_prepare")
+            # Через `build`, а не через CLI: выпуск ходит в Vault, а форма
+            # объявления от Vault не зависит и обязана проверяться без него.
+            secret, (node, instance) = module.build(
+                argparse.Namespace(
+                    environment="develop",
+                    node_id="develop-exit-se",
+                    role="exit",
+                    region="se",
+                    hostname="edge-se.develop.example.invalid",
+                    server_name=None,
+                    port=443,
+                    display_name="Sweden",
+                    address="192.0.2.30",
+                    slot=3,
+                    bandwidth_profile="vps-1g",
+                    resource_id=None,
+                    ssh_host_key=FIXTURE_SSH_HOST_KEY,
+                    bootstrap_port=22,
+                )
+            )
+            # 22 — умолчание, и в объявлении его быть не должно: явное значение
+            # по умолчанию превращает «здесь особый порт» в шум.
+            self.assertNotIn("bootstrap_port", instance["spec"])
             environment_root = desired_root / "environments" / "develop"
             (environment_root / "nodes" / "develop-exit-se.yml").write_text(
                 yaml.safe_dump(node, sort_keys=False), encoding="utf-8"
@@ -1019,7 +1023,7 @@ all:
             # Если они не парные уже в момент выпуска, сверка перед выкаткой
             # отвергнет ноду, которую оператор к тому времени уже создал.
             resolver = _load_script("vault-secret-resolver.py", "spiritvpn_resolver")
-            private_key = json.loads(secret_output.read_text(encoding="utf-8"))["private_key"]
+            private_key = secret["private_key"]
             self.assertEqual(
                 resolver.derive_reality_public_key(private_key),
                 node["spec"]["reality"]["public_key"],
@@ -1028,8 +1032,6 @@ all:
                 {node["spec"]["reality"]["private_key_ref"]: private_key},
                 {node["spec"]["reality"]["private_key_ref"]: node["spec"]["reality"]["public_key"]},
             )
-            # Приватный ключ ложится в файл, который оператор понесёт в церемонию.
-            self.assertEqual(secret_output.stat().st_mode & 0o777, 0o600)
 
     def test_bot_pem_secrets_are_checked_for_being_pem(self) -> None:
         """Непустое — ещё не сертификат.
@@ -1692,20 +1694,91 @@ all:
         паролем. Поэтому существующий путь останавливает операцию, а не
         перезаписывается — второй запуск обязан быть отказом, а не сюрпризом.
         """
+        policy = (
+            REPO_ROOT / "roles" / "platform_vault" / "templates" / "policy-node-issuer.hcl.j2"
+        ).read_text(encoding="utf-8")
+        # `create` без `update` — отказ на уровне Vault, который переживёт
+        # правку скрипта. `delete`/`destroy` нет: снятие ноды идёт топологией.
+        def granted(source: str) -> set[str]:
+            """Только выданные права, без объяснений в комментариях."""
+            return {
+                capability
+                for line in source.splitlines()
+                if line.strip().startswith("capabilities")
+                for capability in re.findall(r'"([a-z]+)"', line)
+            }
+
+        self.assertIn('capabilities = ["create", "read"]', policy)
+        self.assertEqual(granted(policy), {"create", "read", "list"})
+        self.assertIn('path "kv/data/{{ policy_environment }}/nodes/*"', policy)
+
+        deployer = (
+            REPO_ROOT / "roles" / "platform_vault" / "templates" / "policy-fleet-deployer.hcl.j2"
+        ).read_text(encoding="utf-8")
+        # Право записи не должно было протечь в политику обычной выкатки: она
+        # читает секреты всего окружения, включая пароли PostgreSQL.
+        self.assertEqual(granted(deployer), {"read", "list"})
+
         operator = (
             REPO_ROOT / "roles" / "platform_vault" / "templates" / "spiritvpn-vault-operator.j2"
         ).read_text(encoding="utf-8")
-        self.assertIn("refusing to regenerate", operator)
-        # Проверка идёт до обеих записей: отказ после первой оставил бы половину
-        # результата — ключ без сертификата.
-        refusal = operator.index("refusing to regenerate")
-        for write in ('"$environment/nodes/$node_id/reality" -', '"$environment/nodes/$node_id/mask" -'):
-            self.assertGreater(operator.index(write), refusal)
-        # Источник маски читается тоже до записей: ненайденный сертификат должен
-        # остановить операцию раньше, чем в Vault появится первая половина.
-        self.assertLess(operator.index("nodes/$source_node/mask"), refusal + operator[refusal:].index("kv put"))
-        # Токен спрашивается один раз на обе записи.
-        self.assertEqual(operator.count("read_root_token"), 6)
+        start = operator.index("  prepare-node)")
+        prepare = "\n".join(
+            line
+            for line in operator[start : operator.index("  snapshot)", start)].splitlines()
+            # Только код: слова «root token» и «/dev/tty» стоят в комментарии,
+            # объясняющем, почему их здесь нет, и тест ловил собственное объяснение.
+            if not line.lstrip().startswith("#")
+        )
+        # Ни корневого токена, ни терминала: иначе команду не мог бы дёрнуть
+        # раннер, ради которого роль и заводилась.
+        self.assertNotIn("read_root_token", prepare)
+        self.assertNotIn("/dev/tty", prepare)
+        self.assertIn("vault-node-issuer", prepare)
+
+        module = _load_script("node-prepare.py", "spiritvpn_node_prepare")
+        # `cas: 0` — «пиши, только если версии ещё нет». Проверка чтением
+        # оставляет окно между собой и записью; отказ принимает сам Vault.
+        self.assertIn('"cas": 0', (REPO_ROOT / "scripts" / "node-prepare.py").read_text(encoding="utf-8"))
+
+        class Recorder:
+            def __init__(self, existing: set[str]) -> None:
+                self.existing = existing
+                self.written: list[str] = []
+
+            def exists(self, path: str) -> bool:
+                return path in self.existing
+
+            def read_object(self, path: str) -> dict[str, str]:
+                return {"fullchain": "cert", "private_key": "key"}
+
+            def create_object(self, path: str, data: dict[str, str]) -> None:
+                self.written.append(path)
+
+        # Существующий ключ останавливает операцию до единственной записи.
+        occupied = Recorder({"develop/nodes/develop-exit-se/reality"})
+        with self.assertRaises(module.NodePrepareError):
+            module.store(
+                occupied,
+                environment="develop",
+                node_id="develop-exit-se",
+                source_node="develop-entry-ru",
+                reality={"private_key": "x"},
+            )
+        self.assertEqual(occupied.written, [])
+
+        clean = Recorder(set())
+        module.store(
+            clean,
+            environment="develop",
+            node_id="develop-exit-se",
+            source_node="develop-entry-ru",
+            reality={"private_key": "x"},
+        )
+        self.assertEqual(
+            clean.written,
+            ["develop/nodes/develop-exit-se/reality", "develop/nodes/develop-exit-se/mask"],
+        )
 
     def test_secret_reference_listing_is_offline_and_environment_scoped(self) -> None:
         result = subprocess.run(

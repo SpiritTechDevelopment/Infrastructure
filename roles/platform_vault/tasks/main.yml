@@ -211,6 +211,17 @@
   vars:
     policy_environment: "{{ item }}"
 
+- name: Render environment-scoped node issuer policies
+  ansible.builtin.template:
+    src: policy-node-issuer.hcl.j2
+    dest: "{{ platform_vault_dir }}/config/policies/node-issuer-{{ item }}.hcl"
+    owner: root
+    group: "1000"
+    mode: "0640"
+  loop: [develop, prod]
+  vars:
+    policy_environment: "{{ item }}"
+
 - name: Remove the retired staging policy file
   ansible.builtin.file:
     path: "{{ platform_vault_dir }}/config/policies/fleet-deployer-staging.hcl"

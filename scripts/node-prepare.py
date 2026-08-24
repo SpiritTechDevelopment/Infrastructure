@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Выпуск материала REALITY для новой ноды и фрагмент топологии под него.
+"""Выпуск материала новой ноды: приватное — в Vault, объявление — на печать.
 
-Скрипт **ничего не пишет** — ни в Vault, ни в топологию. Он печатает две вещи:
-объект для Vault и объявление для Git. Записывает их церемония, потому что
-Vault слушает loopback и принимает только root-токен с терминала оператора, а
-топологию правит и коммитит человек: добавление машины в инфраструктуру — это
-единственный путь, который обязан проходить ревью.
+Запускается на хабе, потому что Vault слушает loopback: приватная половина пары
+REALITY рождается там же, где хранится, и машины оператора не касается. В Vault
+скрипт ходит ролью `node-issuer-<environment>` — она умеет писать только под
+`nodes/` и только `create`. Корневой токен не нужен, и это не удобство: с
+чтением токена из терминала команду не мог бы вызвать ни раннер, ни любая
+автоматика.
+
+В топологию скрипт **не пишет** — печатает объявление. Коммитит и отправляет на
+ревью человек: добавление машины в инфраструктуру обязано проходить через диффф.
 
 Разделение половинок между Git и Vault здесь и рождается, поэтому обе выводятся
 из одного ключа в одном месте. Расходятся они молча: нода с неверной публичной
@@ -19,7 +23,10 @@ import argparse
 import base64
 import json
 import secrets
+import ssl
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +47,14 @@ SHORT_ID_BYTES = 8
 
 class NodePrepareError(Exception):
     pass
+
+
+class VaultHTTPError(NodePrepareError):
+    """Отказ Vault с кодом. Код нужен: 404 — это «нет пути», а не сбой."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
 
 
 def _encode(raw: bytes) -> str:
@@ -115,6 +130,7 @@ def instance_document(
     bandwidth_profile: str,
     resource_id: str,
     ssh_host_key: str | None,
+    bootstrap_port: int,
 ) -> dict[str, Any]:
     """Инстанс новой ноды.
 
@@ -138,12 +154,163 @@ def instance_document(
     }
     if ssh_host_key:
         spec["ssh_host_key"] = ssh_host_key.strip()
+    # 22 не объявляется: значение по умолчанию, записанное явно, превращает
+    # «здесь особый порт» в шум, который перестают замечать.
+    if bootstrap_port != 22:
+        spec["bootstrap_port"] = bootstrap_port
     return {
         "apiVersion": "spiritvpn.io/v1alpha1",
         "kind": "Instance",
         "metadata": {"id": f"{node_id}-{slot:02d}"},
         "spec": spec,
     }
+
+
+class VaultClient:
+    """AppRole-клиент под политику `node-issuer-<environment>`.
+
+    Отдельный от резолверного намеренно: тот читает секреты всего окружения и
+    ничего не пишет, этот пишет только под `nodes/`. Общий клиент означал бы
+    общий набор прав, а разделение прав здесь и есть смысл второй роли.
+
+    Логин идёт по HTTP из процесса, а не аргументами `vault` внутри контейнера:
+    secret-id в argv виден любому, кто прочитает список процессов.
+    """
+
+    def __init__(self, address: str, ca_file: Path, role_id: str, secret_id: str):
+        self.address = address.rstrip("/")
+        self.context = ssl.create_default_context(cafile=str(ca_file))
+        self.token: str | None = None
+        response = self._request(
+            "POST",
+            "/v1/auth/approle/login",
+            {"role_id": role_id, "secret_id": secret_id},
+        )
+        try:
+            self.token = response["auth"]["client_token"]
+        except (KeyError, TypeError) as exc:
+            raise NodePrepareError("Vault AppRole login returned no client token") from exc
+
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.token is not None:
+            headers["X-Vault-Token"] = self.token
+        request = urllib.request.Request(
+            f"{self.address}{path}", data=data, headers=headers, method=method
+        )
+        try:
+            with urllib.request.urlopen(request, context=self.context, timeout=10) as response:
+                body = response.read()
+        except urllib.error.HTTPError as exc:
+            raise VaultHTTPError(exc.code, f"Vault request failed for {path}") from exc
+        except (OSError, urllib.error.URLError) as exc:
+            raise NodePrepareError(f"Vault request failed for {path}") from exc
+        if not body:
+            return {}
+        try:
+            value = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise NodePrepareError(f"Vault returned an invalid response for {path}") from exc
+        if not isinstance(value, dict):
+            raise NodePrepareError(f"Vault returned an invalid response for {path}")
+        return value
+
+    def exists(self, path: str) -> bool:
+        try:
+            self._request("GET", f"/v1/kv/data/{path}")
+        except VaultHTTPError as exc:
+            if exc.status == 404:
+                return False
+            raise
+        return True
+
+    def read_object(self, path: str) -> dict[str, Any]:
+        response = self._request("GET", f"/v1/kv/data/{path}")
+        try:
+            data = response["data"]["data"]
+        except (KeyError, TypeError) as exc:
+            raise NodePrepareError(f"Vault path holds no data: kv/{path}") from exc
+        if not isinstance(data, dict) or not data:
+            raise NodePrepareError(f"Vault path is empty: kv/{path}")
+        return data
+
+    def create_object(self, path: str, data: dict[str, str]) -> None:
+        """Создаёт путь, отказываясь перезаписать существующий.
+
+        `cas: 0` — «пиши, только если версии ещё нет». Проверка чтением перед
+        записью оставляет окно между ними; здесь отказ принимает сам Vault, и
+        одновременный второй выпуск не сможет затереть первый. Политика тоже не
+        даёт `update`, так что это второй рубеж, а не единственный.
+        """
+        try:
+            self._request(
+                "POST",
+                f"/v1/kv/data/{path}",
+                {"data": data, "options": {"cas": 0}},
+            )
+        except VaultHTTPError as exc:
+            if exc.status == 400:
+                raise NodePrepareError(
+                    f"kv/{path} уже существует; перевыпуск материала живой ноды "
+                    "убил бы её вместе со всеми входами, которые на неё смотрят"
+                ) from exc
+            raise
+
+    def revoke_self(self) -> None:
+        if self.token is None:
+            return
+        self.token, token = None, self.token
+        request = urllib.request.Request(
+            f"{self.address}/v1/auth/token/revoke-self",
+            data=b"",
+            headers={"X-Vault-Token": token},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, context=self.context, timeout=10):
+                pass
+        except (OSError, urllib.error.URLError) as exc:
+            raise NodePrepareError("Vault self-revocation failed") from exc
+
+
+def store(
+    client: VaultClient,
+    *,
+    environment: str,
+    node_id: str,
+    source_node: str,
+    reality: dict[str, str],
+) -> None:
+    """Кладёт материал новой ноды: ключ REALITY и копию маски.
+
+    Порядок проверок важнее порядка записей. Всё, что может отказать, отказывает
+    до первой записи — иначе в Vault остаётся половина результата: ключ без
+    сертификата, который ничем не отличить от целого набора.
+    """
+    reality_path = f"{environment}/nodes/{node_id}/reality"
+    mask_path = f"{environment}/nodes/{node_id}/mask"
+    if client.exists(reality_path):
+        raise NodePrepareError(
+            f"kv/{reality_path} уже существует; выпуск для этой ноды уже был"
+        )
+    if client.exists(mask_path):
+        raise NodePrepareError(f"kv/{mask_path} уже существует; выпуск для этой ноды уже был")
+
+    # Сертификат маски — wildcard на весь флот, поэтому новой ноде нужна копия,
+    # а не выпуск. Читается до записей: ненайденный источник обязан остановить
+    # операцию раньше, чем в Vault появится хоть что-то.
+    source = client.read_object(f"{environment}/nodes/{source_node}/mask")
+    missing = [name for name in ("fullchain", "private_key") if not source.get(name)]
+    if missing:
+        raise NodePrepareError(
+            f"kv/{environment}/nodes/{source_node}/mask не содержит: {', '.join(missing)}"
+        )
+
+    client.create_object(reality_path, reality)
+    client.create_object(mask_path, {name: source[name] for name in ("fullchain", "private_key")})
 
 
 def build(arguments: argparse.Namespace) -> tuple[dict[str, str], list[dict[str, Any]]]:
@@ -170,6 +337,7 @@ def build(arguments: argparse.Namespace) -> tuple[dict[str, str], list[dict[str,
         bandwidth_profile=arguments.bandwidth_profile,
         resource_id=arguments.resource_id or arguments.node_id,
         ssh_host_key=arguments.ssh_host_key,
+        bootstrap_port=arguments.bootstrap_port,
     )
     return {"private_key": private_key}, [node, instance]
 
@@ -194,27 +362,64 @@ def main() -> int:
     parser.add_argument("--bandwidth-profile", default="vps-1g")
     parser.add_argument("--resource-id", help="по умолчанию совпадает с --node-id")
     parser.add_argument(
+        "--bootstrap-port",
+        type=int,
+        default=22,
+        help="порт sshd до бутстрапа; объявляется только если не 22",
+    )
+    parser.add_argument(
         "--ssh-host-key",
         help="ключ хоста, снятый с живой машины; можно дописать позже",
     )
     parser.add_argument(
-        "--secret-output",
+        "--mask-source-node",
+        required=True,
+        help="нода, чей wildcard-сертификат покрывает имя новой",
+    )
+    parser.add_argument(
+        "--credentials-dir",
         required=True,
         type=Path,
-        help="куда положить объект для nodes/<id>/reality; читает церемония",
+        help="каталог с role-id и secret-id роли node-issuer",
+    )
+    parser.add_argument("--vault-address", default="https://127.0.0.1:8200")
+    parser.add_argument(
+        "--vault-ca",
+        type=Path,
+        default=Path("/opt/spiritvpn/platform/vault/tls/vault-ca.crt"),
     )
     arguments = parser.parse_args()
+
+    client = None
     try:
         secret, documents = build(arguments)
+        role_id = (arguments.credentials_dir / "role-id").read_text(encoding="utf-8").strip()
+        secret_id = (arguments.credentials_dir / "secret-id").read_text(encoding="utf-8").strip()
+        if not role_id or not secret_id:
+            raise NodePrepareError("Vault AppRole credentials are empty")
+        client = VaultClient(arguments.vault_address, arguments.vault_ca, role_id, secret_id)
+        store(
+            client,
+            environment=arguments.environment,
+            node_id=arguments.node_id,
+            source_node=arguments.mask_source_node,
+            reality=secret,
+        )
     except NodePrepareError as error:
         print(f"node-prepare: {error}", file=sys.stderr)
         return 2
+    finally:
+        # Отзыв и на пути отказа: невостребованный токен иначе живёт весь TTL
+        # как готовый к употреблению доступ на запись под `nodes/`.
+        if client is not None:
+            try:
+                client.revoke_self()
+            except NodePrepareError as error:
+                print(f"warning: {error}", file=sys.stderr)
 
-    # 0600 и запись до печати: если файл не лёг, оператор не должен увидеть
-    # фрагмент, публичная половина которого уже никому не парная.
-    arguments.secret_output.write_text(json.dumps(secret, indent=2) + "\n", encoding="utf-8")
-    arguments.secret_output.chmod(0o600)
-
+    # Печать после записи: объявление с публичной половиной имеет смысл только
+    # тогда, когда приватная уже в Vault. Обратный порядок дал бы оператору
+    # готовый к коммиту фрагмент, парного ключа к которому нет нигде.
     print(yaml.safe_dump_all(documents, sort_keys=False, allow_unicode=True), end="")
     return 0
 

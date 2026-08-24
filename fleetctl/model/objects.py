@@ -237,6 +237,10 @@ class Instance:
     provider_name: str
     provider_resource_id: str
     source: Path
+    # Порт sshd до бутстрапа. 22 — то, на чём отвечает чистая VPS; объявляется
+    # только там, где провайдер отдаёт машину с другим портом. К установившейся
+    # фазе отношения не имеет: там нода слушает объявленный ssh_port.
+    bootstrap_port: int = 22
 
 
 @dataclass(frozen=True, slots=True)

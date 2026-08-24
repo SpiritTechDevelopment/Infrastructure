@@ -163,6 +163,11 @@ def _validate_bootstrap_inventory(
         hostvars = _expect_mapping(raw_hostvars, f"bootstrap inventory host {host}")
         expected_keys = {
             "ansible_host",
+            # Порт первого контакта. Раньше он был неявным — просто не
+            # задавался, и Ansible брал 22. Теперь задаётся всегда, потому что
+            # неявное умолчание молча ломало бутстрап там, где провайдер отдаёт
+            # машину с другим портом.
+            "ansible_port",
             "ansible_user",
             "spiritvpn_connection_phase",
             "spiritvpn_node_plan_file",

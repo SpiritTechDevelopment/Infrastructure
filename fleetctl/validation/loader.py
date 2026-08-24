@@ -403,6 +403,7 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 provider_name=spec["provider"]["name"],
                 provider_resource_id=spec["provider"]["resource_id"],
                 source=path,
+                bootstrap_port=spec.get("bootstrap_port", 22),
             )
     raise AssertionError(f"unreachable kind: {document['kind']}")
 

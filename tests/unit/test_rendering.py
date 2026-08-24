@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import ipaddress
 import json
 import shutil
@@ -313,11 +314,37 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual(entry["spiritvpn_node_plan_file"], "node-plans/develop-entry-nl-01.json")
 
     def test_bootstrap_inventory_keeps_the_default_ssh_port(self) -> None:
-        # A clean VPS answers on 22 only; the compiled sshd port becomes reachable
-        # after the common role has moved it, never before.
-        inventory = json.loads(render_files(self.state)["bootstrap-inventory.json"])
+        """Первый контакт идёт не на тот порт, куда sshd переедет позже.
+
+        Раньше это держалось на отсутствии ключа: `ansible_port` не задавался, и
+        Ansible брал 22. Теперь он задаётся явно, потому что неявное умолчание
+        молча ломало бутстрап у провайдеров, отдающих машину с другим портом.
+        Проверять «ключа нет» стало нечего — инвариант в том, что порт остаётся
+        портом чистой VPS, а установившийся становится достижим только после
+        того, как роль `common` туда sshd переведёт.
+        """
+        files = render_files(self.state)
+        inventory = json.loads(files["bootstrap-inventory.json"])
         hosts = inventory["all"]["children"]["spiritvpn_bootstrap"]["hosts"]
-        self.assertNotIn("ansible_port", hosts["develop-entry-nl-01"])
+        self.assertEqual(hosts["develop-entry-nl-01"]["ansible_port"], 22)
+
+        steady = json.loads(files["ansible-inventory.json"])
+        steady_hosts = steady["all"]["children"]["spiritvpn_fleet"]["children"]["entry"]["hosts"]
+        self.assertNotEqual(
+            hosts["develop-entry-nl-01"]["ansible_port"],
+            steady_hosts["develop-entry-nl-01"]["ansible_port"],
+        )
+
+    def test_a_declared_bootstrap_port_reaches_the_bootstrap_inventory(self) -> None:
+        """Провайдер, отдающий машину не на 22, объявляется, а не обходится."""
+        instance = self.state.instances[0]
+        state = replace(
+            self.state,
+            instances=(replace(instance, bootstrap_port=2222), *self.state.instances[1:]),
+        )
+        inventory = json.loads(render_files(state)["bootstrap-inventory.json"])
+        hosts = inventory["all"]["children"]["spiritvpn_bootstrap"]["hosts"]
+        self.assertEqual(hosts[instance.object_id]["ansible_port"], 2222)
 
     def test_entry_plan_contains_stable_logical_exit_projection(self) -> None:
         files = render_files(self.state)

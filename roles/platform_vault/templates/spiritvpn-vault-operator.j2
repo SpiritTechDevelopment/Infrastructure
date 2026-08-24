@@ -128,8 +128,41 @@ case "$command" in
     printf '%s\n' "$secret_id" > "$credential_dir/secret-id"
     printf '%s\n' "$secret_accessor" > "$credential_dir/secret-id-accessor"
     chmod 0600 "$credential_dir/role-id" "$credential_dir/secret-id" "$credential_dir/secret-id-accessor"
+
+    # Вторая роль, отдельная от deployer'а. Она умеет писать под `nodes/`, а
+    # deployer обязан оставаться read-only: право записи в нём означало бы, что
+    # обычная выкатка может переписать любой секрет контура.
+    #
+    # TTL длиннее, чем у deployer'а: выпуск ходит в Vault пять раз подряд с
+    # генерацией ключа между ними, и десяти минут ему в обрез.
+    issuer_policy="node-issuer-$environment"
+    vault_as_root policy write "$issuer_policy" "/vault/config/policies/$issuer_policy.hcl"
+    vault_as_root write "auth/approle/role/$issuer_policy" \
+      token_policies="$issuer_policy" \
+      token_no_default_policy=true \
+      token_ttl=15m token_max_ttl=20m \
+      token_bound_cidrs="$local_cidrs" \
+      secret_id_bound_cidrs="$local_cidrs" \
+      secret_id_ttl=0 secret_id_num_uses=0
+
+    issuer_dir="$credentials_root/$environment/vault-node-issuer"
+    install -d -o root -g root -m 0700 "$issuer_dir"
+    if [[ -s "$issuer_dir/secret-id-accessor" ]]; then
+      old_accessor="$(<"$issuer_dir/secret-id-accessor")"
+      vault_as_root write "auth/approle/role/$issuer_policy/secret-id-accessor/destroy" \
+        secret_id_accessor="$old_accessor" >/dev/null
+    fi
+    role_id="$(vault_as_root read -field=role_id "auth/approle/role/$issuer_policy/role-id")"
+    secret_json="$(vault_as_root write -format=json -f "auth/approle/role/$issuer_policy/secret-id")"
+    secret_id="$(printf '%s' "$secret_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["secret_id"])')"
+    secret_accessor="$(printf '%s' "$secret_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["secret_id_accessor"])')"
+    printf '%s\n' "$role_id" > "$issuer_dir/role-id"
+    printf '%s\n' "$secret_id" > "$issuer_dir/secret-id"
+    printf '%s\n' "$secret_accessor" > "$issuer_dir/secret-id-accessor"
+    chmod 0600 "$issuer_dir/role-id" "$issuer_dir/secret-id" "$issuer_dir/secret-id-accessor"
+
     unset root_token role_id secret_id secret_accessor secret_json old_accessor
-    printf '%s\n' "$environment Vault policy and local executor AppRole configured"
+    printf '%s\n' "$environment Vault policies and local AppRoles configured (deployer, node-issuer)"
     ;;
   put)
     [[ $# -eq 3 ]] || { printf '%s\n' 'usage: spiritvpn-vault-operator put <environment> <secret:// reference>' >&2; exit 64; }
@@ -207,10 +240,6 @@ if not isinstance(d, dict) or not d or not all(isinstance(v, str) for v in d.val
     # приватная половина остаётся здесь же, оператор уносит только объявление
     # для Git. Аргументы после <environment> и <source-node> уходят генератору
     # как есть — он и владеет формой объявления.
-    #
-    # Токен спрашивается один раз на обе записи. Разбить на два `put-object`
-    # значило бы спросить его дважды за одну операцию, а токен, набираемый
-    # повторно, набирают вставкой из буфера.
     [[ $# -ge 3 ]] || {
       printf '%s\n' 'usage: spiritvpn-vault-operator prepare-node <environment> <source-node-id> [generator options...]' >&2
       exit 64
@@ -224,63 +253,17 @@ if not isinstance(d, dict) or not d or not all(isinstance(v, str) for v in d.val
       exit 64
     fi
 
-    workspace="$(mktemp -d)"
-    trap 'rm -rf -- "$workspace"' EXIT
-    # Генератор печатает объявление в stdout, а приватный ключ кладёт в файл.
-    # Держим их порознь до самого конца: объявление уходит на терминал, ключ —
-    # только в Vault, и перепутать их местами нечем.
-    if ! python3 "{{ platform_vault_dir }}/node-prepare.py" \
-        --environment "$environment" \
-        --secret-output "$workspace/reality.json" \
-        "$@" > "$workspace/fragment.yml"; then
-      printf '%s\n' 'generator refused; nothing was written' >&2
-      exit 65
-    fi
-    node_id="$(python3 -c 'import sys,yaml
-for document in yaml.safe_load_all(open(sys.argv[1])):
-    if document.get("kind") == "LogicalNode":
-        print(document["metadata"]["id"]); break' "$workspace/fragment.yml")"
-    test -n "$node_id" || { printf '%s\n' 'generator emitted no LogicalNode' >&2; exit 65; }
-
-    read_root_token
-    # Только создание. Перегенерация ключа живой ноды убивает её вместе со
-    # всеми входами, которые на неё смотрят, и делает это молча — поэтому
-    # существующий путь останавливает операцию, а не перезаписывается.
-    if vault_as_root kv get -mount=kv "$environment/nodes/$node_id/reality" >/dev/null 2>&1; then
-      unset root_token
-      printf 'kv/%s/nodes/%s/reality already exists; refusing to regenerate\n' \
-        "$environment" "$node_id" >&2
-      exit 65
-    fi
-    # Сертификат маски — wildcard на весь флот, поэтому новой ноде нужен не
-    # выпуск, а копия. Читается до записи ключа: отсутствующий источник должен
-    # остановить операцию раньше, чем в Vault появится половина результата.
-    if ! vault_as_root kv get -mount=kv -format=json "$environment/nodes/$source_node/mask" \
-        > "$workspace/source-mask.json" 2>/dev/null; then
-      unset root_token
-      printf 'kv/%s/nodes/%s/mask not found; name a node whose mask certificate covers %s\n' \
-        "$environment" "$source_node" "$node_id" >&2
-      exit 65
-    fi
-    python3 -c 'import json,sys
-source = json.load(open(sys.argv[1]))["data"]["data"]
-missing = [name for name in ("fullchain", "private_key") if not source.get(name)]
-if missing:
-    sys.exit("source mask object lacks: " + ", ".join(missing))
-json.dump({name: source[name] for name in ("fullchain", "private_key")}, open(sys.argv[2], "w"))' \
-      "$workspace/source-mask.json" "$workspace/mask.json" || { unset root_token; exit 65; }
-
-    vault_as_root_with_input "$workspace/reality.json" kv put -mount=kv \
-      "$environment/nodes/$node_id/reality" - >/dev/null
-    vault_as_root_with_input "$workspace/mask.json" kv put -mount=kv \
-      "$environment/nodes/$node_id/mask" - >/dev/null
-    unset root_token
-
-    printf 'kv/%s/nodes/%s/{reality,mask} stored; mask copied from %s\n\n' \
-      "$environment" "$node_id" "$source_node" >&2
-    printf 'Объявление для desired/environments/%s/topology — коммит и ревью за вами:\n\n' \
-      "$environment" >&2
-    cat "$workspace/fragment.yml"
+    # Корневой токен здесь не нужен: генератор логинится ролью
+    # `node-issuer-<environment>`, которая умеет писать только под `nodes/` и
+    # только `create`. Это же делает команду вызываемой неинтерактивно — с
+    # `/dev/tty` её не мог дёрнуть ни раннер, ни любая автоматика.
+    exec python3 "{{ platform_vault_dir }}/node-prepare.py" \
+      --environment "$environment" \
+      --mask-source-node "$source_node" \
+      --credentials-dir "$credentials_root/$environment/vault-node-issuer" \
+      --vault-address "https://127.0.0.1:{{ platform_vault_api_port }}" \
+      --vault-ca "{{ platform_vault_dir }}/tls/vault-ca.crt" \
+      "$@"
     ;;
 
   snapshot)

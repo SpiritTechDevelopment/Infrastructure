@@ -14,6 +14,11 @@ def compile_bootstrap_inventory(state: DesiredState) -> dict[str, Any]:
             continue
         hosts[instance.object_id] = {
             "ansible_host": instance.public_address,
+            # 22 у подавляющего большинства машин, и раньше он был здесь
+            # неявным — просто не задавался. Неявный порт молча ломал первый
+            # контакт там, где провайдер отдаёт машину с другим, и разбираться
+            # приходилось с таймаутом SSH вместо объявления.
+            "ansible_port": instance.bootstrap_port,
             "ansible_user": "root",
             "spiritvpn_connection_phase": "bootstrap",
             "spiritvpn_node_plan_file": f"node-plans/{instance.object_id}.json",
