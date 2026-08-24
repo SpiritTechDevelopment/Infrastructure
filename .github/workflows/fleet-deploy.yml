@@ -8,9 +8,14 @@ on:
         required: true
         type: choice
         options: [develop, prod]
+      # Пусто — текущая голова main, разрешаемая на стороне GitHub. Поле было
+      # обязательным, и оператор брал значение локальной командой; коммиты с
+      # digest'ами пушит CI, поэтому `origin/main` на станции о них не знает до
+      # `fetch`. Один раз это уже стоило выкатки вчерашнего образа, прошедшей
+      # успешно. Явный SHA остаётся для осознанного отката.
       source_git_sha:
-        description: Full 40-character commit SHA reachable from main
-        required: true
+        description: Commit SHA reachable from main; empty means the current head
+        required: false
         type: string
       mode:
         description: Dry-run performs no SSH to fleet nodes; apply enables the infrastructure stages
@@ -70,6 +75,7 @@ jobs:
     runs-on: [self-hosted, linux, spiritvpn-deploy]
     outputs:
       promote: ${{ steps.record.outputs.promote }}
+      source_git_sha: ${{ steps.source.outputs.source_git_sha }}
       baseline: ${{ steps.source.outputs.baseline }}
       baseline_git_sha: ${{ steps.source.outputs.baseline_git_sha }}
     # `environment:` намеренно отсутствует — см. control-deploy.yml. На плане
@@ -80,7 +86,9 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ inputs.source_git_sha }}
+          # Пустой ввод означает голову main: локальный `origin/main`
+          # оператора в выборе коммита больше не участвует.
+          ref: ${{ inputs.source_git_sha || 'main' }}
           fetch-depth: 0
 
       - name: Validate reviewed source and deployment baseline
@@ -88,18 +96,32 @@ jobs:
         shell: bash
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
           REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_INITIAL: ${{ inputs.initial }}
         run: |
           set -euo pipefail
           [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
           [[ "$REQUESTED_MODE" =~ ^(dry-run|apply)$ ]]
+          # Пусто — берём вычекнутое, то есть голову main на момент запуска.
+          if [[ -z "$REQUESTED_SHA" ]]; then
+            REQUESTED_SHA="$(git rev-parse HEAD)"
+            printf 'выкатывается текущая голова main: %s\n' "$REQUESTED_SHA"
+          fi
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           actual_sha="$(git rev-parse HEAD)"
           test "$actual_sha" = "$REQUESTED_SHA"
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git merge-base --is-ancestor "$actual_sha" refs/remotes/origin/main
+          # Явно названный коммит, оказавшийся не головой, — это откат. Он
+          # законен, но обязан быть виден в логе.
+          head_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$REQUESTED_SHA" != "$head_sha" ]]; then
+            behind="$(git rev-list --count "$REQUESTED_SHA..$head_sha")"
+            printf '::warning::выкатывается не голова main: запрошен %s, голова %s, отставание %s коммит(ов)\n' \
+              "$REQUESTED_SHA" "$head_sha" "$behind"
+          fi
+          printf 'SOURCE_SHA=%s\n' "$REQUESTED_SHA" >> "$GITHUB_ENV"
+          printf 'source_git_sha=%s\n' "$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
 
           deployment_ref="refs/deployments/$REQUESTED_ENVIRONMENT"
           if git ls-remote --exit-code origin "$deployment_ref" >/dev/null 2>&1; then
@@ -123,12 +145,11 @@ jobs:
         shell: bash
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
           BASELINE: ${{ steps.source.outputs.baseline }}
         run: |
           set -euo pipefail
           source_ref=refs/spiritvpn/source
-          git update-ref "$source_ref" "$REQUESTED_SHA"
+          git update-ref "$source_ref" "$SOURCE_SHA"
           refs=("$source_ref")
           if test "$BASELINE" = present; then
             refs+=("refs/deployments/$REQUESTED_ENVIRONMENT")
@@ -157,7 +178,6 @@ jobs:
           PLATFORM_SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/platform-known-hosts
           PLATFORM_SSH_HOST: ${{ secrets.PLATFORM_SSH_HOST }}
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
           REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_INITIAL: ${{ inputs.initial }}
           REQUESTED_RESUME: ${{ inputs.resume }}
@@ -171,7 +191,7 @@ jobs:
           # по-прежнему валит шаг.
           scripts/platform-remote.sh \
             "$PLATFORM_SSH_HOST" fleet-deploy \
-            "$REQUESTED_ENVIRONMENT" "$REQUESTED_SHA" "$REQUESTED_MODE" \
+            "$REQUESTED_ENVIRONMENT" "$SOURCE_SHA" "$REQUESTED_MODE" \
             "$REQUESTED_INITIAL" "$REQUESTED_RESUME" "$REQUESTED_DESTRUCTIVE" \
             < "$RUNNER_TEMP/fleet-deploy.bundle" \
             | tee "$RUNNER_TEMP/fleet-deploy.transcript"
@@ -186,7 +206,6 @@ jobs:
         shell: bash
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
           BASELINE: ${{ steps.source.outputs.baseline }}
           BASELINE_GIT_SHA: ${{ steps.source.outputs.baseline_git_sha }}
         run: |
@@ -199,7 +218,7 @@ jobs:
           python3 scripts/deployment-record.py \
             --transcript "$RUNNER_TEMP/fleet-deploy.transcript" \
             --environment "$REQUESTED_ENVIRONMENT" \
-            --source-git-sha "$REQUESTED_SHA" \
+            --source-git-sha "$SOURCE_SHA" \
             "${baseline_argument[@]}" >> "$GITHUB_OUTPUT"
 
       - name: Remove the executor transcript
@@ -230,7 +249,9 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ inputs.source_git_sha }}
+          # Разрешённый коммит, а не ввод: пустой ввод означает голову main,
+          # и промоут обязан записать ровно то, что выкатывала задача deploy.
+          ref: ${{ needs.deploy.outputs.source_git_sha }}
           fetch-depth: 0
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -249,7 +270,7 @@ jobs:
         shell: bash
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
+          REQUESTED_SHA: ${{ needs.deploy.outputs.source_git_sha }}
           BASELINE: ${{ needs.deploy.outputs.baseline }}
           BASELINE_GIT_SHA: ${{ needs.deploy.outputs.baseline_git_sha }}
         run: |

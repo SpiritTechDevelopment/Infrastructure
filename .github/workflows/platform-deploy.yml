@@ -8,9 +8,14 @@ on:
         required: true
         type: choice
         options: [develop, prod]
+      # Пусто — текущая голова main, разрешаемая на стороне GitHub. Поле было
+      # обязательным, и оператор брал значение локальной командой; коммиты с
+      # digest'ами пушит CI, поэтому `origin/main` на станции о них не знает до
+      # `fetch`. Один раз это уже стоило выкатки вчерашнего образа, прошедшей
+      # успешно. Явный SHA остаётся для осознанного отката.
       source_git_sha:
-        description: Full 40-character commit SHA reachable from main
-        required: true
+        description: Commit SHA reachable from main; empty means the current head
+        required: false
         type: string
       mode:
         description: Check renders changes; apply reconciles the management VPS
@@ -52,7 +57,9 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ inputs.source_git_sha }}
+          # Пустой ввод означает голову main: локальный `origin/main`
+          # оператора в выборе коммита больше не участвует.
+          ref: ${{ inputs.source_git_sha || 'main' }}
           fetch-depth: 0
 
       - name: Validate reviewed source
@@ -65,20 +72,34 @@ jobs:
           set -euo pipefail
           [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
           [[ "$REQUESTED_MODE" =~ ^(check|apply)$ ]]
+          # Пусто — берём вычекнутое, то есть голову main на момент запуска.
+          # Дальше значение живёт в `$SOURCE_SHA`: шаги ниже обязаны видеть
+          # разрешённый коммит, а не исходный ввод.
+          if [[ -z "$REQUESTED_SHA" ]]; then
+            REQUESTED_SHA="$(git rev-parse HEAD)"
+            printf 'выкатывается текущая голова main: %s\n' "$REQUESTED_SHA"
+          fi
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git merge-base --is-ancestor "$REQUESTED_SHA" refs/remotes/origin/main
+          # Явно названный коммит, оказавшийся не головой, — это откат. Он
+          # законен, но обязан быть виден в логе.
+          head_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$REQUESTED_SHA" != "$head_sha" ]]; then
+            behind="$(git rev-list --count "$REQUESTED_SHA..$head_sha")"
+            printf '::warning::выкатывается не голова main: запрошен %s, голова %s, отставание %s коммит(ов)\n' \
+              "$REQUESTED_SHA" "$head_sha" "$behind"
+          fi
+          printf 'SOURCE_SHA=%s\n' "$REQUESTED_SHA" >> "$GITHUB_ENV"
           git config --local --unset-all http.https://github.com/.extraheader || true
 
       - name: Build the exact non-secret Git handoff bundle
         shell: bash
-        env:
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
         run: |
           set -euo pipefail
           source_ref=refs/spiritvpn/platform-source
-          git update-ref "$source_ref" "$REQUESTED_SHA"
+          git update-ref "$source_ref" "$SOURCE_SHA"
           git bundle create "$RUNNER_TEMP/platform-deploy.bundle" "$source_ref"
           git update-ref -d "$source_ref"
           git bundle verify "$RUNNER_TEMP/platform-deploy.bundle"
@@ -103,14 +124,13 @@ jobs:
           PLATFORM_SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/platform-known-hosts
           PLATFORM_SSH_HOST: ${{ secrets.PLATFORM_SSH_HOST }}
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
           REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           test -n "$PLATFORM_SSH_HOST"
           scripts/platform-remote.sh \
             "$PLATFORM_SSH_HOST" platform-deploy \
-            "$REQUESTED_ENVIRONMENT" "$REQUESTED_SHA" "$REQUESTED_MODE" \
+            "$REQUESTED_ENVIRONMENT" "$SOURCE_SHA" "$REQUESTED_MODE" \
             < "$RUNNER_TEMP/platform-deploy.bundle"
 
       - name: Remove temporary SSH material

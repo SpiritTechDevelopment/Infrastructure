@@ -1822,6 +1822,60 @@ all:
             ["develop/nodes/develop-exit-se/reality", "develop/nodes/develop-exit-se/mask"],
         )
 
+    def test_deploy_workflows_resolve_the_source_commit_server_side(self) -> None:
+        """Локальная ссылка оператора не должна выбирать выкатываемый коммит.
+
+        Поле `source_git_sha` было обязательным, и значение брали командой
+        `git rev-parse origin/main` на станции. Коммиты с digest'ами образов
+        пушит `release-bump` из CI, поэтому `origin/main` там устаревает до
+        ближайшего `fetch`. 2026-08-24 в форму уехал коммит полуторачасовой
+        давности: выкатка прошла успешно и раскатала вчерашний образ бота —
+        откат на предка `main` законен, и отличить его от опечатки было нечем.
+
+        Теперь пустой ввод означает голову `main`, разрешаемую на стороне
+        GitHub. Явный SHA остаётся ради осознанного отката и предупреждает о
+        себе в логе.
+        """
+        for name in ("control-deploy", "fleet-deploy", "platform-deploy"):
+            with self.subTest(workflow=name):
+                path = REPO_ROOT / ".github" / "workflows" / f"{name}.yml"
+                source = path.read_text(encoding="utf-8")
+                workflow = yaml.safe_load(source)
+                # `on` — истинное значение YAML, поэтому ключ приходит как True.
+                triggers = workflow.get("on") or workflow.get(True)
+
+                dispatch = triggers["workflow_dispatch"]["inputs"]["source_git_sha"]
+                self.assertFalse(
+                    dispatch.get("required", False),
+                    "ручной ввод SHA снова стал обязательным",
+                )
+                # Вызов из другого workflow — наоборот, обязан назвать коммит:
+                # он реконсилит конкретный, а не «что там сейчас в main».
+                self.assertTrue(triggers["workflow_call"]["inputs"]["source_git_sha"]["required"])
+
+                self.assertIn("inputs.source_git_sha || 'main'", source)
+                # Ниже по задаче должен ехать разрешённый коммит. Ввод, попавший
+                # в вызов исполнителя напрямую, вернул бы пустую строку.
+                self.assertIn('SOURCE_SHA=%s\\n', source)
+                self.assertIn("::warning::", source)
+
+                steps = workflow["jobs"]["deploy"]["steps"]
+                invocation = [
+                    step["run"]
+                    for step in steps
+                    if "platform-remote.sh" in (step.get("run") or "")
+                ]
+                self.assertEqual(len(invocation), 1, name)
+                self.assertIn('"$SOURCE_SHA"', invocation[0])
+                self.assertNotIn("$REQUESTED_SHA", invocation[0])
+
+                # Синтаксис самих скриптов: ошибка в блоке `run` видна только на
+                # прогоне, то есть на живой выкатке.
+                for step in steps:
+                    script = step.get("run")
+                    if script:
+                        subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+
     def test_secret_reference_listing_is_offline_and_environment_scoped(self) -> None:
         result = subprocess.run(
             [

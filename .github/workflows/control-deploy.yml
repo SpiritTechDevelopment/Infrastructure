@@ -8,9 +8,20 @@ on:
         required: true
         type: choice
         options: [develop, prod]
+      # Пусто — текущая голова main, разрешаемая здесь же, на стороне GitHub.
+      #
+      # Раньше поле было обязательным, и оператор брал значение локальной
+      # командой. Коммиты с digest'ами образов пушит `release-bump` из CI, а не
+      # человек, поэтому `origin/main` на станции о них не знает до `fetch` — и
+      # 2026-08-24 в форму уехал коммит полуторачасовой давности. Выкатка
+      # прошла успешно и раскатала вчерашний образ бота: откат на предка `main`
+      # законен, отличить его от опечатки контур не мог.
+      #
+      # Явный SHA остаётся ради того, ради чего поле и заводилось, — осознанного
+      # отката.
       source_git_sha:
-        description: Full 40-character infrastructure commit SHA reachable from main
-        required: true
+        description: Infrastructure commit SHA; empty means the current head of main
+        required: false
         type: string
       mode:
         description: Check previews changes; apply reconciles PostgreSQL and backend
@@ -58,10 +69,14 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          ref: ${{ inputs.source_git_sha }}
+          # Пустой ввод означает голову main. Ссылка разрешается здесь, на
+          # стороне GitHub, поэтому локальный `origin/main` оператора в выборе
+          # коммита больше не участвует.
+          ref: ${{ inputs.source_git_sha || 'main' }}
           fetch-depth: 0
 
-      - name: Validate reviewed source
+      - name: Validate and resolve the reviewed source
+        id: source
         shell: bash
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
@@ -71,20 +86,35 @@ jobs:
           set -euo pipefail
           [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
           [[ "$REQUESTED_MODE" =~ ^(check|apply)$ ]]
+          # Пусто — берём то, что вычекано, то есть голову main на момент
+          # запуска. Дальше значение живёт в окружении задачи: шаги ниже обязаны
+          # видеть разрешённый коммит, а не исходный ввод.
+          if [[ -z "$REQUESTED_SHA" ]]; then
+            REQUESTED_SHA="$(git rev-parse HEAD)"
+            printf 'выкатывается текущая голова main: %s\n' "$REQUESTED_SHA"
+          fi
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git merge-base --is-ancestor "$REQUESTED_SHA" refs/remotes/origin/main
+          # Явно названный коммит, оказавшийся не головой, — это откат. Он
+          # законен, но должен быть виден в логе: именно так выглядела выкатка
+          # вчерашнего образа, отчитавшаяся успехом.
+          head_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "$REQUESTED_SHA" != "$head_sha" ]]; then
+            behind="$(git rev-list --count "$REQUESTED_SHA..$head_sha")"
+            printf '::warning::выкатывается не голова main: запрошен %s, голова %s, отставание %s коммит(ов)\n' \
+              "$REQUESTED_SHA" "$head_sha" "$behind"
+          fi
           git config --local --unset-all http.https://github.com/.extraheader || true
+          printf 'SOURCE_SHA=%s\n' "$REQUESTED_SHA" >> "$GITHUB_ENV"
 
       - name: Build the exact non-secret Git handoff bundle
         shell: bash
-        env:
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
         run: |
           set -euo pipefail
           source_ref=refs/spiritvpn/control-source
-          git update-ref "$source_ref" "$REQUESTED_SHA"
+          git update-ref "$source_ref" "$SOURCE_SHA"
           git bundle create "$RUNNER_TEMP/control-deploy.bundle" "$source_ref"
           git update-ref -d "$source_ref"
           git bundle verify "$RUNNER_TEMP/control-deploy.bundle"
@@ -109,14 +139,16 @@ jobs:
           PLATFORM_SSH_KNOWN_HOSTS_FILE: ${{ runner.temp }}/platform-known-hosts
           PLATFORM_SSH_HOST: ${{ secrets.PLATFORM_SSH_HOST }}
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
-          REQUESTED_SHA: ${{ inputs.source_git_sha }}
           REQUESTED_MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           test -n "$PLATFORM_SSH_HOST"
+          # `$SOURCE_SHA`, а не ввод: исполнитель сверяет переданный SHA с
+          # головой бандла и откажет на пустом. Именно здесь расхождение между
+          # тем, что вычекано, и тем, что объявлено, стало бы неотличимым.
           scripts/platform-remote.sh \
             "$PLATFORM_SSH_HOST" control-deploy \
-            "$REQUESTED_ENVIRONMENT" "$REQUESTED_SHA" "$REQUESTED_MODE" \
+            "$REQUESTED_ENVIRONMENT" "$SOURCE_SHA" "$REQUESTED_MODE" \
             < "$RUNNER_TEMP/control-deploy.bundle"
 
       - name: Remove temporary SSH material
