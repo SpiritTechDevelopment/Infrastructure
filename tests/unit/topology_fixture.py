@@ -26,9 +26,28 @@ def load(desired_root: Path, environment: str = "develop") -> dict[str, Any]:
     return yaml.safe_load(path(desired_root, environment).read_text(encoding="utf-8"))
 
 
+class _IndentingDumper(yaml.SafeDumper):
+    """Отбивает элементы списка от ключа, как того требует yamllint.
+
+    Тесты пишут во временные каталоги, которые линтер не видит, но записанный
+    бандл иногда читают глазами при разборе падения. Расхождение формы с
+    фикстурой в репозитории на ровном месте сбивает.
+    """
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False) -> Any:
+        return super().increase_indent(flow, False)
+
+
 def save(desired_root: Path, bundle: dict[str, Any], environment: str = "develop") -> None:
     path(desired_root, environment).write_text(
-        yaml.safe_dump(bundle, sort_keys=False, allow_unicode=True), encoding="utf-8"
+        yaml.dump(
+            bundle,
+            Dumper=_IndentingDumper,
+            sort_keys=False,
+            allow_unicode=True,
+            default_flow_style=False,
+        ),
+        encoding="utf-8",
     )
 
 

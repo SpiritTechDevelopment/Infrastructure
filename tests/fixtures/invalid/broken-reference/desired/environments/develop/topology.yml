@@ -4,29 +4,29 @@ metadata:
   id: develop
 spec:
   objects:
-  - apiVersion: spiritvpn.io/v1alpha1
-    kind: Environment
-    metadata:
-      id: develop
-    spec:
-      dns_zone: develop.example.invalid
-      management_network: 10.80.0.0/16
-      backend_endpoint: backend.develop.internal:9443
-      secret_store:
-        kv: kv/develop
-        pki: pki/develop
-  - apiVersion: spiritvpn.io/v1alpha1
-    kind: Fleet
-    metadata:
-      id: develop-fleet-broken
-    spec:
-      entries:
-      - develop-entry-missing
-      exits:
-      - develop-exit-missing
-      bridges:
-      - routing_key: develop-entry-missing.to-develop-exit-missing
-        entry: develop-entry-missing
-        exit: develop-exit-missing
-        display_name: Broken fixture
-        service_credential_ref: secret://kv/develop/bridges/develop-entry-missing.to-develop-exit-missing#service_uuid
+    - apiVersion: spiritvpn.io/v1alpha1
+      kind: Environment
+      metadata:
+        id: develop
+      spec:
+        dns_zone: develop.example.invalid
+        management_network: 10.80.0.0/16
+        backend_endpoint: backend.develop.internal:9443
+        secret_store:
+          kv: kv/develop
+          pki: pki/develop
+    - apiVersion: spiritvpn.io/v1alpha1
+      kind: Fleet
+      metadata:
+        id: develop-fleet-broken
+      spec:
+        entries:
+          - develop-entry-missing
+        exits:
+          - develop-exit-missing
+        bridges:
+          - routing_key: develop-entry-missing.to-develop-exit-missing
+            entry: develop-entry-missing
+            exit: develop-exit-missing
+            display_name: Broken fixture
+            service_credential_ref: secret://kv/develop/bridges/develop-entry-missing.to-develop-exit-missing#service_uuid
