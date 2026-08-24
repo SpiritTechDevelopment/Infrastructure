@@ -38,7 +38,7 @@ class RepositorySurfaceTests(unittest.TestCase):
     def test_makefile_exposes_only_declared_operation_families(self) -> None:
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
         targets = set(re.findall(r"(?m)^([a-zA-Z0-9_-]+):", makefile))
-        operational = targets - {"help", "check", "lint", "syntax"}
+        operational = targets - {"help", "check", "check-static", "lint", "syntax"}
         self.assertTrue(operational)
         # Семейств два, и они разделены намеренно. `fleet-` трогает серверы.
         # `operator-` не трогает их вовсе: выдача и отзыв доступа правят только

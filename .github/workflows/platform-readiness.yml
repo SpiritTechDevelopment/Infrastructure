@@ -1,19 +1,17 @@
 name: platform-readiness
 
+# Окружение здесь не спрашивается: платформа общая, и `platform-readiness` в
+# списке forced-команд исполнителя аргументов не принимает. Выбор из двух
+# значений, ни одно из которых ни на что не влияет, обещал разделение сред,
+# которого на этом шаге нет.
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Environment whose management foundation is checked
-        required: true
-        type: choice
-        options: [develop, prod]
 
 permissions:
   contents: read
 
 concurrency:
-  group: platform-readiness-${{ inputs.environment }}
+  group: platform-readiness
   cancel-in-progress: false
 
 jobs:

@@ -246,6 +246,36 @@ class DesiredStateDetectTest(unittest.TestCase):
             fleet=["develop"],
         )
 
+    def test_documentation_and_tests_reach_nothing(self) -> None:
+        """Уборка не должна стоить как боевая выкатка.
+
+        Всё вне `desired/environments/*` считается глобальным, и это верно по
+        умолчанию — но тесты и документация на хосты не едут. Без отсечки каждый
+        уборочный коммит поднимал реконсиляцию всех трёх контуров на обоих
+        окружениях.
+        """
+        self.write("docs/guide.md", "# guide, changed\n")
+        self.write("tests/unit/test_something.py", "# changed\n")
+        self.write("README.md", "# readme\n")
+        head = self.commit("touch only inert paths")
+        self.assert_areas(self.detect(self.base, head), platform=[], control=[], fleet=[])
+
+    def test_an_inert_path_does_not_mask_a_real_change(self) -> None:
+        """Отсечка пропускает файл, а не коммит.
+
+        Правка роли в том же коммите обязана доехать: иначе достаточно тронуть
+        README рядом, чтобы выкатка молча не состоялась.
+        """
+        self.write("docs/guide.md", "# guide, changed\n")
+        self.write("roles/xray/tasks/main.yml", "- name: changed\n")
+        head = self.commit("touch docs and a role together")
+        self.assert_areas(
+            self.detect(self.base, head),
+            platform=["develop"],
+            control=["develop"],
+            fleet=["develop"],
+        )
+
     def test_an_unknown_new_directory_reaches_every_contour(self) -> None:
         self.write("roles/brand-new-role/tasks/main.yml", "- name: new\n")
         head = self.commit("add a role that no list knows about")

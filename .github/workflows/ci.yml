@@ -129,9 +129,12 @@ jobs:
           python-version: "3.12"
       - name: Install tooling
         run: pip install -r requirements-ansible.txt
+      # `check-static`, а не `check`: конверты и сьют уже отработала задача
+      # `desired-state` на этом же прогоне, и повторять их здесь значит платить
+      # за них дважды на PR и трижды на push.
       - name: Static checks
         env:
           SPIRITVPN_SKIP_LIVE_DESIRED: "1"
-        run: make check
+        run: make check-static
       - name: Lint
         run: make lint

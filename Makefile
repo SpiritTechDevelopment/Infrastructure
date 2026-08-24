@@ -180,7 +180,14 @@ lint: ## Run YAML and Ansible lint on the active v1 contour
 	ANSIBLE_INVENTORY="$(CURDIR)/tests/fixtures/platform-bootstrap/platform.yml" \
 		ansible-lint playbooks roles
 
-check: fleet-sops-envelope-check fleet-test ## Run local v1 static checks
+check: fleet-sops-envelope-check fleet-test check-static ## Run local v1 static checks
+
+# То же, что `check`, минус конверты и сьют. Существует ради CI: там их уже
+# отработала задача `desired-state`, и повторный прогон в `lint` был настоящим
+# дублем — единственным из трёх. Третий прогон, `trusted-desired-state`, дублем
+# не является: он единственный без SPIRITVPN_SKIP_LIVE_DESIRED и читает
+# настоящий desired state. Локально по-прежнему хватает `make check`.
+check-static: ## Static checks minus the suite `desired-state` already ran
 	@if test "$(SPIRITVPN_SKIP_LIVE_DESIRED)" != 1; then $(MAKE) fleet-validate; fi
 	@for script in scripts/*.sh; do bash -n "$$script" || exit $$?; done
 	@python3 -m py_compile scripts/*.py
@@ -202,4 +209,4 @@ check: fleet-sops-envelope-check fleet-test ## Run local v1 static checks
 	fleet-dns-plan fleet-dns-apply \
 	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-promote fleet-platform-check \
 	fleet-platform-bootstrap-check fleet-platform-bootstrap fleet-platform-refresh \
-	fleet-deploy-log operator-identity operator-hosts operator-grant operator-revoke syntax lint check
+	fleet-deploy-log operator-identity operator-hosts operator-grant operator-revoke syntax lint check check-static
