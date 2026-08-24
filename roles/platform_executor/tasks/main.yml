@@ -106,11 +106,6 @@
   no_log: true
   when: not ansible_check_mode
 
-- name: Remove the retired staging executor configuration
-  ansible.builtin.file:
-    path: "{{ platform_executor_config_dir }}/staging"
-    state: absent
-
 - name: Inspect the existing executor Python environment
   ansible.builtin.stat:
     path: "{{ platform_executor_dir }}/venv/bin/python"

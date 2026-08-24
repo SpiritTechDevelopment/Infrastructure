@@ -67,6 +67,12 @@
     - "{{ platform_wireguard_peer_dir }}/develop"
     - "{{ platform_wireguard_peer_dir }}/prod"
 
+# Не след миграции, а действующая защита, и снимать её вместе с прочей уборкой
+# staging нельзя. Реконсиляция перебирает каталог пиров целиком —
+# `find <peer_dir> -mindepth 2 -maxdepth 2 -name '*.conf'`, — поэтому уцелевший
+# `staging/` не лежал бы мёртвым грузом, а раздал бы доступ в управляющий
+# оверлей пирам снятой среды. Две другие задачи про staging сняты 2026-08-24
+# именно потому, что их каталоги никто не перебирает; эта остаётся.
 - name: Remove the retired staging WireGuard peer state
   ansible.builtin.file:
     path: "{{ platform_wireguard_peer_dir }}/staging"

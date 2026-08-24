@@ -222,11 +222,6 @@
   vars:
     policy_environment: "{{ item }}"
 
-- name: Remove the retired staging policy file
-  ansible.builtin.file:
-    path: "{{ platform_vault_dir }}/config/policies/fleet-deployer-staging.hcl"
-    state: absent
-
 # Генератор едет на хаб, а не запускается на станции, потому что приватная
 # половина пары REALITY не должна покидать машину, где стоит Vault. Церемония
 # зовёт его локально и отдаёт оператору только публичную половину.
