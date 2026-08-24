@@ -1796,36 +1796,6 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
-    def test_previous_flag_name_is_still_accepted_for_the_installed_executor(self) -> None:
-        """Исполнитель на хабе вызывает скрипт до того, как playbook его заменит.
-
-        Прогон 1160f02 упал именно здесь: флаг переименовали вместе с шаблоном,
-        и установленный исполнитель передал имя, которого новый скрипт уже не
-        знал, — раньше, чем steady.yml успел его перерендерить. Тест закрепляет
-        алиас, потому что его уборка «за ненадобностью» ломает выкатку ровно
-        один раз и ровно на том хабе, который дольше всех не обновлялся.
-        """
-        source = (REPO_ROOT / "scripts" / "platform-sops.py").read_text(encoding="utf-8")
-        self.assertIn('"--require-applied-runtime"', source)
-        self.assertIn('dest="compare_applied_runtime"', source)
-
-        result = subprocess.run(
-            [
-                "python3",
-                str(REPO_ROOT / "scripts" / "platform-sops.py"),
-                "materialize-runtime",
-                "--bundle", "/nonexistent.sops.yml",
-                "--output", "/nonexistent-output.yml",
-                "--require-applied-runtime", "/nonexistent-applied.yml",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        # Падение по расшифровке ожидаемо и нормально: проверяется, что argparse
-        # принял аргумент, а не что бандла нет.
-        self.assertNotIn("unrecognized arguments", result.stderr)
-
     def test_runtime_projection_is_private_and_applies_reviewed_access_changes(self) -> None:
         """Контракт доступа применяется из Git, а расхождение только называется.
 
@@ -1851,14 +1821,13 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
         }
         expected["platform_wireguard_public_endpoint"] = "1.1.1.1:51820"
 
-        def project(output: Path, applied: Path | None, **keywords: object) -> str:
+        def project(output: Path, applied: Path | None) -> str:
             stream = io.StringIO()
             with contextlib.redirect_stderr(stream):
                 module.materialize_runtime_variables(
                     Path("ignored.sops.yml"),
                     output,
                     compare_applied_runtime=applied,
-                    **keywords,
                 )
             return stream.getvalue()
 
@@ -1907,18 +1876,18 @@ class PlatformRuntimeProjectionTests(unittest.TestCase):
             self.assertEqual(project(first, missing), "")
             self.assertEqual(yaml.safe_load(first.read_text(encoding="utf-8")), expected)
 
-            legacy_refused = root / "legacy-refused.yml"
-            with self.assertRaises(module.PlatformBundleError) as legacy_raised:
-                project(legacy_refused, None, executor_listen_port=51821)
-            self.assertIn("installed executor listen port", str(legacy_raised.exception))
-            self.assertFalse(legacy_refused.exists())
-
+            # Ключ, которого нет в файле прошлой выкатки, — это изменение
+            # контракта доступа, и отчёт обязан его назвать. Раньше два поля
+            # переходного формата здесь молча добивались значением по умолчанию;
+            # бэкфилл снят 2026-08-24, когда на хабе оба поля уже появились.
             legacy_applied = copy.deepcopy(expected)
             legacy_applied.pop("platform_wireguard_hub_public_key")
             legacy_applied.pop("platform_wireguard_runner_peers")
             applied.write_text(yaml.safe_dump(legacy_applied), encoding="utf-8")
             transitioned = root / "transitioned.yml"
-            self.assertEqual(project(transitioned, applied), "")
+            report = project(transitioned, applied)
+            self.assertIn("platform_wireguard_hub_public_key", report)
+            self.assertIn("platform_wireguard_runner_peers", report)
             self.assertEqual(
                 yaml.safe_load(transitioned.read_text(encoding="utf-8")),
                 expected,

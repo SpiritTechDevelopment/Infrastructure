@@ -54,11 +54,6 @@ EXPECTED_VARIABLE_KEYS = {
 
 RUNTIME_VARIABLE_KEYS = EXPECTED_VARIABLE_KEYS - {"platform_runner"}
 
-TRANSITIONAL_RUNTIME_DEFAULTS = {
-    "platform_wireguard_hub_public_key": "",
-    "platform_wireguard_runner_peers": [],
-}
-
 
 class PlatformBundleError(Exception):
     """Raised when protected platform input cannot be used safely."""
@@ -501,9 +496,6 @@ def _report_access_drift(compare_applied_runtime: Path, desired: dict[str, Any])
         return
     if not isinstance(applied, dict):
         return
-    for key, default in TRANSITIONAL_RUNTIME_DEFAULTS.items():
-        if key not in applied and desired[key] == default:
-            applied[key] = copy.deepcopy(default)
     changed = sorted(key for key in desired if applied.get(key, _MISSING) != desired[key])
     # Ключ, который исчез из контракта, тоже изменение доступа: так пропадает
     # последний оператор из ростера, если поле снесли целиком.
@@ -522,16 +514,8 @@ def materialize_runtime_variables(
     output: Path,
     *,
     compare_applied_runtime: Path | None,
-    executor_listen_port: int | None = None,
 ) -> None:
     inventory, _known_hosts, variables = decrypt_bundle(bundle)
-    if (
-        executor_listen_port is not None
-        and executor_listen_port != variables["platform_wireguard_listen_port"]
-    ):
-        raise PlatformBundleError(
-            "installed executor listen port differs from the Git-owned platform contract"
-        )
     desired = {
         key: copy.deepcopy(variables[key])
         for key in RUNTIME_VARIABLE_KEYS
@@ -759,30 +743,17 @@ def main() -> int:
     )
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--output", type=Path)
-    # Accepted during the rollout from the executor installed before the listen
-    # port became Git-owned. It is comparison-only and never drives projection.
-    parser.add_argument("--wireguard-listen-port", type=int)
     # Сравнение, а не требование. Прежнее имя описывало отказ, которого больше
     # нет, и оставить его значило бы обещать гейт, которого не существует.
+    #
+    # Прежнее имя `--require-applied-runtime` принималось молча до 2026-08-24:
+    # исполнитель на хабе — файл, отрендеренный прошлым прогоном steady.yml, и
+    # он вызывает этот скрипт **до** того, как playbook заменит его новой
+    # версией. Переименование флага и шаблона одним коммитом уронило прогон
+    # 1160f02 ровно так. Алиас снят после того, как на единственном хабе
+    # платформы установленный исполнитель перестал его передавать (проверено
+    # grep'ом по /usr/local/sbin/spiritvpn-platform-deploy).
     parser.add_argument("--compare-applied-runtime", type=Path)
-    # Прежнее имя того же аргумента, принимается молча.
-    #
-    # Без него выкатка этого изменения невозможна в принципе, и это не теория:
-    # первый же прогон упал. Исполнитель на хабе — файл, отрендеренный прошлым
-    # прогоном steady.yml, и он вызывает этот скрипт **до** того, как playbook
-    # успеет заменить его новой версией. Переименовать флаг и шаблон одним
-    # коммитом значит попросить установленного исполнителя передать аргумент,
-    # о котором он ещё не знает, — и упасть раньше, чем он себя обновит.
-    #
-    # Снимать этот алиас можно только после того, как исполнитель перерендерен
-    # во **всех** средах, включая prod: там автоматического пути нет, и хаб
-    # может месяцами держать сборку, вызывающую старое имя.
-    parser.add_argument(
-        "--require-applied-runtime",
-        dest="compare_applied_runtime",
-        type=Path,
-        help=argparse.SUPPRESS,
-    )
     parser.add_argument("--runner-id")
     parser.add_argument("--source-git-sha")
     args = parser.parse_args()
@@ -795,7 +766,6 @@ def main() -> int:
             materialize_runtime_variables(
                 args.bundle.resolve(),
                 args.output.resolve(),
-                executor_listen_port=args.wireguard_listen_port,
                 compare_applied_runtime=(
                     args.compare_applied_runtime.resolve()
                     if args.compare_applied_runtime is not None
@@ -807,7 +777,7 @@ def main() -> int:
                 raise PlatformBundleError(
                     "runner-plan requires --output, --runner-id and --source-git-sha"
                 )
-            if args.wireguard_listen_port is not None or args.compare_applied_runtime is not None:
+            if args.compare_applied_runtime is not None:
                 raise PlatformBundleError("runtime options cannot be used with runner-plan")
             _require_clean_exact_source(args.source_git_sha)
             materialize_runner_plan(
@@ -821,11 +791,7 @@ def main() -> int:
                 raise PlatformBundleError(
                     "runner-host-plan requires --output and --source-git-sha"
                 )
-            if (
-                args.runner_id is not None
-                or args.wireguard_listen_port is not None
-                or args.compare_applied_runtime is not None
-            ):
+            if args.runner_id is not None or args.compare_applied_runtime is not None:
                 raise PlatformBundleError(
                     "overlay or runtime options cannot be used with runner-host-plan"
                 )
@@ -840,7 +806,6 @@ def main() -> int:
                 value is not None
                 for value in (
                     args.output,
-                    args.wireguard_listen_port,
                     args.compare_applied_runtime,
                     args.runner_id,
                     args.source_git_sha,
