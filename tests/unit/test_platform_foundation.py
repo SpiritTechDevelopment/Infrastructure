@@ -1735,6 +1735,25 @@ all:
         self.assertNotIn("read_root_token", prepare)
         self.assertNotIn("/dev/tty", prepare)
         self.assertIn("vault-node-issuer", prepare)
+        # venv исполнителя, а не системный python: генератору нужны yaml и
+        # cryptography, и на живом хабе системный дал бы ModuleNotFoundError —
+        # то есть отказ в единственном месте, где его нечем поймать заранее.
+        self.assertIn("venv/bin/python", prepare)
+        self.assertNotIn("exec python3 ", prepare)
+        # Значение обязано совпадать с тем, по которому venv создаёт
+        # platform_executor: роли ставит один playbook, а расхождение вылезло бы
+        # только на хабе.
+        executor_default = yaml.safe_load(
+            (REPO_ROOT / "roles" / "platform_executor" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )["platform_executor_dir"]
+        vault_default = yaml.safe_load(
+            (REPO_ROOT / "roles" / "platform_vault" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )["platform_executor_dir"]
+        self.assertEqual(vault_default, executor_default)
 
         module = _load_script("node-prepare.py", "spiritvpn_node_prepare")
         # `cas: 0` — «пиши, только если версии ещё нет». Проверка чтением

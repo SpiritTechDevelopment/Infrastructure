@@ -257,7 +257,9 @@ if not isinstance(d, dict) or not d or not all(isinstance(v, str) for v in d.val
     # `node-issuer-<environment>`, которая умеет писать только под `nodes/` и
     # только `create`. Это же делает команду вызываемой неинтерактивно — с
     # `/dev/tty` её не мог дёрнуть ни раннер, ни любая автоматика.
-    exec python3 "{{ platform_vault_dir }}/node-prepare.py" \
+    # venv исполнителя, а не системный python: генератору нужны yaml и
+    # cryptography, а системный их не несёт.
+    exec "{{ platform_executor_dir }}/venv/bin/python" "{{ platform_vault_dir }}/node-prepare.py" \
       --environment "$environment" \
       --mask-source-node "$source_node" \
       --credentials-dir "$credentials_root/$environment/vault-node-issuer" \

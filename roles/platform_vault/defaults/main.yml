@@ -15,3 +15,8 @@ platform_vault_node_id: management-1
 platform_vault_ca_common_name: SpiritVPN management Vault transport CA
 platform_vault_tls_validity_days: 825
 platform_executor_config_dir: /etc/spiritvpn/deploy
+# Каталог исполнителя нужен церемонии ради его venv: `node-prepare.py`
+# импортирует yaml и cryptography, которых в системном python нет. Значение
+# обязано совпадать с одноимённым в platform_executor — роли ставит один и тот
+# же playbook, и расхождение проявится только на живом хабе.
+platform_executor_dir: /opt/spiritvpn/platform/executor
