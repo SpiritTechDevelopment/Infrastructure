@@ -1709,15 +1709,35 @@ all:
             }
 
         self.assertIn('capabilities = ["create", "read"]', policy)
-        self.assertEqual(granted(policy), {"create", "read", "list"})
+        self.assertEqual(granted(policy), {"create", "read", "list", "update"})
         self.assertIn('path "kv/data/{{ policy_environment }}/nodes/*"', policy)
+        # `update` тут ровно один и только на отзыв токена, не на секреты.
+        self.assertNotIn('"update"', policy[: policy.index('path "auth/token/revoke-self"')])
 
         deployer = (
             REPO_ROOT / "roles" / "platform_vault" / "templates" / "policy-fleet-deployer.hcl.j2"
         ).read_text(encoding="utf-8")
         # Право записи не должно было протечь в политику обычной выкатки: она
-        # читает секреты всего окружения, включая пароли PostgreSQL.
-        self.assertEqual(granted(deployer), {"read", "list"})
+        # читает секреты всего окружения, включая пароли PostgreSQL. `update`
+        # здесь — только отзыв токена, к путям `kv/` он не относится.
+        self.assertEqual(granted(deployer), {"read", "list", "update"})
+        self.assertNotIn("create", deployer)
+
+        # Обе роли заводятся с `token_no_default_policy=true`, а право звать
+        # `auth/token/revoke-self` приходит именно с `default`. Без явного пути
+        # отзыв отвергается, и токен доживает весь TTL на исполнителе — то
+        # есть отзыв, ради которого код и писался, молча не работает.
+        #
+        # Заглушка Vault в тестах отвечает 204 на любой POST и политику не
+        # применяет, поэтому тест на отзыв этого поймать не может: он
+        # проверяет, что запрос отправлен, а не что он принят. Поймал первый
+        # прогон против настоящего Vault.
+        operator_source = (
+            REPO_ROOT / "roles" / "platform_vault" / "templates" / "spiritvpn-vault-operator.j2"
+        ).read_text(encoding="utf-8")
+        self.assertIn("token_no_default_policy=true", operator_source)
+        for source in (policy, deployer):
+            self.assertIn('path "auth/token/revoke-self"', source)
 
         operator = (
             REPO_ROOT / "roles" / "platform_vault" / "templates" / "spiritvpn-vault-operator.j2"

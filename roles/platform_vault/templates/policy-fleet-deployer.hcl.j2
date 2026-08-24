@@ -7,3 +7,12 @@ path "kv/data/{{ policy_environment }}/*" {
 path "kv/metadata/{{ policy_environment }}/*" {
   capabilities = ["read", "list"]
 }
+
+# Отзыв собственного токена. Право обычно приходит с политикой `default`, но
+# роль заводится с `token_no_default_policy=true`, и без явного пути отзыв
+# отвергался: резолвер печатал `Vault self-revocation failed` предупреждением и
+# продолжал, а токен с доступом ко всем секретам окружения оставался валидным
+# до конца TTL на исполнителе. Отзыв ради этого и делался.
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}

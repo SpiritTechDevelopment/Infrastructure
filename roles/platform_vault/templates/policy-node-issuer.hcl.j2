@@ -20,3 +20,12 @@ path "kv/data/{{ policy_environment }}/nodes/*" {
 path "kv/metadata/{{ policy_environment }}/nodes/*" {
   capabilities = ["read", "list"]
 }
+
+# Отзыв собственного токена. Обычно это право приходит с политикой `default`,
+# но роль заводится с `token_no_default_policy=true`, и без явного пути отзыв
+# отвергается — токен доживает весь TTL как готовый к употреблению доступ на
+# запись под `nodes/`. Поймано первым же прогоном против настоящего Vault:
+# `warning: Vault self-revocation failed`.
+path "auth/token/revoke-self" {
+  capabilities = ["update"]
+}
