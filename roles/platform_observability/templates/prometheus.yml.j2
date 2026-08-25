@@ -39,6 +39,20 @@ scrape_configs:
           environment: management
           node_role: control
           instance_id: management
+
+  - job_name: management/vault
+    scheme: https
+    metrics_path: /v1/sys/metrics
+    params:
+      format: [prometheus]
+    tls_config:
+      ca_file: {{ platform_observability_vault_ca_container_file }}
+    static_configs:
+      - targets: ["{{ platform_observability_vault_address }}"]
+        labels:
+          environment: management
+          node_role: control
+          instance_id: management
 {% for environment in platform_observability_environments %}
 {% for job in platform_observability_jobs %}
 

@@ -26,6 +26,10 @@ platform_prometheus_bind_address: 127.0.0.1
 platform_prometheus_port: 9090
 platform_prometheus_scrape_timeout_seconds: 10
 
+platform_observability_vault_address: 127.0.0.1:8200
+platform_observability_vault_ca_file: /opt/spiritvpn/platform/vault/tls/vault-ca.crt
+platform_observability_vault_ca_container_file: /etc/prometheus/vault-ca.crt
+
 # One shared instance serves both environments, the way one Vault does.
 # Isolation is by write surface: each environment's control deployment writes
 # only its own file_sd fragments under targets/<environment>/.

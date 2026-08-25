@@ -40,6 +40,7 @@ services:
     volumes:
       - {{ platform_observability_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - {{ platform_observability_targets_dir }}:{{ platform_prometheus_targets_container_dir }}:ro
+      - {{ platform_observability_vault_ca_file }}:{{ platform_observability_vault_ca_container_file }}:ro
       - {{ platform_prometheus_rules_dir }}:{{ platform_prometheus_rules_container_dir }}:ro
       - {{ platform_observability_state_dir }}:/prometheus
 

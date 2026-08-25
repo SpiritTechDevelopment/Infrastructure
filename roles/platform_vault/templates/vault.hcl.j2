@@ -12,6 +12,15 @@ listener "tcp" {
   tls_cert_file   = "/vault/tls/vault.crt"
   tls_key_file    = "/vault/tls/vault.key"
   tls_min_version = "tls13"
+
+  telemetry {
+    unauthenticated_metrics_access = true
+  }
+}
+
+telemetry {
+  prometheus_retention_time = "{{ platform_vault_telemetry_retention }}"
+  disable_hostname          = true
 }
 
 api_addr     = "https://{{ platform_vault_tls_server_name }}:{{ platform_vault_api_port }}"
