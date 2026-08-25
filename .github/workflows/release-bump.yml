@@ -1,38 +1,19 @@
 name: release-bump
 
 # Репозитории бэкенда и агента сообщают сюда digest опубликованного образа.
-# Это уведомление о факте, а не команда на выкатку: что из него следует, решает
-# инфраструктура.
-#
-# Digest всегда доезжает до среды коммитом. Если бы версия ехала параметром
-# workflow, Git перестал бы описывать работающую систему: impact plan считался
-# бы против устаревшей базы, а следующий рутинный прогон вернул бы старую
-# версию из desired state и молча откатил среду.
-#
-# Этот workflow только доводит изменение до main. После успешного CI точного
-# коммита desired-state-deploy reconciles состояние — потому что источником
-# истины является проверенный main, а не то, что здесь посчитали. Благодаря
-# этому ручная правка digest'а оператором раскатывается тем же путём, что и
-# автоматическая, а исправление CI повторяет ранее заблокированный apply.
 on:
   repository_dispatch:
     types: [control-release, agent-release, bot-release]
 
-# Пишет в репозиторий отдельный токен, а не GITHUB_TOKEN: слияние, выполненное
-# от GITHUB_TOKEN, не порождает событий, и выкатка после него не запустилась бы.
 permissions:
   contents: read
 
-# Два предложения для одной среды одновременно не нужны; develop и prod друг
-# друга не блокируют.
 concurrency:
   group: release-bump-${{ github.event.client_payload.environment }}
   cancel-in-progress: false
 
 jobs:
   bump:
-    # The encrypted topology is opened only on the dedicated runner. Its age
-    # identity is local to that host and is never supplied as a GitHub secret.
     runs-on: [self-hosted, linux, spiritvpn-deploy]
     env:
       COMPONENT: ${{ github.event.action }}
@@ -53,9 +34,6 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.INFRA_PUSH_TOKEN }}
 
-      # Полезная нагрузка пришла из другого репозитория по сети и доверенной не
-      # является. Проверяется форма каждого поля целиком: без якоря `$` строка
-      # `develop; rm -rf /` прошла бы проверку «начинается с develop».
       - name: Validate the payload
         run: |
           set -euo pipefail
@@ -104,9 +82,6 @@ jobs:
       - name: Install fleetctl
         run: python -m pip install .
 
-      # topology-release decrypts and mutates in process memory. Its stdout is
-      # already new SOPS ciphertext; no plaintext desired-state file is ever
-      # created in the Actions workspace.
       - name: Apply the release to desired state
         run: |
           set -euo pipefail
@@ -144,24 +119,16 @@ jobs:
           test -s "$candidate"
           cp "$candidate" "$file"
 
-      # Автоматическая правка обязана быть узкой. Любой лишний файл означает
-      # ошибку в выражении yq, а не изменение релиза.
       - name: Refuse an unexpected change
         run: |
           set -euo pipefail
           test "$(git diff --name-only)" = "desired/environments/${ENVIRONMENT}/topology.sops.yml"
 
-      # Локальная проверка до открытия pull request: сломанное предложение не
-      # должно доходить до ревьюера и занимать очередь проверок.
       - name: Validate desired state
         run: |
           set -euo pipefail
           python -m fleetctl.cli validate --environment "$ENVIRONMENT"
 
-      # develop едет в main сразу — коммит здесь нужен машине, а не ревьюеру.
-      # prod останавливается на pull request: продвижение версии в прод есть
-      # решение человека, а не следствие успешной сборки. Слить его нужно
-      # вручную; выкатку запустит успешный CI коммита после слияния в main.
       - name: Land the release
         env:
           GH_TOKEN: ${{ secrets.INFRA_PUSH_TOKEN }}

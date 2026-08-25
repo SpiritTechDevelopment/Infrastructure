@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Validate encrypted topology envelopes without possessing a decryption key."""
 
 from __future__ import annotations
 
@@ -32,8 +31,6 @@ def encrypted_leaves(value: Any, path: str) -> list[str]:
     elif isinstance(value, list):
         for index, child in enumerate(value):
             issues.extend(encrypted_leaves(child, f"{path}[{index}]"))
-    # SOPS deliberately preserves null because it carries no scalar value to
-    # disclose; schemas use null to mean "inherit the runtime default".
     elif value is not None and (
         not isinstance(value, str) or not ENC_RE.fullmatch(value)
     ):
@@ -42,12 +39,6 @@ def encrypted_leaves(value: Any, path: str) -> list[str]:
 
 
 def load_creation_rules(root: Path) -> tuple[list[tuple[re.Pattern[str], set[str]]], list[str]]:
-    """Читает `.sops.yaml` как объявление того, кто обязан уметь расшифровать.
-
-    Возвращает правила в объявленном порядке: SOPS применяет первое совпавшее,
-    и проверка обязана вести себя так же, иначе она подтвердит не то правило,
-    по которому файл был зашифрован.
-    """
     issues: list[str] = []
     path = root / ".sops.yaml"
     try:
@@ -127,11 +118,6 @@ def check_sops_metadata(
         ):
             issues.append(f"{path}: wrapped age data key is missing")
 
-    # Равенство множеств, а не счётчик. Добавление получателя в .sops.yaml не
-    # перешифровывает существующие файлы: без `sops updatekeys` новый оператор
-    # не расшифрует ничего, а отозванный — продолжит расшифровывать всё. Второе
-    # опаснее и незаметнее, и раньше проходило проверку, потому что она считала
-    # стансы, а не сверяла их с объявлением.
     if declared is None:
         issues.append(
             f"{path}: no .sops.yaml creation rule matches {relative or path.name}"
@@ -250,9 +236,6 @@ def check(root: Path) -> list[str]:
         if sops.get("encrypted_regex") != "^(spec)$":
             issues.append(f"{topology}: SOPS encrypted_regex must cover spec")
 
-    # Контракт доступа к платформе — тот самый файл, который правит выдача и
-    # отзыв операторского доступа. Без него проверка получателей не покрывала
-    # ровно ту поверхность, ради которой она и нужна.
     platform = root / "inventories" / "bootstrap" / "platform.sops.yml"
     if platform.is_file():
         document = load_document(platform, issues)

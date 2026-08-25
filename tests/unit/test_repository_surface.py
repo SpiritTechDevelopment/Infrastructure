@@ -94,7 +94,6 @@ class RepositorySurfaceTests(unittest.TestCase):
                 # локально: приватная половина не должна покидать машину, где
                 # стоит Vault. Сам ничего не пишет — ни в Vault, ни в топологию.
                 "node-prepare.py",
-                "vendor-backend-contract.sh",
                 # Read-only triage of a deployment run. Lives here because the
                 # job-level log endpoint is the only one reachable from the
                 # workstation, and because a green PLAY RECAP on a red run means

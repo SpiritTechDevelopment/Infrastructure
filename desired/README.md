@@ -1,57 +1,63 @@
-# Desired state
+# Желаемое состояние
 
-This directory is the human-edited source of truth for infrastructure topology.
-It must contain references to secrets, never secret values.
+Каталог для топологии инфраструктуры. 
 
-- `common/` contains shared defaults encrypted in place with SOPS.
-- `fleet-ids.yml` is the SOPS-encrypted append-only mapping from fleet
-  identifiers to numeric `vpn_fleet_id` values.
-- `environments/` contains one encrypted topology for each isolated
-  `develop` and `prod` environment.
+- `common/` содержит общие параметры, зашифрованные на месте через SOPS.
+- `fleet-ids.yml` — зашифрованное SOPS append-only соответствие идентификаторов
+  флота числовым значениям `vpn_fleet_id`.
+- `environments/` содержит по одной зашифрованной топологии на каждое
+  изолированное окружение — `develop` и `prod`.
 
-An `Environment` may also contain `spec.control`: immutable backend,
-migration and PostgreSQL images plus environment-scoped Vault references. The
-compiler then emits `control-plan.json`. The complete non-secret example is in
-`tests/fixtures/valid/desired/environments/develop/environment.yml`.
+`Environment` может дополнительно содержать `spec.control`: неизменяемые образы
+бэкенда, миграций и PostgreSQL, публичную точку входа, списки авторизации и
+релиз бота. Компилятор в этом случае выпускает `control-plan.json`. Полный
+несекретный пример лежит в
+`tests/fixtures/valid/desired/environments/develop/topology.yml`.
 
-Validate all environments without network access:
+Проверить все окружения без доступа к сети:
 
 ```bash
 make fleet-validate
 ```
 
-Render the current environment projections:
+Отрисовать проекции текущего окружения:
 
 ```bash
 make fleet-render ENVIRONMENT=develop
 ```
 
-Compare it with an explicit previously deployed desired-state directory:
+Спланировать `HEAD` относительно ref'а выкатки:
+
+```bash
+make fleet-plan ENVIRONMENT=develop
+```
+
+Сравнить с явно указанным каталогом ранее выкаченного желаемого состояния
+(режим только для тестов, `SOURCE` при этом задавать нельзя):
 
 ```bash
 make fleet-plan ENVIRONMENT=develop BASELINE=path/to/desired
 ```
 
-`develop` declares the live fleet: one entry in Russia and one exit in Romania.
-`prod` is still an intentionally empty placeholder, containing
-neither a fleet nor a control release. A complete synthetic fleet and control
-stack live under `tests/fixtures/valid/`.
+`develop` объявляет живой флот: один вход в России и один выход в Румынии.
+`prod` — намеренно оставленная заглушка: в нём нет ни флота, ни релиза
+control-плоскости. Полный синтетический флот и control-стек лежат под
+`tests/fixtures/valid/`.
 
-Each live environment is represented by one `EnvironmentTopology` document
-named `topology.sops.yml`. Per-object files remain supported only for synthetic
-test fixtures; they may not be mixed with a topology bundle. Git carries Vault
-references, never secret values, and encrypts the complete environment payload,
-including addresses, ports, domains and release pins.
+Каждое живое окружение представлено одним документом `EnvironmentTopology` с
+именем `topology.sops.yml`.
 
-The management executor and the dedicated self-hosted runner each own a separate
-age identity with mode `0600`. Their private identities are neither returned to
-GitHub nor committed to Git; trusted processes receive only the local file path
-through `SOPS_AGE_KEY_FILE`. A third recipient is held for operator recovery.
+Управляющий исполнитель и выделенный self-hosted runner владеют каждый своей
+age-идентичностью с правами `0600`. Их приватные идентичности не возвращаются в
+GitHub и не коммитятся в Git; доверенные процессы получают только локальный путь
+к файлу через `SOPS_AGE_KEY_FILE`. Третий получатель держится для
+восстановления оператором.
 
-`fleetctl` decrypts a SOPS document to process memory and never writes plaintext
-beside it. A missing or invalid age identity is a validation failure, not a
-reason to accept the encrypted placeholders as desired state.
+`fleetctl` расшифровывает документ SOPS в память процесса. Отсутствующая или неверная age-идентичность — ошибка валидации.
 
-Some components are declared through a reviewed registry mirror because direct
-access to their canonical registries is unavailable from one traffic-node
-network. See the comments in `common/components.yml`.
+Из сети, где стоит entry-нода, Docker Hub и quay.io не отвечают — соединение
+виснет до таймаута. Поэтому `nginx_mask`, `alloy` и `node_exporter` тянутся
+через зеркало `mirror.gcr.io`. Подмену исключает пин по digest: у первых двух
+он тот же, что на Docker Hub. У `node_exporter` digest другой — зеркало отдаёт
+копию из Docker Hub вместо quay. Подробности — в комментариях
+`common/components.yml`.

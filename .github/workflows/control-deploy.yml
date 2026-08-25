@@ -8,17 +8,6 @@ on:
         required: true
         type: choice
         options: [develop, prod]
-      # Пусто — текущая голова main, разрешаемая здесь же, на стороне GitHub.
-      #
-      # Раньше поле было обязательным, и оператор брал значение локальной
-      # командой. Коммиты с digest'ами образов пушит `release-bump` из CI, а не
-      # человек, поэтому `origin/main` на станции о них не знает до `fetch` — и
-      # 2026-08-24 в форму уехал коммит полуторачасовой давности. Выкатка
-      # прошла успешно и раскатала вчерашний образ бота: откат на предка `main`
-      # законен, отличить его от опечатки контур не мог.
-      #
-      # Явный SHA остаётся ради того, ради чего поле и заводилось, — осознанного
-      # отката.
       source_git_sha:
         description: Infrastructure commit SHA; empty means the current head of main
         required: false
@@ -31,8 +20,6 @@ on:
         options: [check, apply]
 
   # Вызов из release-bump после того, как коммит с новым digest лёг в main.
-  # `type: choice` в workflow_call не существует, поэтому допустимые значения
-  # проверяет сам job — иначе вызывающая сторона могла бы передать что угодно.
   workflow_call:
     inputs:
       environment:
@@ -55,23 +42,10 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, linux, spiritvpn-deploy]
-    # `environment:` намеренно отсутствует. Организация на плане free с
-    # приватными репозиториями: environments там недоступны, поэтому задача,
-    # объявившая среду, не начинает выполняться вовсе — падает с нулём шагов,
-    # ничего не сообщая. Ни защиты, ни отдельного хранилища секретов эта
-    # строка здесь не давала: required reviewers на free тоже нет, а секреты
-    # приходится держать на уровне репозитория.
-    #
-    # Разделение сред держится на другом и остаётся в силе: ключ
-    # github-deploy привязан к среде форсированной командой в authorized_keys
-    # исполнителя (roles/platform_executor), а сам скрипт отвергает всё, кроме
-    # develop и prod. Вернуть строку, когда план позволит environments.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          # Пустой ввод означает голову main. Ссылка разрешается здесь, на
-          # стороне GitHub, поэтому локальный `origin/main` оператора в выборе
-          # коммита больше не участвует.
+          # Пустой ввод означает head main.
           ref: ${{ inputs.source_git_sha || 'main' }}
           fetch-depth: 0
 
@@ -86,24 +60,19 @@ jobs:
           set -euo pipefail
           [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
           [[ "$REQUESTED_MODE" =~ ^(check|apply)$ ]]
-          # Пусто — берём то, что вычекано, то есть голову main на момент
-          # запуска. Дальше значение живёт в окружении задачи: шаги ниже обязаны
-          # видеть разрешённый коммит, а не исходный ввод.
           if [[ -z "$REQUESTED_SHA" ]]; then
             REQUESTED_SHA="$(git rev-parse HEAD)"
-            printf 'выкатывается текущая голова main: %s\n' "$REQUESTED_SHA"
+            printf 'выкатывается текущий head main: %s\n' "$REQUESTED_SHA"
           fi
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git merge-base --is-ancestor "$REQUESTED_SHA" refs/remotes/origin/main
-          # Явно названный коммит, оказавшийся не головой, — это откат. Он
-          # законен, но должен быть виден в логе: именно так выглядела выкатка
-          # вчерашнего образа, отчитавшаяся успехом.
+          # Явно названный коммит, оказавшийся не head, — это откат.
           head_sha="$(git rev-parse refs/remotes/origin/main)"
           if [[ "$REQUESTED_SHA" != "$head_sha" ]]; then
             behind="$(git rev-list --count "$REQUESTED_SHA..$head_sha")"
-            printf '::warning::выкатывается не голова main: запрошен %s, голова %s, отставание %s коммит(ов)\n' \
+            printf '::warning::выкатывается не head main: запрошен %s, head %s, отставание %s коммит(ов)\n' \
               "$REQUESTED_SHA" "$head_sha" "$behind"
           fi
           git config --local --unset-all http.https://github.com/.extraheader || true
@@ -143,9 +112,6 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$PLATFORM_SSH_HOST"
-          # `$SOURCE_SHA`, а не ввод: исполнитель сверяет переданный SHA с
-          # головой бандла и откажет на пустом. Именно здесь расхождение между
-          # тем, что вычекано, и тем, что объявлено, стало бы неотличимым.
           scripts/platform-remote.sh \
             "$PLATFORM_SSH_HOST" control-deploy \
             "$REQUESTED_ENVIRONMENT" "$SOURCE_SHA" "$REQUESTED_MODE" \

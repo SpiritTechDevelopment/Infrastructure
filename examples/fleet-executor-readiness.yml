@@ -1,5 +1,0 @@
----
-# Read-only smoke adapters. Keep empty until reviewed executable probes exist;
-# readiness then fails closed for any node that requires the missing adapter.
-spiritvpn_direct_smoke_argv: []
-spiritvpn_entry_exit_smoke_argv: []

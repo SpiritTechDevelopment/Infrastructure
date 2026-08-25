@@ -1,4 +1,4 @@
-"""Command-line interface for fleetctl."""
+"""CLI для fleetctl."""
 
 from __future__ import annotations
 
@@ -127,8 +127,6 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--bootstrap-vars", type=Path)
     deploy.add_argument("--compiled-secrets", type=Path)
     deploy.add_argument("--readiness-vars", type=Path)
-    # All three or none: a half-configured identity would fail at the wire
-    # rather than at the boundary, after the fleet has already been mutated.
     deploy.add_argument(
         "--backend-client-certificate",
         type=Path,
@@ -136,8 +134,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     deploy.add_argument("--backend-client-private-key", type=Path)
     deploy.add_argument("--backend-ca", type=Path, help="CA that signs the backend server")
-    # No default, for the same reason as pki-sign: the root key must not be
-    # reachable from a path the repository knows.
     deploy.add_argument(
         "--ca-state",
         type=Path,
@@ -162,8 +158,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_ca_arguments(command: argparse.ArgumentParser) -> None:
-    # --ca-state has no default on purpose. The root key must not land in the
-    # repository or in generated artifacts, and a default is the way it would.
     command.add_argument(
         "--ca-state",
         required=True,

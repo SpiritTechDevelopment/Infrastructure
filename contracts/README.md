@@ -1,22 +1,16 @@
-# Contracts
+# Контракты
 
-Versioned machine-readable contracts shared with services outside this infrastructure
-repository.
+Версионированные контракты, который репозиторий делит с другими.
 
-| Contract | Purpose |
+| Контракт | Цель |
 |---|---|
-| [`manifest/v1/manifest.proto`](manifest/v1/manifest.proto) | Infrastructure-to-backend full fleet manifest apply contract |
-| [`nodeagent/v1/node_agent.proto`](nodeagent/v1/node_agent.proto) | Backend-to-entry-agent control, inventory, health, usage, and privacy-reduced activity delivery |
+| [`manifest/v1/manifest.proto`](manifest/v1/manifest.proto) | Infrastructure-to-backend манифест |
+| [`nodeagent/v1/node_agent.proto`](nodeagent/v1/node_agent.proto) | Backend-to-entry-agent активность, health, usage |
 
-Compatibility rules:
+Совместимость:
 
-- a published package version is immutable;
-- additive protobuf changes use new field numbers;
-- removed field numbers are reserved;
-- breaking changes require a new package (`v2`, and so on);
-- generated code belongs in the consuming backend/agent repositories, not here.
-
-The normative backend behavior is vendored in
-[`backend/BACKEND_DOMAIN_AGREEMENTS.md`](backend/BACKEND_DOMAIN_AGREEMENTS.md).
-The infrastructure-owned delta to the backend is in
-[`backend/INFRA_DELTA.md`](backend/INFRA_DELTA.md).
+- версия опубликованного пакета не меняется;
+- для новых изменений в protobuf используются новые числа;
+- если поле однажды существовало в .proto, его номер нельзя повторно назначить другому полю после удаления;
+- изменения контракта требуют изменения версии (`v2`, and so on);
+- сгенерированный код принадлежит репозиториям агента/бэкенда;

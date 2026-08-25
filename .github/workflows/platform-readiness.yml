@@ -1,9 +1,5 @@
 name: platform-readiness
 
-# Окружение здесь не спрашивается: платформа общая, и `platform-readiness` в
-# списке forced-команд исполнителя аргументов не принимает. Выбор из двух
-# значений, ни одно из которых ни на что не влияет, обещал разделение сред,
-# которого на этом шаге нет.
 on:
   workflow_dispatch:
 
@@ -17,11 +13,6 @@ concurrency:
 jobs:
   readiness:
     runs-on: [self-hosted, linux, spiritvpn-deploy]
-    # `environment:` намеренно отсутствует — см. control-deploy.yml. На плане
-    # free с приватными репозиториями environments недоступны, и задача,
-    # объявившая среду, падает с нулём шагов, ничего не сообщая. Разделение
-    # сред держится на forced command в authorized_keys исполнителя
-    # (roles/platform_executor) и на проверке среды в самом скрипте.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Install the environment-protected SSH identity

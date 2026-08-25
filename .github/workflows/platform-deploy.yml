@@ -8,11 +8,6 @@ on:
         required: true
         type: choice
         options: [develop, prod]
-      # Пусто — текущая голова main, разрешаемая на стороне GitHub. Поле было
-      # обязательным, и оператор брал значение локальной командой; коммиты с
-      # digest'ами пушит CI, поэтому `origin/main` на станции о них не знает до
-      # `fetch`. Один раз это уже стоило выкатки вчерашнего образа, прошедшей
-      # успешно. Явный SHA остаётся для осознанного отката.
       source_git_sha:
         description: Commit SHA reachable from main; empty means the current head
         required: false
@@ -24,9 +19,6 @@ on:
         type: choice
         options: [check, apply]
 
-  # Вызов из desired-state-deploy. `type: choice` в workflow_call не существует,
-  # поэтому допустимые значения проверяет сам job — иначе вызывающая сторона
-  # могла бы передать что угодно.
   workflow_call:
     inputs:
       environment:
@@ -49,16 +41,9 @@ concurrency:
 jobs:
   deploy:
     runs-on: [self-hosted, linux, spiritvpn-deploy]
-    # `environment:` намеренно отсутствует — см. control-deploy.yml. На плане
-    # free с приватными репозиториями environments недоступны, и задача,
-    # объявившая среду, падает с нулём шагов, ничего не сообщая. Разделение
-    # сред держится на forced command в authorized_keys исполнителя
-    # (roles/platform_executor) и на проверке среды в самом скрипте.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          # Пустой ввод означает голову main: локальный `origin/main`
-          # оператора в выборе коммита больше не участвует.
           ref: ${{ inputs.source_git_sha || 'main' }}
           fetch-depth: 0
 
@@ -72,9 +57,6 @@ jobs:
           set -euo pipefail
           [[ "$REQUESTED_ENVIRONMENT" =~ ^(develop|prod)$ ]]
           [[ "$REQUESTED_MODE" =~ ^(check|apply)$ ]]
-          # Пусто — берём вычекнутое, то есть голову main на момент запуска.
-          # Дальше значение живёт в `$SOURCE_SHA`: шаги ниже обязаны видеть
-          # разрешённый коммит, а не исходный ввод.
           if [[ -z "$REQUESTED_SHA" ]]; then
             REQUESTED_SHA="$(git rev-parse HEAD)"
             printf 'выкатывается текущая голова main: %s\n' "$REQUESTED_SHA"
@@ -83,8 +65,6 @@ jobs:
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           git merge-base --is-ancestor "$REQUESTED_SHA" refs/remotes/origin/main
-          # Явно названный коммит, оказавшийся не головой, — это откат. Он
-          # законен, но обязан быть виден в логе.
           head_sha="$(git rev-parse refs/remotes/origin/main)"
           if [[ "$REQUESTED_SHA" != "$head_sha" ]]; then
             behind="$(git rev-list --count "$REQUESTED_SHA..$head_sha")"

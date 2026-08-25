@@ -1,7 +1,7 @@
 ---
 # Операторский доступ к управляющим поверхностям хаба: Grafana и Vault.
 # WireGuard он не заменяет — тот остаётся транспортом флота, и связь хаб → ноды,
-# выкатка и метрики идут через него. См. docs/architecture/NETBIRD_OVERLAY.md.
+# выкатка и метрики идут через него.
 
 # Пустой по умолчанию: образ обязан приезжать закреплённым по digest из
 # desired/common/components.yml через scripts/platform-component-vars.py.
