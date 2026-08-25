@@ -241,7 +241,15 @@ class XrayApiRuntimeTests(unittest.TestCase):
 class XrayBridgeRoutingTests(unittest.TestCase):
     """An exit must allow its static entry bridge before agent default-deny."""
 
-    def test_exit_static_bridge_clients_route_to_freedom(self) -> None:
+    @staticmethod
+    def xray_defaults() -> dict:
+        return yaml.safe_load(
+            (REPO_ROOT / "roles" / "xray" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def render_exit(self) -> dict:
         template = ansible_jinja().from_string(
             (REPO_ROOT / "roles" / "xray" / "templates" / "config.json.j2").read_text(
                 encoding="utf-8"
@@ -282,8 +290,12 @@ class XrayBridgeRoutingTests(unittest.TestCase):
             xray_manage_routing_via_agent=True,
             entry_default_exit_tag="",
             xray_entry_block_unmatched=True,
+            xray_private_networks=self.xray_defaults()["xray_private_networks"],
         )
-        config = json.loads(rendered)
+        return json.loads(rendered)
+
+    def test_exit_static_bridge_clients_route_to_freedom(self) -> None:
+        config = self.render_exit()
 
         bridge_rule = next(
             rule
@@ -300,6 +312,15 @@ class XrayBridgeRoutingTests(unittest.TestCase):
                 "ruleTag": "spirit-static:bridge:bridge-develop-entry-ru.to-develop-exit-ro",
             },
         )
+
+    def test_private_networks_are_blocked_first_without_geo_assets(self) -> None:
+        config = self.render_exit()
+        first = config["routing"]["rules"][0]
+        self.assertEqual(first["outboundTag"], "block")
+        for network in ("10.0.0.0/8", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12"):
+            self.assertIn(network, first["ip"])
+        for entry in first["ip"]:
+            self.assertFalse(entry.startswith(("geoip:", "geosite:")), entry)
 
 
 class SshPortHandoverTests(unittest.TestCase):

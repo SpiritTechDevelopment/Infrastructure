@@ -15,7 +15,7 @@ class DocumentationTests(unittest.TestCase):
     # на что ссылается код или контракт, а не то, чему хочется придать статус.
     def test_referenced_documents_exist(self) -> None:
         required = (
-            "ARCHITECTURE.md",
+            "docs/ARCHITECTURE.md",
             "contracts/README.md",
             "contracts/nodeagent/v1/node_agent.proto",
             "fleetctl/README.md",
@@ -31,7 +31,6 @@ class DocumentationTests(unittest.TestCase):
             "captured-state",
             "contracts/backend",
             "dev",
-            "docs",
             "examples",
             "governance",
         )

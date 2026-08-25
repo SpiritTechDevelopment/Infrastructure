@@ -112,7 +112,7 @@
   "routing": {
     "domainStrategy": "{{ xray_domain_strategy }}",
     "rules": [
-      { "type": "field", "ip": ["geoip:private"], "outboundTag": "{{ xray_block_outbound_tag }}" }
+      { "type": "field", "ip": {{ xray_private_networks | to_json }}, "outboundTag": "{{ xray_block_outbound_tag }}" }
 {% if xray_block_domains | length > 0 %}
       ,{ "type": "field", "domain": {{ xray_block_domains | to_json }}, "outboundTag": "block" }
 {% endif %}
