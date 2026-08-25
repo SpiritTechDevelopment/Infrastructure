@@ -1,10 +1,5 @@
 name: desired-state-deploy
 
-# Выкатка начинается только после успешного CI точного коммита main. Это
-# level-triggered reconcile: следующий зелёный commit применяет всё актуальное
-# состояние, даже если предыдущая выкатка была остановлена красным CI. Поэтому
-# workflow намеренно запускается и после изменений самого CI — именно такой
-# fix обязан закрывать накопившийся drift, а не ждать следующего релиза.
 on:
   workflow_run:
     workflows: [ci]
@@ -14,9 +9,6 @@ on:
 permissions:
   contents: read
 
-# Своя группа поверх групп вызываемых workflow. Без неё два пуша подряд дают
-# два перекрывающихся прогона, и порядок platform → control → fleet перестаёт
-# существовать: fleet первого пуша может уйти после platform второго.
 concurrency:
   group: desired-state-deploy
   cancel-in-progress: false
@@ -29,8 +21,6 @@ jobs:
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    # `actions: read` только ради истории прогонов этого же workflow: из неё
-    # берётся база сравнения ниже. Записи не даёт и на выкатку не влияет.
     permissions:
       contents: read
       actions: read
@@ -44,8 +34,6 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
-      # A manually rerun old CI must never roll main back. The successful CI
-      # SHA is accepted only while it is still the exact branch head.
       - name: Require the successful CI commit to remain current main
         env:
           SOURCE_GIT_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -53,23 +41,6 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
           test "$(git rev-parse refs/remotes/origin/main)" = "$SOURCE_GIT_SHA"
-
-      # База сравнения — коммит, который этот workflow в прошлый раз успешно
-      # свёл, а не родитель головного коммита.
-      #
-      # Родитель головного был здесь молчаливой ошибкой: push из трёх коммитов
-      # разбирался так, будто существует только последний, и контуры первых
-      # двух не выкатывались вовсе. Прогон при этом зелёный — то есть ровно тот
-      # тихий недовыкат, против которого построен весь этот шаг. Незаметно это
-      # было потому, что `BEFORE` никогда не задавался: в CI работала ветка
-      # умолчания, а в тестах переменная приходит снаружи, и обе стороны видели
-      # разный код.
-      #
-      # Один push даёт один прогон CI и один прогон этого workflow, поэтому
-      # головной коммит прошлого успешного прогона — это в точности состояние
-      # до текущего push. Если прошлый прогон упал, его дельта остаётся в
-      # сравнении и доедет следующим — это и есть обещанный level-triggered
-      # reconcile, а не декларация о нём.
       - name: Resolve the last successfully reconciled commit
         id: baseline
         env:
@@ -77,11 +48,6 @@ jobs:
         run: |
           set -euo pipefail
           reconciled="$RUNNER_TEMP/reconciled-runs"
-          # Сбой запроса и «успешных прогонов нет» — разные вещи, и разводятся
-          # они здесь намеренно. Подстановка процесса не роняет шаг: её код
-          # возврата не виден ни `set -e`, ни `pipefail`, поэтому запрос идёт
-          # отдельной командой. Иначе временная ошибка API читалась бы как
-          # отсутствие базы и разворачивала бы полную сверку всех контуров.
           gh api \
             "/repos/${GITHUB_REPOSITORY}/actions/workflows/desired-state-deploy.yml/runs?branch=main&status=success&per_page=50" \
             --jq '.workflow_runs[] | select(.conclusion == "success") | .head_sha' \
@@ -90,8 +56,6 @@ jobs:
           before=""
           while read -r candidate; do
             test -n "$candidate" || continue
-            # Коммит из прогона мог исчезнуть из истории после force-push.
-            # Сравнивать с недостижимым объектом нельзя.
             if git cat-file -e "${candidate}^{commit}" 2>/dev/null; then
               before="$candidate"
               break
@@ -99,23 +63,12 @@ jobs:
           done < "$reconciled"
 
           if test -z "$before"; then
-            # Успешной сверки в истории нет, значит неизвестно, что уже
-            # применено. Пустое дерево делает изменёнными все файлы: шаг ниже
-            # видит неопознанные пути и выкатывает все контуры во всех средах.
-            # Догадка о базе здесь стоила бы ровно того недовыката, который
-            # этот шаг и должен исключать.
             before="$(git hash-object -t tree /dev/null)"
             echo "нет успешной сверки в истории; сравнение идёт с пустым деревом" >&2
           fi
           printf 'before=%s\n' "$before" >> "$GITHUB_OUTPUT"
           echo "база сравнения: $before"
 
-      # Изменение относится к конкретной среде только если среда написана в
-      # самом пути. Всё остальное — роли, playbooks, компилятор, контракты,
-      # общие куски desired state — влияет на любую среду сразу, и разбирать,
-      # на какую именно, значило бы вести таблицу «путь → контур». Такая таблица
-      # и есть источник тихого недовыката, поэтому её здесь нет: неопознанный
-      # путь выкатывает все три контура во всех средах.
       - name: Split changed environments by area
         id: split
         env:
@@ -123,9 +76,6 @@ jobs:
           BEFORE: ${{ steps.baseline.outputs.before }}
         run: |
           set -euo pipefail
-          # BEFORE обязан прийти снаружи. Умолчание здесь раньше подставляло
-          # родителя головного коммита и теряло всё, что было в push раньше
-          # него; отсутствие базы — это отказ, а не повод угадывать.
           test -n "${BEFORE:-}"
           platform_list="$RUNNER_TEMP/platform"
           control_list="$RUNNER_TEMP/control"
@@ -134,31 +84,16 @@ jobs:
           : > "$control_list"
           : > "$fleet_list"
 
-          # Среды читаются из дерева, а не перечисляются здесь: объявленная
-          # среда, о которой не знает этот шаг, — ровно тот же тихий недовыкат.
           mapfile -t environments < <(
             find desired/environments -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
           )
 
-          # Первый push в ветку даёт нулевой BEFORE: сравнивать не с чем, и
-          # раскатывать по такому событию нельзя.
           if [[ "$BEFORE" =~ ^0+$ ]]; then
             echo "первый push в ветку; выкатка не выводится" >&2
           else
             global=false
             while read -r file; do
               test -n "$file" || continue
-
-              # Пути, которые не могут изменить ни один выкатываемый артефакт.
-              # Без этой отсечки любой коммит в тесты или документацию поднимал
-              # реконсиляцию всех трёх контуров на обоих окружениях, то есть
-              # уборка репозитория стоила как боевая выкатка.
-              #
-              # Список намеренно короткий: всё, что не доказано инертным,
-              # остаётся глобальным. `.github/` сюда не входит — правка самого
-              # пайплайна обязана закрывать накопившийся drift, см. заголовок
-              # файла. `roles/`, `scripts/`, `fleetctl/`, `contracts/` и
-              # `desired/common/` тоже не входят: они едут на хосты.
               case "$file" in
                 tests/*|docs/*|*.md)
                   continue
@@ -172,10 +107,6 @@ jobs:
               fi
 
               case "$file" in
-                # A SOPS topology cannot be safely split by inspecting fields
-                # on GitHub-hosted CI. Treat it conservatively as the complete
-                # environment contract; downstream impact planning still
-                # limits actual node work.
                 */topology.yml|*/topology.yaml|*/topology.sops.yml|*/topology.sops.yaml)
                   echo "$environment" >> "$platform_list"
                   echo "$environment" >> "$control_list"
@@ -184,12 +115,6 @@ jobs:
                 */platform/*)
                   echo "$environment" >> "$platform_list"
                   ;;
-                # Раскладка по объектам снята: окружение объявляется одним
-                # `topology.yml`, и ветки под `environment.yml` и под
-                # `nodes/`|`fleets/`|`instances/` вместе с ней. Всё, что
-                # появится рядом с топологией и не будет опознано, попадает
-                # сюда — и трактуется как описание флота, потому что
-                # under-deployment здесь дороже лишнего прогона.
                 *)
                   echo "$environment" >> "$fleet_list"
                   ;;
@@ -202,19 +127,6 @@ jobs:
               printf '%s\n' "${environments[@]}" >> "$fleet_list"
             fi
           fi
-
-          # prod через автоматический путь не проходит.
-          #
-          # Задумано было иначе: предполагалось, что вызываемый workflow встанет
-          # на одобрении GitHub Environment. Такого гейта не существует —
-          # control-deploy.yml объясняет, почему `environment:` там намеренно
-          # отсутствует: на плане free с приватными репозиториями environments
-          # недоступны, required reviewers тоже. То есть без этой отсечки пуш в
-          # desired/environments/prod/topology.sops.yml выкатил бы prod в apply
-          # без единого подтверждения.
-          #
-          # Отсекается здесь, а не фильтром путей в триггере: так причина видна
-          # на месте решения и переживёт расширение путей.
           for list in "$platform_list" "$control_list" "$fleet_list"; do
             if grep -qx prod "$list"; then
               echo "prod изменился, но автоматический путь его не выкатывает: гейта одобрения нет" >&2
@@ -229,16 +141,6 @@ jobs:
             echo "$area: $(sort -u "$list" | tr '\n' ' ')"
           done
 
-  # Второго гейта здесь нет: одобрение GitHub Environment недоступно на плане
-  # free, и вызываемые workflow его не объявляют. Автоматическому пути доверен
-  # только develop — prod отсекается в detect выше и выкатывается dispatch'ем.
-  #
-  # Порядок platform → control → fleet — это порядок зависимостей, а не вкуса:
-  # хаб несёт Vault и исполнителя, из которых работают две другие выкатки, а
-  # бэкенд принимает манифест, который потом описывает ноды. Каждое звено
-  # пропускается, когда его контур не затронут, поэтому у следующих стоит
-  # `!failure() && !cancelled()`, а не обычный `success()`: пропущенное звено
-  # обязано пропускать дальше, упавшее — останавливать.
   deploy-platform:
     needs: [detect]
     if: needs.detect.outputs.platform != '[]'
@@ -276,11 +178,6 @@ jobs:
     if: >-
       !failure() && !cancelled() &&
       needs.detect.outputs.fleet != '[]'
-    # Потолок прав вызванного workflow, а не выданное право: внутри
-    # fleet-deploy.yml запись остаётся у одной задачи promote, а сама выкатка
-    # по-прежнему идёт с contents: read. Без этой строки вызванный workflow
-    # получил бы read сверху и не смог бы передвинуть запись о развёрнутом —
-    # реактивный путь молча оставлял бы ref позади.
     permissions:
       contents: write
     strategy:
@@ -296,3 +193,35 @@ jobs:
       resume: false
       allow_destructive: false
     secrets: inherit
+
+  report:
+    needs: [detect, deploy-platform, deploy-control, deploy-fleet]
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Report the stopped reconciliation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_GIT_SHA: ${{ github.event.workflow_run.head_sha }}
+          RESULT_DETECT: ${{ needs.detect.result }}
+          RESULT_PLATFORM: ${{ needs.deploy-platform.result }}
+          RESULT_CONTROL: ${{ needs.deploy-control.result }}
+          RESULT_FLEET: ${{ needs.deploy-fleet.result }}
+        run: |
+          set -euo pipefail
+          marker='Сверка desired state остановлена'
+          body="$(printf '%s\n\nКоммит: %s\nПрогон: %s\n\ndetect: %s\nplatform: %s\ncontrol: %s\nfleet: %s\n' \
+            "Автоматическая сверка не довела main до сред." \
+            "$SOURCE_GIT_SHA" "$RUN_URL" \
+            "$RESULT_DETECT" "$RESULT_PLATFORM" "$RESULT_CONTROL" "$RESULT_FLEET")"
+          existing="$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title | startswith(\"$marker\"))] | .[0].number // empty")"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$marker на ${SOURCE_GIT_SHA:0:12}" --body "$body"
+          fi
