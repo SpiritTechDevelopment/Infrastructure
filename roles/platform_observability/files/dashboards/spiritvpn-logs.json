@@ -1,0 +1,133 @@
+{
+  "uid": "spiritvpn-logs",
+  "title": "SpiritVPN — логи",
+  "description": "Логи контейнеров с фильтрацией по среде, серверу, сервису и контейнеру.",
+  "tags": ["spiritvpn", "logs"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "10s",
+  "time": {"from": "now-1h", "to": "now"},
+  "graphTooltip": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "environment",
+        "label": "Среда",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
+        "definition": "label_values(environment)",
+        "query": "label_values(environment)",
+        "refresh": 1,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {"selected": true, "text": "All", "value": "$__all"}
+      },
+      {
+        "name": "host",
+        "label": "Сервер",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
+        "definition": "label_values({environment=~\"$environment\"}, host)",
+        "query": "label_values({environment=~\"$environment\"}, host)",
+        "refresh": 1,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {"selected": true, "text": "All", "value": "$__all"}
+      },
+      {
+        "name": "service",
+        "label": "Сервис",
+        "description": "Например: backend, node-agent, postgres, xray.",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
+        "definition": "label_values({environment=~\"$environment\", host=~\"$host\"}, service)",
+        "query": "label_values({environment=~\"$environment\", host=~\"$host\"}, service)",
+        "refresh": 1,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {"selected": true, "text": "All", "value": "$__all"}
+      },
+      {
+        "name": "container",
+        "label": "Контейнер",
+        "type": "query",
+        "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
+        "definition": "label_values({environment=~\"$environment\", host=~\"$host\", service=~\"$service\"}, container)",
+        "query": "label_values({environment=~\"$environment\", host=~\"$host\", service=~\"$service\"}, container)",
+        "refresh": 1,
+        "sort": 1,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {"selected": true, "text": "All", "value": "$__all"}
+      },
+      {
+        "name": "search",
+        "label": "Поиск в сообщении",
+        "description": "Регулярное выражение RE2; пустое значение показывает все строки.",
+        "type": "textbox",
+        "query": "",
+        "current": {"selected": true, "text": "", "value": ""}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Поток логов по сервисам",
+      "description": "Количество строк за интервал. Резкий рост обычно означает цикл ошибок или слишком подробный log level.",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+      "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "min": 0, "custom": {"fillOpacity": 12, "lineWidth": 1}},
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "table", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "desc"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (count_over_time({environment=~\"$environment\", host=~\"$host\", service=~\"$service\", container=~\"$container\"} |~ \"$search\" [$__interval]))",
+          "legendFormat": "{{service}}",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "logs",
+      "title": "Логи контейнеров",
+      "description": "Backend: service=backend; NodeAgent: service=node-agent. Метки строки содержат среду, сервер, сервис и полное имя контейнера.",
+      "gridPos": {"h": 22, "w": 24, "x": 0, "y": 8},
+      "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
+      "options": {
+        "showTime": true,
+        "showLabels": true,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending",
+        "dedupStrategy": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{environment=~\"$environment\", host=~\"$host\", service=~\"$service\", container=~\"$container\"} |~ \"$search\"",
+          "queryType": "range"
+        }
+      ]
+    }
+  ]
+}

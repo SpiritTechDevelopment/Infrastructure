@@ -49,6 +49,7 @@ loki.write "hub" {
 
   external_labels = {
     environment   = "{{ spiritvpn_node_plan.environment }}",
+    host          = "{{ ansible_hostname }}",
     logical_node  = "{{ spiritvpn_node_plan.logical_node.id }}",
     instance      = "{{ spiritvpn_node_plan.instance.id }}",
     role          = "{{ spiritvpn_node_plan.logical_node.role }}",

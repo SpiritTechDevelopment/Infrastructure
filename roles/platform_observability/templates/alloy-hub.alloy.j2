@@ -33,9 +33,15 @@ discovery.relabel "containers" {
     target_label  = "compose_project"
   }
 
-  // Среда выводится из имени compose-проекта, потому что control-стек
-  // называется spiritvpn-control-<среда>. У платформенных контейнеров метки не
-  // будет вовсе: Vault и коллектор общие и ничьей среде не принадлежат.
+  // Единая метка нужна каскадному фильтру Grafana. Платформенные контейнеры
+  // принадлежат management; следующее правило заменит значение для control.
+  rule {
+    target_label = "environment"
+    replacement  = "management"
+  }
+
+  // Среда control выводится из имени compose-проекта, потому что стек
+  // называется spiritvpn-control-<среда>.
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
     regex         = "spiritvpn-control-(develop|prod)"
