@@ -61,7 +61,7 @@ spec:
                         image:
                             repository: ENC[AES256_GCM,data:yGzduPhksFQTiPXWMGv3vPo3izRQoZUrBY4+k5BLJpU=,iv:TpsrppWD5Kuqrf5iOZlTWV8qKz3UP2NH1zxLQU3G9qo=,tag:C/pvObNcksGUiCFA3tKDHA==,type:str]
                             digest: ENC[AES256_GCM,data:cAQ9TwM6qK/vqtD4jrX7M1TAANLHDhT8PANTZwdl/u+QonphXNUl8Kuor7DCz2C/a3ghQbrEcTPQCakuk9xEnoupcXCKZfQ=,iv:bkqwT8Ec4j5eiMf62Aam7QmSsmQ0g3LEiJremr84B6Y=,tag:6c82Dk/Nor2c2gIz8TjtDA==,type:str]
-                        hostname: ENC[AES256_GCM,data:8at9zjwqKiJ5TbIfecILvQUVTQ==,iv:vrIGEUXvth64aSTfEichxmxVJxPen5mBLTjH7Asy17M=,tag:Be+dISG8rVqXbuCEAFmBDQ==,type:str]
+                        hostname: ENC[AES256_GCM,data:8SWKDEhG+54CeNmqfMNI,iv:YPEYFNx9r6+PdGqxOTSjQLZ9JprC6+F1ey1XV+QyF3s=,tag:Pln68UEGqyeygVwZTdZk3Q==,type:str]
             common_overrides:
                 components:
                     node_agent:
@@ -182,6 +182,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age1r3tvuhn9g7csftpe9fxdfvpfw23aryhttcz2ft5hp4pg9jj8vvhq68fanx
     encrypted_regex: ^(spec)$
-    lastmodified: "2026-08-25T22:05:12Z"
-    mac: ENC[AES256_GCM,data:5anej/i/WSALVedTeeQ+2s6BhCXPiBHTPhN6tA97XhBt+U0Rj1eSfaL5IGwogxa1upa3nlPBDvK4EJDwRCQCx4HtQHGUHb1imPnvwUlIeLe3HvXIXre5ofoqjPvyfhsy56StZRAGyqlTkv0fH9wY2DJltthV4VBzXRN7o34ZmXk=,iv:qEfOF30PSd5kXRSxv7H7SBhSbexiE+C5uklBKi524Ww=,tag:zsjMyJTdYP0CMxBBnqEN5Q==,type:str]
+    lastmodified: "2026-08-25T22:11:11Z"
+    mac: ENC[AES256_GCM,data:S4T1eaPFB9vhR3BW8m6nMApeWvnChlbNOfFqvu3iDRRbaIMOld9LvCtNL7+Dt/jb9PXwVXKoG+Q5zw1/T+RwfQQdaQytXDg0jjlB3BREvBfmzPUL/F2ZKh3tTnBeDXwEmEc0cn8U2V7wYSf+FU/RNAPT9IwfmRMhNbkwCQY+Wzo=,iv:bpuSpnQEvlqD8K+g2lSvsGtqqkwCbe6tI6B66gt+sfk=,tag:jaipso0sPc2YIzKkN+ntJA==,type:str]
     version: 3.13.3
