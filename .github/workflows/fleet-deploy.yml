@@ -8,11 +8,6 @@ on:
         required: true
         type: choice
         options: [develop, prod]
-      # Пусто — текущая голова main, разрешаемая на стороне GitHub. Поле было
-      # обязательным, и оператор брал значение локальной командой; коммиты с
-      # digest'ами пушит CI, поэтому `origin/main` на станции о них не знает до
-      # `fetch`. Один раз это уже стоило выкатки вчерашнего образа, прошедшей
-      # успешно. Явный SHA остаётся для осознанного отката.
       source_git_sha:
         description: Commit SHA reachable from main; empty means the current head
         required: false
@@ -40,8 +35,6 @@ on:
         type: boolean
 
   # Вызов из release-bump после того, как коммит с новым digest лёг в main.
-  # `type: choice` в workflow_call не существует, поэтому допустимые значения
-  # проверяет сам job — иначе вызывающая сторона могла бы передать что угодно.
   workflow_call:
     inputs:
       environment:
@@ -78,16 +71,9 @@ jobs:
       source_git_sha: ${{ steps.source.outputs.source_git_sha }}
       baseline: ${{ steps.source.outputs.baseline }}
       baseline_git_sha: ${{ steps.source.outputs.baseline_git_sha }}
-    # `environment:` намеренно отсутствует — см. control-deploy.yml. На плане
-    # free с приватными репозиториями environments недоступны, и задача,
-    # объявившая среду, падает с нулём шагов, ничего не сообщая. Разделение
-    # сред держится на forced command в authorized_keys исполнителя
-    # (roles/platform_executor) и на проверке среды в самом скрипте.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          # Пустой ввод означает голову main: локальный `origin/main`
-          # оператора в выборе коммита больше не участвует.
           ref: ${{ inputs.source_git_sha || 'main' }}
           fetch-depth: 0
 
@@ -96,6 +82,7 @@ jobs:
         shell: bash
         env:
           REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          REQUESTED_SHA: ${{ inputs.source_git_sha }}
           REQUESTED_MODE: ${{ inputs.mode }}
           REQUESTED_INITIAL: ${{ inputs.initial }}
         run: |
@@ -128,9 +115,6 @@ jobs:
             test "$REQUESTED_INITIAL" = false
             git fetch --no-tags origin "+$deployment_ref:$deployment_ref"
             printf 'baseline=present\n' >> "$GITHUB_OUTPUT"
-            # Читается здесь, до всякой выкатки, и переносится в задачу promote
-            # как ожидаемое прежнее значение. База, прочитанная после выкатки,
-            # доказывала бы только то, что ref не менялся между двумя чтениями.
             printf 'baseline_git_sha=%s\n' "$(git rev-parse "$deployment_ref^{commit}")" \
               >> "$GITHUB_OUTPUT"
           else
@@ -185,10 +169,6 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$PLATFORM_SSH_HOST"
-          # `tee` вместо простого вывода: последним на stdout исполнитель печатает
-          # запись о развёртывании, и она — единственный отчёт о том, чего выкатка
-          # на самом деле достигла. `pipefail` уже включён, так что упавший ssh
-          # по-прежнему валит шаг.
           scripts/platform-remote.sh \
             "$PLATFORM_SSH_HOST" fleet-deploy \
             "$REQUESTED_ENVIRONMENT" "$SOURCE_SHA" "$REQUESTED_MODE" \
@@ -196,10 +176,6 @@ jobs:
             < "$RUNNER_TEMP/fleet-deploy.bundle" \
             | tee "$RUNNER_TEMP/fleet-deploy.transcript"
 
-      # Нулевой код возврата выкатки не означает, что граница бэкенда пройдена:
-      # apply без личности manifest-writer останавливается на WAITING_FOR_BACKEND
-      # и завершается успешно. Двигать ref после такого прогона значило бы
-      # объявить развёрнутым то, что бэкенд не принимал.
       - name: Decide whether the deployment ref may advance
         id: record
         if: inputs.mode == 'apply'
@@ -231,15 +207,6 @@ jobs:
         shell: bash
         run: rm -f -- "$RUNNER_TEMP/platform-ssh-key" "$RUNNER_TEMP/platform-known-hosts"
 
-  # Запись о развёрнутом — единственное, что делает планы изменений точными:
-  # impact plan считается от неё, и пока она не двигается, каждая следующая
-  # выкатка планируется от состояния недельной давности.
-  #
-  # Отдельная задача, а не шаг: право записи в репозиторий живёт здесь и больше
-  # нигде. У этой задачи нет ни SSH-ключа, ни бандла, ни доступа к хабу, она
-  # выполняется на runner'е GitHub и умеет ровно одно — переставить ref на SHA,
-  # который отдельно подтверждён записью о развёртывании. Задача deploy,
-  # наоборот, права записи не получает.
   promote:
     needs: deploy
     if: needs.deploy.outputs.promote == 'true'
@@ -249,8 +216,6 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          # Разрешённый коммит, а не ввод: пустой ввод означает голову main,
-          # и промоут обязан записать ровно то, что выкатывала задача deploy.
           ref: ${{ needs.deploy.outputs.source_git_sha }}
           fetch-depth: 0
 
@@ -261,11 +226,6 @@ jobs:
       - name: Install fleetctl
         run: python -m pip install .
 
-      # Перестановка идёт через compare-and-swap с обеих сторон: локально это
-      # третий аргумент `git update-ref`, на стороне origin — `--force-with-lease`
-      # с явно названным прежним значением. Обычный push проверил бы только
-      # быструю перемотку, а откат на предка выглядит для него нормальным
-      # изменением и молча затёр бы чужую запись.
       - name: Advance the deployment ref
         shell: bash
         env:

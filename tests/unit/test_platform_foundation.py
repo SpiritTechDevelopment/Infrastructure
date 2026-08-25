@@ -1876,6 +1876,96 @@ all:
                     if script:
                         subprocess.run(["bash", "-n"], input=script, text=True, check=True)
 
+    def test_workflow_scripts_read_only_bound_variables(self) -> None:
+        expression = re.compile(r"\$\{\{.*?\}\}", re.S)
+        reference = re.compile(
+            r"\$\{([A-Za-z_][A-Za-z0-9_]*)[^}]*\}|\$([A-Za-z_][A-Za-z0-9_]*)"
+        )
+        assignment = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)=", re.M)
+        declaration = re.compile(
+            r"^\s*(?:export|local|declare|readonly)\s+(.*)$", re.M
+        )
+        read_builtin = re.compile(
+            r"(?:^|\s)(?:while\s+|until\s+)?read\s+(?:-\w+\s+)*(.+?)(?:<<|<|;|$)", re.M
+        )
+        mapfile_builtin = re.compile(
+            r"^\s*mapfile\s+(?:-\w+\s+)*([A-Za-z_][A-Za-z0-9_]*)", re.M
+        )
+        loop_variable = re.compile(r"^\s*for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b", re.M)
+        name = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=")
+        word = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+        shell_provided = {
+            "HOME",
+            "PATH",
+            "PWD",
+            "SHELL",
+            "USER",
+            "IFS",
+            "TMPDIR",
+            "LANG",
+            "BASH_SOURCE",
+            "FUNCNAME",
+            "OSTYPE",
+            "HOSTNAME",
+            "RANDOM",
+            "PIPESTATUS",
+        }
+
+        def assigned(script: str) -> dict[str, int]:
+            first: dict[str, int] = {}
+
+            def record(variable: str, offset: int) -> None:
+                if first.get(variable, offset + 1) > offset:
+                    first[variable] = offset
+
+            for pattern in (assignment, mapfile_builtin, loop_variable):
+                for match in pattern.finditer(script):
+                    record(match.group(1), match.start())
+            for match in declaration.finditer(script):
+                for inner in name.finditer(match.group(1)):
+                    record(inner.group(1), match.start())
+            for match in read_builtin.finditer(script):
+                for item in match.group(1).split():
+                    if word.fullmatch(item):
+                        record(item, match.start())
+            return first
+
+        def promoted(script: str) -> set[str]:
+            names: set[str] = set()
+            for line in script.splitlines():
+                if "GITHUB_ENV" in line or "GITHUB_OUTPUT" in line:
+                    names |= set(name.findall(line))
+            return names
+
+        unbound: list[str] = []
+        workflows = sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+        self.assertTrue(workflows)
+        for path in workflows:
+            workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+            top_level = set(workflow.get("env") or {})
+            for job_name, job in (workflow.get("jobs") or {}).items():
+                bound = top_level | set(job.get("env") or {})
+                for step in job.get("steps") or []:
+                    script = step.get("run")
+                    if not script:
+                        continue
+                    script = expression.sub("X", script)
+                    visible = bound | set(step.get("env") or {})
+                    local_names = assigned(script)
+                    for match in reference.finditer(script):
+                        variable = match.group(1) or match.group(2)
+                        if variable in shell_provided or variable in visible:
+                            continue
+                        if variable.startswith(("GITHUB_", "RUNNER_", "ACTIONS_")):
+                            continue
+                        if local_names.get(variable, match.start() + 1) <= match.start():
+                            continue
+                        unbound.append(
+                            f"{path.name}:{job_name}:{step.get('name', '?')}: ${variable}"
+                        )
+                    bound |= promoted(script)
+        self.assertEqual(unbound, [])
+
     def test_secret_reference_listing_is_offline_and_environment_scoped(self) -> None:
         result = subprocess.run(
             [
