@@ -1,4 +1,4 @@
-"""Public validation use case."""
+"""Публичный сценарий проверки желаемого состояния."""
 
 from __future__ import annotations
 

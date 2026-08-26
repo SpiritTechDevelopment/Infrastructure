@@ -1,4 +1,4 @@
-"""Typed common configuration construction and deterministic overrides."""
+"""Сборка общей конфигурации и детерминированных переопределений."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from .serialization import common_source_values
 
 
 class CommonOverrideError(ValueError):
-    """An override was structurally valid but did not form a complete config."""
+    """Переопределение не сформировало полную конфигурацию."""
 
 
 def common_from_values(

@@ -1,4 +1,4 @@
-"""Pure monitoring discovery projection."""
+"""Чистая проекция целей мониторинга."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from .addressing import (
 
 
 class MonitoringPlanError(ValueError):
-    """The monitoring projection would describe an unreachable or unsafe target."""
+    """Проекция содержит недоступную или небезопасную цель."""
 
 
 def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
@@ -68,10 +68,7 @@ def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
                     "id": f"{instance.object_id}:xray-metrics",
                     "service": "xray-metrics",
                     "kind": "metrics",
-                    # Xray publishes expvar, not the Prometheus text format, and
-                    # per-user counters would carry client cardinality into the
-                    # time series. It stays node-local until a translating
-                    # exporter exists; `collection` is what keeps it unscraped.
+                    # Xray отдаёт expvar, поэтому без экспортера метрики остаются локальными.
                     "collection": "node-local",
                     "endpoint": {
                         "scheme": "http",
@@ -140,13 +137,7 @@ def compile_monitoring_targets(state: DesiredState) -> dict[str, Any]:
 def _assert_scraped_targets_stay_on_the_overlay(
     state: DesiredState, targets: list[dict[str, Any]]
 ) -> None:
-    """Prometheus reaches nodes only over WireGuard.
-
-    A scraped target outside the management network is either unreachable or,
-    worse, a public address — which would mean the metrics port is exposed. The
-    executor only has ansible-core and cannot do subnet arithmetic, so this is
-    the one place the invariant can be enforced with real addresses.
-    """
+    """Проверяет, что Prometheus обращается к нодам только через WireGuard."""
     network = ipaddress.ip_network(state.environment.management_network, strict=True)
     for target in targets:
         if target["kind"] != "metrics" or target["collection"] != "management":
@@ -160,7 +151,7 @@ def _assert_scraped_targets_stay_on_the_overlay(
 
 
 def _control_targets(state: DesiredState) -> list[dict[str, Any]]:
-    """Backend metrics live on the management host, not on a fleet instance."""
+    """Формирует цели метрик control на управляющем хосте."""
     if state.environment.control is None:
         return []
     environment = state.environment.object_id
@@ -202,8 +193,7 @@ def _control_targets(state: DesiredState) -> list[dict[str, Any]]:
                 "path": "/metrics",
             },
             "labels": labels,
-            # The database is not a served path: a broken exporter is a hole in
-            # observability, not an outage, and must not colour an SLO.
+            # Сбой экспортера БД ухудшает наблюдаемость, но не доступность сервиса.
             "slo_eligible": False,
             "readiness_expected": True,
         },

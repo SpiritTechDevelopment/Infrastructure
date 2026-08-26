@@ -1,4 +1,4 @@
-"""Manual, provider-neutral provisioning implementation."""
+"""Ручная подготовка серверов без привязки к провайдеру."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Fail-closed Cloudflare DNS reconciliation for compiled fleet records."""
+"""Fail-closed сверка DNS Cloudflare со скомпилированными записями флота."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ DEFAULT_API_BASE = "https://api.cloudflare.com/client/v4"
 
 
 class CloudflareDnsError(Exception):
-    """Cloudflare rejected a request or the compiled plan is unsafe."""
+    """Cloudflare отклонил запрос либо скомпилированный план небезопасен."""
 
 
 class DnsRecordClient(Protocol):
@@ -129,7 +129,7 @@ def reconcile_cloudflare_dns(
     *,
     apply: bool,
 ) -> dict[str, Any]:
-    """Plan or apply create/update operations; deletions are intentionally separate."""
+    """Планирует или применяет создание и обновление без удаления записей."""
 
     zone, desired = _validated_records(plan)
     zone_id = client.zone_id(zone)

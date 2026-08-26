@@ -1,4 +1,4 @@
-"""Pure Ansible inventory projection."""
+"""Чистая проекция Ansible inventory."""
 
 from __future__ import annotations
 
@@ -23,9 +23,7 @@ def compile_ansible_inventory(state: DesiredState) -> dict[str, Any]:
         if instance.target_state == "retired":
             continue
         address = management_address(state.environment, node, instance)
-        # Steady-state phase reaches an already-bootstrapped node on the declared
-        # sshd port. The bootstrap inventory deliberately keeps the default 22 —
-        # that is the only port a clean VPS answers on.
+        # После бутстрапа нода доступна на объявленном порту sshd.
         hostvars = {
             "ansible_host": address,
             "ansible_port": state.common_for_node(node.object_id).networking.ssh_port,

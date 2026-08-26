@@ -1,11 +1,4 @@
-"""Issuance ceremonies: desired state decides the names, the CA only signs them.
-
-Every name here is read from validated desired state or from the same helpers
-the compiler uses, never typed by the operator. That is the whole point of
-routing issuance through fleetctl rather than through an openssl recipe in a
-runbook: the host name in the certificate and the host name the peer verifies
-come out of one function.
-"""
+"""Выпуск сертификатов с именами из проверенного желаемого состояния."""
 
 from __future__ import annotations
 
@@ -20,9 +13,7 @@ from .keys import generate_key_and_csr
 from .local_ca import DEFAULT_VALIDITY_DAYS, LocalCertificateAuthorityAdapter
 from .model import CertificateRequest, PkiError
 
-# Profiles that belong to a process rather than to a machine, and so are created
-# wherever the operator runs this command. agent-server is deliberately absent:
-# its key is generated on the node by roles/pki_agent and only its CSR travels.
+# Профили процессов выпускаются оператором; ключ agent-server остаётся на ноде.
 CONTROL_PROFILES = ("backend-server", "backend-client", "manifest-writer", "customer-service")
 
 # Профиль -> компонент, имена файлов для сертификата и ключа, имена якорей CA.
@@ -82,9 +73,7 @@ def issue_control_certificate(
     identity = request.expected_identity()
     _require_authorised(state, profile, identity)
 
-    # 0700: this directory receives a private key. The key itself is 0600, but a
-    # world-readable directory holding one is the wrong default to hand an
-    # operator who will later copy things out of it.
+    # Каталог с приватным ключом доступен только владельцу.
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(output, 0o700)
     csr_pem = generate_key_and_csr(
@@ -137,8 +126,7 @@ def sign_agent_certificate(
         None,
     )
     if instance is None:
-        # Refusing here is the same rule the backend applies at runtime: an
-        # instance absent from desired state gets nothing, certificate or not.
+        # Необъявленный инстанс не может получить сертификат.
         raise PkiError(f"instance {instance_id!r} is not declared in {environment}")
 
     identity = agent_certificate_identity(state.environment, instance)
@@ -157,9 +145,7 @@ def sign_agent_certificate(
     output.mkdir(parents=True, exist_ok=True)
     chain_path = output / f"{instance_id}-chain.pem"
     ca_path = output / "ca.crt"
-    # The chain, not the leaf: compiled_runtime mounts this one file as both the
-    # served certificate and SPIRIT_GRPC_TLS_CLIENT_CA_FILE, so the root has to
-    # travel with it.
+    # Агенту нужна полная цепочка leaf + CA.
     chain_path.write_bytes(bundle.certificate_chain_pem)
     ca_path.write_bytes(bundle.ca_certificate_pem)
     return {
@@ -181,11 +167,7 @@ def sign_agent_certificate(
 
 
 def _require_authorised(state: DesiredState, profile: str, identity: str | None) -> None:
-    """A client certificate no role list names is a cert that authorises nothing.
-
-    Only checkable once the environment declares spec.control; before that the
-    lists do not exist and issuance is still legitimate.
-    """
+    """Проверяет, что identity клиентского сертификата разрешён control plane."""
     control = state.environment.control
     if control is None or profile != "customer-service" or identity is None:
         return

@@ -1,4 +1,4 @@
-"""Stable serialization of transport-independent model values."""
+"""Стабильная сериализация значений модели."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ def common_values(common: CommonConfig) -> dict[str, Any]:
 
 
 def common_source_values(common: CommonConfig) -> dict[str, Any]:
-    """Serialize only declarative fields, excluding derived values."""
+    """Сериализует только декларативные поля без вычисляемых значений."""
 
     return {
         "components": {

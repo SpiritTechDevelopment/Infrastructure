@@ -1,4 +1,4 @@
-"""Resume-safe infrastructure-only deployment workflow."""
+"""Возобновляемый инфраструктурный процесс развёртывания."""
 
 from __future__ import annotations
 
@@ -42,9 +42,7 @@ class DeploymentError(Exception):
     pass
 
 
-# These inputs can change the rendered files or reconciliation behaviour even
-# when desired/ is byte-for-byte unchanged. The semantic desired-state planner
-# cannot see them, so a deployment must explicitly converge every current node.
+# Эти пути влияют на runtime нод даже без изменений в desired/.
 NODE_RECONCILE_PATH_PREFIXES = (
     "contracts/desired-state/",
     "fleetctl/",
@@ -77,11 +75,9 @@ class DeploymentOptions:
     bootstrap_vars: Path | None = None
     compiled_secrets: Path | None = None
     readiness_vars: Path | None = None
-    # Root of the offline CA. Required only when nodes are actually bootstrapped,
-    # because that is the only step that needs to sign anything.
+    # Корень offline CA нужен только для подписи при бутстрапе.
     ca_state: Path | None = None
-    # manifest-writer identity. Absent means the workflow stops at the contract
-    # boundary exactly as it did before: compiled, allocated, not sent.
+    # Без identity manifest-writer процесс останавливается до отправки.
     backend_client_certificate: Path | None = None
     backend_client_private_key: Path | None = None
     backend_certificate_authority: Path | None = None
@@ -260,18 +256,7 @@ class DeploymentCoordinator:
                         | set(bootstrap_targets)
                     )
                 )
-                # A node is bootstrapped once in its life. The impact plan calls
-                # an instance "provision" whenever it is absent from the Git
-                # baseline, which is also true of every already-running node on
-                # any deployment that has no baseline yet — and the bootstrap
-                # inventory reaches nodes on port 22, the one port a hardened
-                # node no longer answers on. Left unfiltered, a node drops out
-                # of the fleet precisely because the previous deployment to it
-                # succeeded.
-                #
-                # Filtering happens after configure_targets is computed on
-                # purpose: skipping the bootstrap of a live node must never also
-                # skip its configuration.
+                # Маркер не даёт повторно бутстрапить уже защищённую ноду через порт 22.
                 pending_bootstrap = tuple(
                     instance_id
                     for instance_id in bootstrap_targets
@@ -279,10 +264,7 @@ class DeploymentCoordinator:
                         bootstrapped_directory, options.environment, instance_id
                     ).exists()
                 )
-                # Machine identity is a two-phase handshake: the node keeps its
-                # private key, so the CA can only sign a CSR it is handed. The
-                # bootstrap step is split accordingly and each phase is recorded
-                # separately, so a resume does not re-collect signed requests.
+                # CSR и установка сертификата разделены для безопасного resume.
                 pki_directory = self._agent_pki_directory(record_path, deployment_id)
                 self._reconcile_ansible_step(
                     record=record,
@@ -314,9 +296,7 @@ class DeploymentCoordinator:
                     variables=options.bootstrap_vars,
                     extra_files=(chain_variables,) if chain_variables else (),
                 )
-                # Only once the step above has returned: a bootstrap that failed
-                # raises, and an instance must never be recorded as bootstrapped
-                # on the strength of an attempt.
+                # Маркер создаётся только после успешного бутстрапа.
                 for instance_id in pending_bootstrap:
                     self._record_bootstrapped(
                         bootstrapped_directory,
@@ -429,10 +409,7 @@ class DeploymentCoordinator:
                 "resume backend manifest differs from the revision pinned in the deployment record"
             )
         record["backend_manifest"] = metadata
-        # NOT_SENT is where every deployment starts; APPLIED is where it lands
-        # once the manifest has been handed over. Anything else was written by
-        # something this coordinator does not understand, and resuming on top of
-        # it would guess at what the backend has already accepted.
+        # Координатор поддерживает только состояния NOT_SENT и APPLIED.
         existing_apply = record.get("backend_apply")
         if existing_apply is None:
             record["backend_apply"] = {
@@ -466,16 +443,14 @@ class DeploymentCoordinator:
         request: dict[str, Any],
         identity_directory: Path,
     ) -> None:
-        """Hand the compiled snapshot to the backend, or stop at the boundary."""
+        """Передаёт снимок бэкенду либо останавливается на границе контракта."""
 
         supplied = (
             options.backend_client_certificate,
             options.backend_client_private_key,
             options.backend_certificate_authority,
         )
-        # An explicitly supplied identity wins: an operator pointing at specific
-        # files is making a deliberate choice, and quietly issuing a different
-        # certificate underneath them would be the wrong kind of helpful.
+        # Явно переданный identity имеет приоритет над автоматическим выпуском.
         material: tuple[Path, Path, Path] | None
         if all(path is not None for path in supplied):
             material = supplied  # type: ignore[assignment]
@@ -485,9 +460,7 @@ class DeploymentCoordinator:
             )
         else:
             material = None
-        # Sending is a mutation and needs an identity. Without either, the
-        # workflow ends exactly where it always did: compiled, durably
-        # allocated, and explicit that nothing was sent.
+        # Отправка требует режима apply и клиентского identity.
         if not options.apply or material is None:
             record["status"] = "WAITING_FOR_BACKEND"
             record["diagnostic"] = (
@@ -500,9 +473,7 @@ class DeploymentCoordinator:
         revision = record["backend_manifest"]["revision"]
         applied = record.get("backend_apply", {})
         if applied.get("status") == "APPLIED" and applied.get("applied_revision") == revision:
-            # A resume must not re-send: the revision is already accepted, and
-            # asking again would be a second chance to be told something new
-            # about a decision the backend has already made.
+            # Resume не отправляет уже принятую ревизию повторно.
             record["status"] = "BACKEND_APPLIED"
             record["diagnostic"] = (
                 f"Backend manifest revision {revision} was already applied in an earlier attempt "
@@ -512,9 +483,7 @@ class DeploymentCoordinator:
 
         host, port = current.environment.backend_endpoint.rsplit(":", 1)
         endpoint = BackendEndpoint(
-            # The backend publishes its service port on the management overlay
-            # only, so that is where it is reached; the certificate is issued
-            # for the declared name, which has no DNS.
+            # Подключение идёт по overlay-адресу с TLS-именем без DNS.
             target=f"{control_management_address(current.environment)}:{port}",
             tls_server_name=host,
             client_certificate=material[0],
@@ -593,13 +562,7 @@ class DeploymentCoordinator:
         options: DeploymentOptions,
         directory: Path,
     ) -> tuple[Path, Path, Path] | None:
-        """Issue or renew the manifest-writer identity the coordinator itself uses.
-
-        The CA root is an operator input because it is a root. This is a leaf,
-        and the coordinator already holds the CA while it signs agent
-        certificates — asking an operator to mint it by hand only adds a step
-        that is forgotten once and then expires unnoticed.
-        """
+        """Выпускает или обновляет identity manifest-writer координатора."""
         if options.ca_state is None:
             return None
         environment = current.environment.object_id
@@ -627,8 +590,7 @@ class DeploymentCoordinator:
 
     @staticmethod
     def _certificate_outlives(certificate: Path, seconds: int) -> bool:
-        # openssl, not a parsed date: the PKI here shells out everywhere else,
-        # and -checkend answers exactly the question being asked.
+        # OpenSSL проверяет, переживёт ли сертификат заданный срок.
         result = subprocess.run(
             ["openssl", "x509", "-in", str(certificate), "-noout", "-checkend", str(seconds)],
             stdout=subprocess.DEVNULL,
@@ -645,8 +607,7 @@ class DeploymentCoordinator:
         os.chmod(state_directory, 0o700)
         record_directory = state_directory / "deployment-records"
         revision_directory = state_directory / "manifest-revisions"
-        # Whether a machine has been bootstrapped is a property of the machine,
-        # not of a Git diff, and it outlives any single deployment record.
+        # Маркер бутстрапа живёт дольше отдельной записи развёртывания.
         bootstrapped_directory = state_directory / "bootstrapped"
         if record_directory.is_symlink():
             raise DeploymentError(f"refusing symlink deployment record directory: {record_directory}")
@@ -679,9 +640,7 @@ class DeploymentCoordinator:
 
     @staticmethod
     def _agent_pki_directory(record_path: Path, deployment_id: str) -> Path:
-        # Beside the deployment record rather than inside the build directory:
-        # render_files replaces that directory wholesale, which would delete the
-        # collected requests between the two bootstrap phases.
+        # CSR хранятся вне build-каталога, который render_files заменяет целиком.
         directory = record_path.parent.parent / "agent-pki" / deployment_id
         if directory.is_symlink():
             raise DeploymentError(f"refusing symlink agent PKI directory: {directory}")
@@ -699,7 +658,7 @@ class DeploymentCoordinator:
         options: DeploymentOptions,
         pki_directory: Path,
     ) -> Path | None:
-        """Sign every collected CSR and return the chain variables file."""
+        """Подписывает собранные CSR и возвращает файл цепочек."""
         chain_path = pki_directory / "agent-chains.json"
         if self._step_is_completed(record, "sign_agent_certificates"):
             return chain_path if chain_path.is_file() else None

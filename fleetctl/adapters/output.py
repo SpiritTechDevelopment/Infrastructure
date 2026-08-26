@@ -1,4 +1,4 @@
-"""Filesystem adapter for generated build artifacts."""
+"""Запись сгенерированных артефактов в файловую систему."""
 
 from __future__ import annotations
 

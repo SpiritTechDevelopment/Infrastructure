@@ -1,3 +1,3 @@
-"""SpiritVPN desired-state compiler and deployment tooling."""
+"""Компилятор желаемого состояния и средства развёртывания SpiritVPN."""
 
 __version__ = "0.1.0"

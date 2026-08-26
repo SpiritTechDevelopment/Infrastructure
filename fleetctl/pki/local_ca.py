@@ -1,4 +1,4 @@
-"""Offline OpenSSL CA for every environment identity; no private key is accepted."""
+"""Локальный OpenSSL CA с отдельным корнем для каждой среды."""
 
 from __future__ import annotations
 
@@ -20,11 +20,7 @@ from .model import (
 )
 
 
-# Nothing renews these certificates. roles/pki_agent installs a daily timer, but
-# renew-agent-certificate.sh only writes a marker file that no collector reads,
-# so expiry surfaces as a refused handshake rather than as a signal. Until that
-# is closed, a short leaf lifetime buys no safety and costs a manual signing
-# ceremony per node per rotation.
+# Автоматическое обновление пока не работает, поэтому leaf действует год.
 DEFAULT_VALIDITY_DAYS = 365
 CA_VALIDITY_DAYS = 3650
 
@@ -109,7 +105,7 @@ class LocalCertificateAuthorityAdapter:
             )
 
     def _resolve_identity(self, request: CertificateRequest) -> str | None:
-        """Check the caller's identity against the one the profile permits."""
+        """Сверяет identity запроса с допустимым для профиля."""
         expected = request.expected_identity()
         stated = (request.identity or "").strip()
         if expected is None:
@@ -125,9 +121,7 @@ class LocalCertificateAuthorityAdapter:
         match = pattern.fullmatch(expected)
         if match is None:
             raise PkiError(f"malformed certificate identity: {expected!r}")
-        # Belt and braces: the environment is built into the string above, but a
-        # develop certificate accepted in prod is the one failure this naming
-        # scheme exists to make impossible.
+        # Identity обязан принадлежать запрошенной среде.
         if match.group("environment") != request.environment:
             raise PkiError("certificate identity does not belong to the requested environment")
         return expected
@@ -140,10 +134,7 @@ class LocalCertificateAuthorityAdapter:
                 raise PkiError(f"profile {profile.name} does not carry DNS names")
             return ()
         if not names:
-            # Both server profiles are verified by host name on the other side —
-            # `openssl x509 -checkhost` for the backend, Go's ServerName check
-            # for the agent — so a certificate without a DNS SAN is refused at
-            # the first handshake rather than here.
+            # Серверный сертификат обязан содержать проверяемый DNS SAN.
             raise PkiError(f"profile {profile.name} requires at least one DNS name")
         for name in names:
             if not HOST_NAME.fullmatch(name):
@@ -158,12 +149,7 @@ class LocalCertificateAuthorityAdapter:
 
     @staticmethod
     def _require_declared_sans(csr_text: str, expected: tuple[str, ...]) -> None:
-        """The CSR must ask for exactly what it is about to be given.
-
-        Set equality, not a substring search: `URI:.../develop-entry-nl-01` is a
-        substring of `URI:.../develop-entry-nl-011`, so a prefix test would let
-        one node's request be signed under a neighbour's identity.
-        """
+        """Требует точного совпадения SAN в CSR и выдаваемом сертификате."""
         declared = _subject_alt_names(csr_text)
         if declared != set(expected):
             raise PkiError(
@@ -223,7 +209,7 @@ class LocalCertificateAuthorityAdapter:
 
 
 def _subject_alt_names(text: str) -> set[str]:
-    """Extract the SAN entries from `openssl req -text` / `openssl x509 -text`."""
+    """Извлекает SAN из текстового вывода OpenSSL."""
     lines = text.splitlines()
     for index, line in enumerate(lines):
         if _SAN_HEADER not in line:

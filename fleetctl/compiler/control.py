@@ -1,4 +1,4 @@
-"""Deterministic local control-plane deployment projection."""
+"""Детерминированная проекция развёртывания control plane."""
 
 from __future__ import annotations
 
@@ -72,14 +72,7 @@ def compile_control_plan(state: DesiredState) -> dict[str, Any] | None:
 
 
 def _bot_projection(state: DesiredState) -> dict[str, Any] | None:
-    """The bot's own half of the control host.
-
-    Two values are computed here rather than declared: the fleet number, which
-    belongs to the registry and not to a second copy in the bot's settings, and
-    the public URLs, which are one hostname plus the routes the bot itself
-    serves. Declaring the URLs would let them drift from the hostname the
-    tunnel actually publishes.
-    """
+    """Формирует часть control-плана для бота и вычисляет его публичные URL."""
     control = state.environment.control
     if control is None or control.bot is None:
         return None
@@ -91,8 +84,7 @@ def _bot_projection(state: DesiredState) -> dict[str, Any] | None:
         "client_identity": bot.client_identity,
         "friends_plan_fleet": bot.friends_plan_fleet,
         "friends_plan_fleet_id": state.fleet_ids[bot.friends_plan_fleet],
-        # The mini app is served from the same origin: its static files are
-        # mounted at "/" of the very app that answers /s/{token}.
+        # Mini App и ссылки подписки обслуживаются из одного origin.
         "subscription_base_url": public_origin,
         "mini_app_url": public_origin,
     }
@@ -113,11 +105,7 @@ def _bot_projection(state: DesiredState) -> dict[str, Any] | None:
             "runtime_user": bot.postgres_runtime_user,
         },
         "network": {
-            # The bot dials the backend by the name in the backend's server
-            # certificate, so the container resolves that name to the
-            # management address the backend publishes on. Reaching it as
-            # `backend:8443` over the compose network would present a name the
-            # certificate does not carry.
+            # Имя из сертификата бэкенда резолвится в его управляющий адрес.
             "backend_target": state.environment.backend_endpoint,
             "http_port": 8080,
         },
@@ -131,18 +119,9 @@ def _bot_projection(state: DesiredState) -> dict[str, Any] | None:
 
 
 def _observability_projection(state: DesiredState) -> dict[str, Any]:
-    """What this environment expects of the shared collector.
-
-    The collector itself is one instance for every environment, deployed by the
-    platform contour beside Vault, so its image and retention are platform
-    values rather than environment ones — a shared TSDB cannot hold two
-    retentions. Only the scrape cadence is projected here, and the control role
-    asserts it against the deployed collector so desired state cannot describe
-    a cadence that nothing applies.
-    """
+    """Формирует ожидания среды от общего коллектора."""
     return {
         "scrape_interval_seconds": state.environment_common.observability.scrape_interval_seconds,
-        # Same rule, same reason: one shared Loki cannot hold two retentions, so
-        # this is asserted against the deployed store rather than applied.
+        # Общий Loki требует одинакового retention во всех средах.
         "log_retention_days": state.environment_common.observability.activity_retention_days,
     }

@@ -1,4 +1,4 @@
-"""Deterministic values derived from desired state."""
+"""Детерминированные значения из желаемого состояния."""
 
 from __future__ import annotations
 
@@ -9,26 +9,18 @@ from fleetctl.model import Environment, Instance, LogicalNode
 
 ROLE_SUBNET = {"entry": 1, "exit": 2}
 
-# The backend's service HTTP port inside its container. It carries /metrics and
-# the health endpoints, has neither TLS nor caller checks, and therefore only
-# ever binds the management overlay.
+# HTTP-порт бэкенда без TLS доступен только в управляющем оверлее.
 CONTROL_BACKEND_METRICS_PORT = 8080
 
-# The PostgreSQL exporter's listener. The database itself never leaves the
-# control compose network; only this translated view of it is published, and
-# on the same management address and for the same reason as the backend's
-# /metrics — connection counts and table sizes describe the fleet.
+# Экспортер PostgreSQL публикует метрики только в управляющем оверлее.
 CONTROL_POSTGRES_METRICS_PORT = 9187
 
-# The shared log store on the hub. Unlike every metrics port here this one is
-# written *to* rather than read from: nodes push, which is why it is the one
-# listener on the hub that is not confined to loopback. It stays on the overlay
-# for the same reason the scraped ports do.
+# Loki принимает логи нод через управляющий оверлей.
 PLATFORM_LOKI_PORT = 3100
 
 
 def control_management_address(environment: Environment) -> str:
-    """The management hub's own overlay address: the first host in the network."""
+    """Возвращает первый адрес сети, принадлежащий управляющему хабу."""
     network = ipaddress.ip_network(environment.management_network, strict=True)
     return str(network.network_address + 1)
 

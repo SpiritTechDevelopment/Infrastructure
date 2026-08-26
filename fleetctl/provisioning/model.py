@@ -1,4 +1,4 @@
-"""Provider-neutral provisioning boundary."""
+"""Независимый от провайдера интерфейс подготовки серверов."""
 
 from __future__ import annotations
 

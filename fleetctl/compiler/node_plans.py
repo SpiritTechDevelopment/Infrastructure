@@ -1,4 +1,4 @@
-"""Pure per-instance infrastructure plan projection."""
+"""Чистая проекция инфраструктурного плана для каждого инстанса."""
 
 from __future__ import annotations
 
@@ -109,19 +109,7 @@ def compile_node_plans(state: DesiredState) -> dict[str, dict[str, Any]]:
 
 
 def _logs_projection(state: DesiredState) -> dict[str, Any]:
-    """Where this node ships its logs, and what it must never ship.
-
-    The endpoint is derived, not declared: it is the hub's own overlay address,
-    the same one Prometheus scrapes from. Declaring it would let desired state
-    name a host outside the management network, and log shipping is the one
-    direction where that would send data out rather than fail to collect it.
-
-    `xray_access_log` is stated here as a compiled fact rather than left to the
-    shipper's configuration. Desired state already forbids exporting it —
-    validation refuses `access_log_export_enabled` — and repeating the decision
-    where the shipper is configured is what keeps a later edit to an Alloy
-    template from quietly undoing it.
-    """
+    """Задаёт безопасную отправку логов на overlay-адрес хаба без access-log Xray."""
     return {
         "endpoint": (
             f"http://{control_management_address(state.environment)}"

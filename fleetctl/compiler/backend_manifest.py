@@ -1,4 +1,4 @@
-"""Deterministic full-snapshot projection for ApplyFleetManifest."""
+"""Детерминированная проекция полного снимка ApplyFleetManifest."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ MAX_UINT64 = 2**64 - 1
 
 
 class BackendManifestError(ValueError):
-    """The manifest cannot be safely built for the supplied impact plan."""
+    """Манифест нельзя безопасно собрать для заданного impact-плана."""
 
 
 def compile_backend_manifest(
@@ -29,7 +29,7 @@ def compile_backend_manifest(
     revision: int,
     allow_destructive: bool,
 ) -> dict[str, Any]:
-    """Build one complete, deterministic ApplyFleetManifest request projection."""
+    """Собирает полную детерминированную проекцию ApplyFleetManifest."""
 
     _validate_envelope(state, plan, revision, allow_destructive)
     serving = _serving_instances(state)
@@ -55,13 +55,13 @@ def compile_backend_manifest(
 
 
 def backend_manifest_bytes(request: dict[str, Any]) -> bytes:
-    """Serialize the request as a stable, reviewable JSON artifact."""
+    """Сериализует запрос в стабильный JSON для ревью."""
 
     return (json.dumps(request, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
 def backend_manifest_payload_digest(request: dict[str, Any]) -> str:
-    """Hash the local desired payload, excluding revision-scoped request fields."""
+    """Хеширует желаемые данные без полей ревизии запроса."""
 
     payload = {
         "schema_version": request["schema_version"],

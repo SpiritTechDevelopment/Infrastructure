@@ -1,4 +1,4 @@
-"""Stable validation diagnostics suitable for CLI and tests."""
+"""Стабильные диагностические сообщения для CLI и тестов."""
 
 from __future__ import annotations
 

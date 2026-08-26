@@ -1,4 +1,4 @@
-"""Stable impact-plan representation."""
+"""Стабильное представление impact-плана."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Deterministic serialization of all currently supported projections."""
+"""Детерминированная сериализация поддерживаемых проекций."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Read-only validation for the generated Ansible input boundary."""
+"""Проверка сгенерированных входных данных Ansible без изменений."""
 
 from __future__ import annotations
 
@@ -61,16 +61,7 @@ def validate_ansible_artifacts(build_directory: Path, environment: str) -> int:
 
 
 def _validate_known_hosts(build_directory: Path, expected: set[str]) -> None:
-    """Require one declared host key for every address the run will dial.
-
-    Both inventories are already checked against the node plans above; this is
-    the last of the three saying the same thing about the same hosts. An address
-    reached without an entry here would fail at the wire under
-    StrictHostKeyChecking, deep inside a play and after other nodes have already
-    been touched — so it is refused before anything is dialled. An entry with no
-    address left to reach is refused too: a stale key is a machine that is still
-    trusted for no stated reason.
-    """
+    """Требует объявленный host key для каждого адреса подключения."""
 
     path = build_directory / "known_hosts"
     if path.is_symlink() or not path.is_file():
@@ -194,8 +185,7 @@ def _validate_bootstrap_inventory(
         if hostvars["ansible_host"] != instance.get("public_address"):
             raise CompiledArtifactsError(f"bootstrap ansible_host disagrees with public address for {host}")
         plan_files.add(plan_path.resolve())
-        # The bootstrap inventory declares no port on purpose: a clean VPS
-        # answers on 22 and nowhere else.
+        # Чистая VPS при бутстрапе отвечает на стандартном порту 22.
         endpoints.add(host_pattern(hostvars["ansible_host"], 22))
     return plan_files, endpoints
 

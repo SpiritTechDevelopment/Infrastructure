@@ -1,4 +1,4 @@
-"""Canonical desired-state representation used for comparison and hashing."""
+"""Каноническое желаемое состояние для сравнения и хеширования."""
 
 from __future__ import annotations
 

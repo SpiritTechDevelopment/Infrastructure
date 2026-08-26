@@ -1,4 +1,4 @@
-"""Minimal public-address inventory for first-time VPS bootstrap."""
+"""Минимальный inventory публичных адресов для первого бутстрапа VPS."""
 
 from __future__ import annotations
 

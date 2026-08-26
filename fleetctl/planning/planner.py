@@ -1,4 +1,4 @@
-"""Pure semantic diff and impact expansion."""
+"""Чистый семантический diff и расчёт затронутых компонентов."""
 
 from __future__ import annotations
 
@@ -318,7 +318,7 @@ def build_impact_plan(
 
 
 def build_initial_baseline(current: DesiredState) -> DesiredState:
-    """Return an empty, environment-compatible state for an explicit first deploy."""
+    """Возвращает пустое состояние среды для первой выкатки."""
 
     return DesiredState(
         common=current.common,

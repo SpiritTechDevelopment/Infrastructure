@@ -1,4 +1,4 @@
-"""Typed, transport-independent desired-state objects."""
+"""Типизированные объекты желаемого состояния без привязки к транспорту."""
 
 from __future__ import annotations
 
@@ -31,14 +31,7 @@ class ImmutableImage:
 
 @dataclass(frozen=True, slots=True)
 class BotRuntime:
-    """The Telegram bot deployed beside the backend on the management host.
-
-    It is a client of the backend, not a part of it: its own release, its own
-    database and its own identity, sharing only the PostgreSQL instance and the
-    host. That is why it hangs off ControlPlane rather than standing alone — one
-    control-deploy reconciles both, and a bot release lands in the same subtree
-    the deployment trigger already watches.
-    """
+    """Конфигурация Telegram-бота рядом с бэкендом на управляющем хосте."""
 
     source_git_sha: str
     image: ImmutableImage
@@ -68,9 +61,7 @@ class ControlPlane:
     external_backup_command_argv: tuple[str, ...]
     customer_access_writers: tuple[str, ...]
     customer_access_readers: tuple[str, ...]
-    # Optional, and it has to stay that way. `plan` compares a Git source with
-    # the last deployed baseline, and that baseline predates this field: making
-    # it mandatory would make every plan against it fail to load.
+    # Поле необязательно для совместимости со старыми baseline.
     bot: BotRuntime | None = None
     # Публичное имя и адрес самого хаба — того, что обслуживает управляющие
     # поверхности контура. Объявлены здесь, потому что DNS-план проецирует
@@ -229,9 +220,7 @@ class Instance:
     logical_node: str
     target_state: str
     public_address: str
-    # Public host key of the machine. Declared rather than discovered: the
-    # alternative is ssh-keyscan, which asks the host being authenticated to
-    # supply its own proof of identity.
+    # Публичный host key машины объявляется явно, а не через ssh-keyscan.
     ssh_host_key: str
     bandwidth_profile: str
     provider_name: str

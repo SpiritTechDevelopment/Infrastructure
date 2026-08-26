@@ -1,4 +1,4 @@
-"""Fail-closed local Git access for deployment baselines."""
+"""Fail-closed доступ к Git-базам развёртывания."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ DEPLOYMENT_REF_PREFIX = "refs/deployments"
 
 
 class GitAdapterError(Exception):
-    """Raised when Git cannot prove the requested deployment state."""
+    """Git не подтвердил запрошенное состояние развёртывания."""
 
 
 class GitRepository:
@@ -68,7 +68,7 @@ class GitRepository:
         return self.resolve_commit(ref)
 
     def changed_paths(self, baseline: str, source: str) -> tuple[str, ...]:
-        """Return the tracked paths changed between two reviewed commits."""
+        """Возвращает изменённые отслеживаемые пути между двумя коммитами."""
 
         baseline_commit = self.resolve_commit(baseline)
         source_commit = self.resolve_commit(source)

@@ -1,4 +1,4 @@
-"""Cross-object desired-state invariants that JSON Schema cannot express."""
+"""Межобъектные инварианты, не выражаемые через JSON Schema."""
 
 from __future__ import annotations
 
@@ -131,16 +131,8 @@ def _validate_common_policy(
                 "default outbound must be the fail-closed block outbound",
             )
         )
-    # There was a rule here requiring the access log to be enabled "for local
-    # accounting classification". Its consumer does not exist: NODE_AGENT_SPEC
-    # §14 puts the activity subsystem out of scope for v1 and states the agent
-    # does not read the Xray access log at all, while per-user volume comes
-    # from the stats API instead. The rule therefore mandated writing client
-    # addresses and destinations for a feature that was never built, so
-    # `enabled` is now a choice desired state records rather than a constant.
-    #
-    # The export prohibition below stays: it is the half that still means
-    # something, and it keeps the log from ever becoming a central archive.
+    # NodeAgent не читает access-log Xray, поэтому его включение остаётся выбором.
+    # Экспорт запрещён, чтобы адреса клиентов не попадали в центральное хранилище.
     if common.xray.access_log_export_enabled:
         issues.append(
             ValidationIssue.at(
@@ -271,15 +263,7 @@ def _validate_environment(environment: Environment, issues: list[ValidationIssue
 
 
 def _validate_bot(state: DesiredState, issues: list[ValidationIssue]) -> None:
-    """The bot is a tenant of the control host, and this is the rent.
-
-    It shares one PostgreSQL instance with the backend and reaches it as an
-    ordinary mTLS client. Both of those are places where a plausible-looking
-    desired state produces silent damage rather than a failure: a repeated
-    database name lets bot migrations run against backend tables, and an
-    identity the backend does not authorise leaves a bot that starts, connects
-    and is refused on every call.
-    """
+    """Проверяет изоляцию БД бота и его mTLS-доступ к бэкенду."""
     environment = state.environment
     control = environment.control
     if control is None or control.bot is None:
@@ -320,9 +304,7 @@ def _validate_bot(state: DesiredState, issues: list[ValidationIssue]) -> None:
                 f"bot friends_plan_fleet {bot.friends_plan_fleet!r} has no vpn_fleet_id",
             )
         )
-    # Writer and reader both: the bot issues access and then reads back the
-    # VLESS URI it hands the customer. Authorised for one only is a bot that
-    # half-works, which is worse than one that does not start.
+    # Боту нужны права записи доступа и чтения выданного VLESS URI.
     if bot.client_identity not in control.customer_access_writers:
         issues.append(
             ValidationIssue.at(

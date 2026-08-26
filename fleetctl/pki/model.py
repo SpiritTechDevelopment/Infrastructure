@@ -1,4 +1,4 @@
-"""Adapter boundary for environment-scoped machine certificate authorities."""
+"""Интерфейс CA машинных сертификатов, изолированных по средам."""
 
 from __future__ import annotations
 
@@ -13,11 +13,7 @@ class PkiError(Exception):
 
 ENVIRONMENTS = ("develop", "prod")
 
-# Identities are never invented here. Every string this module accepts is also
-# produced by the compiler (fleetctl/compiler/addressing.py, control.py) and
-# asserted again by the Ansible roles; the patterns below only reject shapes the
-# verifying side could not match. A second source of truth for identity strings
-# is exactly the failure this PKI exists to prevent.
+# Identity формирует компилятор; шаблоны лишь проверяют допустимый формат.
 INSTANCE_IDENTITY = re.compile(
     r"^spiffe://spiritvpn/(?P<environment>develop|prod)/instance/(?P<name>[a-z0-9-]{1,63})$"
 )
@@ -25,23 +21,13 @@ SERVICE_IDENTITY = re.compile(
     r"^spiffe://spiritvpn/(?P<environment>develop|prod)/service/(?P<name>[a-z0-9-]{1,63})$"
 )
 
-# A DNS SAN is a host name, not a pattern: wildcards would let one leaked key
-# answer for every name in the zone.
+# DNS SAN не допускает wildcard, чтобы один ключ не представлял всю зону.
 HOST_NAME = re.compile(r"^(?![0-9.]+$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$")
 
 
 @dataclass(frozen=True, slots=True)
 class CertificateProfile:
-    """What one kind of peer is allowed to be given.
-
-    ``identity_path`` is the part of the SPIFFE name after the environment.
-    ``None`` means the profile carries no URI SAN at all: identity in this
-    system is a property of the *calling* side — every verification site
-    (grpcsvc/auth.go, nodeagent/tls.go, grpcserver/tls.go) reads the SAN of the
-    peer it is authorising — so giving a server key the same SPIFFE name as the
-    client key that authenticates outbound would put one identity on two keys
-    and make it unrevokable by reissue.
-    """
+    """Описывает допустимые назначения и identity сертификата peer."""
 
     name: str
     extended_key_usage: tuple[str, ...]
@@ -49,54 +35,39 @@ class CertificateProfile:
     requires_dns: bool
 
 
-# keyUsage is digitalSignature only. Every key here is EC P-256 and both peers
-# require TLS 1.3, which has no RSA key transport, so keyEncipherment would
-# describe an operation none of these certificates can perform.
+# Ключи EC P-256 используются только для цифровой подписи в TLS 1.3.
 KEY_USAGE = ("digitalSignature",)
 
 PROFILES: dict[str, CertificateProfile] = {
-    # The node's own server certificate, and nothing else. The agent never
-    # dials anything over mTLS — its only outbound gRPC is to local Xray on the
-    # loopback with insecure credentials — so clientAuth would grant a usage it
-    # has no need of. That matters: with one root per environment, a leaf
-    # carrying clientAuth chains successfully as a client anywhere in the trust
-    # domain and is stopped only by the identity allow-list. Without it, Go
-    # rejects the leaf during chain verification, one step earlier.
+    # Сертификат сервера агента не получает лишнее назначение clientAuth.
     "agent-server": CertificateProfile(
         name="agent-server",
         extended_key_usage=("serverAuth",),
         identity_path="instance/{subject}",
         requires_dns=True,
     ),
-    # Terminates gRPC for manifest and customer-access clients. DNS SAN only:
-    # control_runtime asserts it with `openssl x509 -checkhost`, and nothing
-    # reads an identity from it.
+    # Серверный сертификат бэкенда проверяется только по DNS SAN.
     "backend-server": CertificateProfile(
         name="backend-server",
         extended_key_usage=("serverAuth",),
         identity_path=None,
         requires_dns=True,
     ),
-    # The backend calling agents. This is the identity the agent allows in
-    # SPIRIT_GRPC_ALLOWED_CLIENT_IDENTITIES.
+    # Identity бэкенда для вызова агентов.
     "backend-client": CertificateProfile(
         name="backend-client",
         extended_key_usage=("clientAuth",),
         identity_path="service/backend",
         requires_dns=False,
     ),
-    # Infrastructure CI/CD calling the backend; SPIRIT_ROLE_MANIFEST_WRITER.
+    # Identity CI/CD для отправки манифеста бэкенду.
     "manifest-writer": CertificateProfile(
         name="manifest-writer",
         extended_key_usage=("clientAuth",),
         identity_path="service/manifest-writer",
         requires_dns=False,
     ),
-    # CustomerService calling the backend; goes into
-    # authorization.customer_access_writers / _readers. Not implemented yet, so
-    # the identity is fixed here before anything depends on it: the same string
-    # has to appear in desired state, and inventing it twice is how the two
-    # drift.
+    # Identity CustomerService для работы с доступами клиентов.
     "customer-service": CertificateProfile(
         name="customer-service",
         extended_key_usage=("clientAuth",),
@@ -107,32 +78,20 @@ PROFILES: dict[str, CertificateProfile] = {
 
 
 def agent_dns_name(environment: str, instance_id: str) -> str:
-    """Mirror of compiler.addressing.agent_tls_server_name.
-
-    Duplicated deliberately and asserted against the caller's value rather than
-    substituted for it: the CA must be able to reject a certificate request
-    whose DNS name and SPIFFE name describe different machines.
-    """
+    """Повторяет имя из compiler.addressing для независимой проверки CA."""
     return f"{instance_id}.agent.{environment}.internal"
 
 
 @dataclass(frozen=True, slots=True)
 class CertificateRequest:
-    """A signing request, fully named by the caller.
-
-    The caller states the identity and the host names; the CA checks them
-    against the profile and writes them itself. Nothing is copied out of the
-    CSR — a CSR is proof of key possession and a declaration of intent, never
-    the source of what gets signed.
-    """
+    """Запрос подписи с identity и DNS-именами, проверяемыми CA."""
 
     environment: str
     profile: str
     csr_pem: bytes
     identity: str | None = None
     dns_names: tuple[str, ...] = ()
-    # Only meaningful for profiles whose identity_path has a {subject}; the
-    # instance id for agent-server.
+    # Subject нужен профилям с шаблоном {subject}, например agent-server.
     subject: str | None = None
 
     def resolved_profile(self) -> CertificateProfile:
@@ -143,7 +102,7 @@ class CertificateRequest:
         return profile
 
     def expected_identity(self) -> str | None:
-        """The one identity this request is allowed to carry, or None."""
+        """Возвращает единственный допустимый identity запроса."""
         profile = self.resolved_profile()
         if profile.identity_path is None:
             return None
@@ -155,7 +114,7 @@ class CertificateRequest:
         return f"spiffe://spiritvpn/{self.environment}/{path}"
 
     def subject_alt_names(self) -> tuple[str, ...]:
-        """The SAN entries, in the order they are written and compared."""
+        """Возвращает SAN в порядке записи и сравнения."""
         names = [f"DNS:{name}" for name in self.dns_names]
         identity = self.expected_identity()
         if identity is not None:
@@ -169,11 +128,9 @@ class CertificateBundle:
     profile: str
     identity: str | None
     dns_names: tuple[str, ...]
-    # The leaf alone, for consumers that are handed a trust anchor separately —
-    # the backend reads its certificate and its CA from different files.
+    # Leaf-сертификат для потребителей с отдельным trust anchor.
     certificate_pem: bytes
-    # Leaf followed by the CA. The agent needs this form: the same file is its
-    # served chain and its client CA pool.
+    # Цепочка leaf + CA для агента.
     certificate_chain_pem: bytes
     ca_certificate_pem: bytes
 

@@ -1,4 +1,4 @@
-"""Schema validation and conversion from YAML into typed objects."""
+"""Проверка YAML по схемам и преобразование в типизированные объекты."""
 
 from __future__ import annotations
 
@@ -420,8 +420,7 @@ def _to_bot(bot_spec: dict[str, Any] | None) -> BotRuntime | None:
         postgres_runtime_user=bot_spec["postgres"]["runtime_user"],
         client_identity=settings["client_identity"],
         friends_plan_fleet=settings["friends_plan_fleet"],
-        # Absent means "keep the image's own default": the bot already declares
-        # one, and repeating it here would create a second place to change it.
+        # Отсутствующее значение сохраняет умолчание образа бота.
         friends_plan_quota_bytes=settings.get("friends_plan_quota_bytes"),
         friends_plan_duration_days=settings.get("friends_plan_duration_days"),
         tunnel_image=ImmutableImage(**bot_spec["ingress"]["image"]),

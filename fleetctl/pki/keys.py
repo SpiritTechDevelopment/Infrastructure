@@ -1,11 +1,4 @@
-"""Local key and CSR generation for identities that have no machine of their own.
-
-Node identities never come through here: roles/pki_agent generates the agent key
-on the node and only the CSR leaves it. This module exists for the control-plane
-identities — the backend's two keys and the two client identities — which belong
-to a process, not to a host, and so have to be created wherever the operator is
-standing. The private key still never reaches the CA: only the CSR does.
-"""
+"""Локальная генерация ключей и CSR для identity control plane."""
 
 from __future__ import annotations
 
@@ -24,13 +17,7 @@ def generate_key_and_csr(
     common_name: str,
     subject_alt_names: Sequence[str],
 ) -> bytes:
-    """Create an EC P-256 key and a CSR declaring exactly these SANs.
-
-    Refuses to overwrite an existing key. Silently replacing one would leave a
-    certificate in Vault that no longer matches the key beside it, and
-    control_runtime compares the two public keys only after both have been
-    written to the host.
-    """
+    """Создаёт ключ EC P-256 и CSR с заданными SAN без перезаписи ключа."""
     if not subject_alt_names:
         raise PkiError("a CSR without SANs cannot be authorised by either side")
     if key_path.exists():

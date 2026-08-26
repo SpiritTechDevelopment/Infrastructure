@@ -1,4 +1,4 @@
-"""Pure DNS publication projection."""
+"""Чистая проекция публикуемых DNS-записей."""
 
 from __future__ import annotations
 
@@ -18,9 +18,7 @@ def compile_dns_plan(state: DesiredState) -> dict[str, Any]:
         records.append(control_record)
     for instance in sorted(state.instances, key=lambda item: item.object_id):
         node = nodes[instance.logical_node]
-        # Both roles are client endpoints. Entry can route a user to a linked
-        # exit, while an exit also serves that fleet's users directly through
-        # its local FREEDOM outbound.
+        # Обе роли принимают клиентов; entry маршрутизирует их на связанный exit.
         if instance.target_state != "serving":
             continue
         common = state.common_for_node(node.object_id)

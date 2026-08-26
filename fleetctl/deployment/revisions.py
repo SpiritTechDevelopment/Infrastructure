@@ -1,4 +1,4 @@
-"""Durable, environment-scoped backend manifest revision allocation."""
+"""Надёжное выделение ревизий манифеста отдельно для каждой среды."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ MAX_UINT64 = 2**64 - 1
 
 
 class RevisionStateError(ValueError):
-    """Revision state is missing, corrupt, or conflicts with a deployment."""
+    """Состояние ревизий отсутствует, повреждено или конфликтует с выкаткой."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +35,7 @@ class RevisionAllocation:
 
 
 class ManifestRevisionAllocator:
-    """Allocate one monotonic revision per deployment under an external env lock."""
+    """Выделяет монотонную ревизию под внешней блокировкой среды."""
 
     def __init__(self, path: Path, environment: str):
         self.path = path

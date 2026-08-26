@@ -1,14 +1,7 @@
-"""Client for the vendored ManifestService contract.
+"""Клиент вендоренного контракта ManifestService.
 
-The deployment pipeline compiles a complete manifest snapshot and durably
-allocates its revision long before anything is sent. This adapter is the last
-step of that boundary and nothing more: it hands one already-compiled request to
-the backend and reports what the backend said about it.
-
-grpcio and protobuf are imported lazily. Every other fleetctl command — validate,
-render, plan, the whole check suite — runs without them, and an operator
-workstation that never sends a manifest should not have to install a gRPC stack
-to compile one.
+Передаёт бэкенду готовый снимок манифеста. gRPC-зависимости загружаются только
+при отправке, поэтому остальные команды fleetctl работают без них.
 """
 
 from __future__ import annotations
@@ -19,18 +12,16 @@ from typing import Any
 
 
 class BackendCallError(Exception):
-    """The manifest could not be handed over, or was refused."""
+    """Манифест не удалось передать либо бэкенд его отклонил."""
 
 
-# APPLIED and IDEMPOTENT are both successful deployment-boundary results:
-# re-sending one revision with the same canonical digest is defined as a no-op,
-# and a pipeline that retried must not read that as a failure.
+# APPLIED и IDEMPOTENT означают успешную передачу манифеста.
 _ACCEPTED_RESULTS = ("MANIFEST_APPLY_RESULT_APPLIED", "MANIFEST_APPLY_RESULT_IDEMPOTENT")
 
 
 @dataclass(frozen=True, slots=True)
 class BackendEndpoint:
-    """Where the backend is, and what proves both sides are who they claim."""
+    """Адрес бэкенда и данные взаимной проверки сторон."""
 
     target: str
     tls_server_name: str
@@ -60,14 +51,14 @@ def apply_fleet_manifest(
     endpoint: BackendEndpoint,
     timeout_seconds: int = 60,
 ) -> str:
-    """Send one compiled manifest and return the backend's result name."""
+    """Отправляет манифест и возвращает результат бэкенда."""
 
     endpoint.require_readable_material()
     grpc, manifest_pb2, manifest_pb2_grpc, parse_dict = _load_grpc_runtime()
 
     try:
         message = parse_dict(request, manifest_pb2.ApplyFleetManifestRequest())
-    except Exception as exc:  # a malformed request must never reach the wire
+    except Exception as exc:  # Некорректный запрос нельзя отправлять в сеть.
         raise BackendCallError(f"compiled manifest does not match the contract: {exc}") from exc
 
     credentials = grpc.ssl_channel_credentials(
@@ -75,10 +66,7 @@ def apply_fleet_manifest(
         private_key=endpoint.client_private_key.read_bytes(),
         certificate_chain=endpoint.client_certificate.read_bytes(),
     )
-    # The backend is reached at its overlay address while its certificate is
-    # issued for a name that has no DNS anywhere. Overriding the name checked
-    # against the certificate is what keeps verification on: the alternative in
-    # practice is somebody disabling it.
+    # Бэкенд доступен по overlay-адресу, а сертификат проверяется по имени без DNS.
     options = [("grpc.ssl_target_name_override", endpoint.tls_server_name)]
 
     with grpc.secure_channel(endpoint.target, credentials, options=options) as channel:
