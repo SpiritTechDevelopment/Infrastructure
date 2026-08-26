@@ -1,11 +1,11 @@
 {
   "uid": "spiritvpn-logs",
   "title": "SpiritVPN — логи",
-  "description": "Логи контейнеров с фильтрацией по среде, серверу, сервису и контейнеру.",
+  "description": "Логи контейнеров с фильтрацией по среде, серверу или ноде, сервису и контейнеру.",
   "tags": ["spiritvpn", "logs"],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "refresh": "10s",
   "time": {"from": "now-1h", "to": "now"},
@@ -27,12 +27,13 @@
         "current": {"selected": true, "text": "All", "value": "$__all"}
       },
       {
-        "name": "host",
-        "label": "Сервер",
+        "name": "instance",
+        "label": "Сервер / нода",
+        "description": "Список берётся из целей node-exporter в Prometheus и не зависит от наличия свежих логов.",
         "type": "query",
-        "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
-        "definition": "label_values({environment=~\"$environment\"}, host)",
-        "query": "label_values({environment=~\"$environment\"}, host)",
+        "datasource": {"type": "prometheus", "uid": "spiritvpn-prometheus"},
+        "definition": "label_values(up{job=~\"$environment/node-exporter|management/node-exporter\"}, instance_id)",
+        "query": "label_values(up{job=~\"$environment/node-exporter|management/node-exporter\"}, instance_id)",
         "refresh": 1,
         "sort": 1,
         "multi": true,
@@ -46,8 +47,8 @@
         "description": "Например: backend, node-agent, postgres, xray.",
         "type": "query",
         "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
-        "definition": "label_values({environment=~\"$environment\", host=~\"$host\"}, service)",
-        "query": "label_values({environment=~\"$environment\", host=~\"$host\"}, service)",
+        "definition": "label_values({environment=~\"$environment\", instance=~\"$instance\"}, service)",
+        "query": "label_values({environment=~\"$environment\", instance=~\"$instance\"}, service)",
         "refresh": 1,
         "sort": 1,
         "multi": true,
@@ -60,8 +61,8 @@
         "label": "Контейнер",
         "type": "query",
         "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
-        "definition": "label_values({environment=~\"$environment\", host=~\"$host\", service=~\"$service\"}, container)",
-        "query": "label_values({environment=~\"$environment\", host=~\"$host\", service=~\"$service\"}, container)",
+        "definition": "label_values({environment=~\"$environment\", instance=~\"$instance\", service=~\"$service\"}, container)",
+        "query": "label_values({environment=~\"$environment\", instance=~\"$instance\", service=~\"$service\"}, container)",
         "refresh": 1,
         "sort": 1,
         "multi": true,
@@ -98,7 +99,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (service) (count_over_time({environment=~\"$environment\", host=~\"$host\", service=~\"$service\", container=~\"$container\"} |~ \"$search\" [$__interval]))",
+          "expr": "sum by (service) (count_over_time({environment=~\"$environment\", instance=~\"$instance\", service=~\"$service\", container=~\"$container\"} |~ \"$search\" [$__interval]))",
           "legendFormat": "{{service}}",
           "queryType": "range"
         }
@@ -108,7 +109,7 @@
       "id": 2,
       "type": "logs",
       "title": "Логи контейнеров",
-      "description": "Backend: service=backend; NodeAgent: service=node-agent. Метки строки содержат среду, сервер, сервис и полное имя контейнера.",
+      "description": "Backend: service=backend; NodeAgent: service=node-agent. Метки строки содержат среду, сервер или ноду, сервис и полное имя контейнера.",
       "gridPos": {"h": 22, "w": 24, "x": 0, "y": 8},
       "datasource": {"type": "loki", "uid": "spiritvpn-loki"},
       "options": {
@@ -124,7 +125,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{environment=~\"$environment\", host=~\"$host\", service=~\"$service\", container=~\"$container\"} |~ \"$search\"",
+          "expr": "{environment=~\"$environment\", instance=~\"$instance\", service=~\"$service\", container=~\"$container\"} |~ \"$search\"",
           "queryType": "range"
         }
       ]

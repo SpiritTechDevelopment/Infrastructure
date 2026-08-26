@@ -1138,7 +1138,7 @@ all:
                 host = endpoint.split("//", 1)[1].split(":", 1)[0]
                 self.assertIn(ipaddress.ip_address(host), network)
 
-    def test_log_dashboard_can_filter_every_container_by_environment_and_host(self) -> None:
+    def test_log_dashboard_can_filter_every_container_by_environment_and_instance(self) -> None:
         collector = REPO_ROOT / "roles" / "platform_observability"
         dashboard = json.loads(
             (collector / "files" / "dashboards" / "spiritvpn-logs.json").read_text(
@@ -1147,16 +1147,19 @@ all:
         )
         variables = {item["name"]: item for item in dashboard["templating"]["list"]}
         self.assertEqual(
-            set(variables), {"environment", "host", "service", "container", "search"}
+            set(variables), {"environment", "instance", "service", "container", "search"}
         )
-        self.assertIn('environment=~"$environment"', variables["host"]["query"])
-        self.assertIn('host=~"$host"', variables["service"]["query"])
+        self.assertEqual(variables["instance"]["datasource"]["uid"], "spiritvpn-prometheus")
+        self.assertIn('$environment/node-exporter', variables["instance"]["query"])
+        self.assertIn('management/node-exporter', variables["instance"]["query"])
+        self.assertIn('instance_id', variables["instance"]["query"])
+        self.assertIn('instance=~"$instance"', variables["service"]["query"])
         self.assertIn('service=~"$service"', variables["container"]["query"])
 
         log_panels = [panel for panel in dashboard["panels"] if panel["type"] == "logs"]
         self.assertEqual(len(log_panels), 1)
         selector = log_panels[0]["targets"][0]["expr"]
-        for matcher in ("environment", "host", "service", "container"):
+        for matcher in ("environment", "instance", "service", "container"):
             self.assertIn(f'{matcher}=~"${matcher}"', selector)
 
         hub_alloy = (collector / "templates" / "alloy-hub.alloy.j2").read_text(
@@ -1166,7 +1169,9 @@ all:
             REPO_ROOT / "roles" / "compiled_runtime" / "templates" / "alloy-node.alloy.j2"
         ).read_text(encoding="utf-8")
         self.assertIn('replacement  = "management"', hub_alloy)
-        self.assertIn('host = "{{ ansible_hostname }}"', hub_alloy)
+        self.assertIn('instance = "management"', hub_alloy)
+        self.assertIn('host     = "{{ ansible_hostname }}"', hub_alloy)
+        self.assertIn('instance      = "{{ spiritvpn_node_plan.instance.id }}"', node_alloy)
         self.assertIn('host          = "{{ ansible_hostname }}"', node_alloy)
 
     def test_bot_migrations_ship_with_the_bot_image(self) -> None:

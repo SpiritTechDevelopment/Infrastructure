@@ -64,7 +64,8 @@ loki.write "hub" {
   }
 
   external_labels = {
-    host = "{{ ansible_hostname }}",
-    tier = "hub",
+    host     = "{{ ansible_hostname }}",
+    instance = "management",
+    tier     = "hub",
   }
 }
