@@ -356,6 +356,46 @@
       "targets": [
         {"refId": "A", "expr": "pg_up", "legendFormat": "pg_up"}
       ]
-    }
+    },
+    {
+    "id": 17,
+    "type": "stat",
+    "title": "Трафик за период, GB",
+    "description": "RX + TX публичного интерфейса за выбранный диапазон Grafana.",
+    "gridPos": {"h": 8, "w": 12, "x": 0, "y": 56},
+    "datasource": {
+      "type": "prometheus",
+      "uid": "spiritvpn-prometheus"
+    },
+    "fieldConfig": {
+      "defaults": {
+        "unit": "none",
+        "decimals": 2,
+        "min": 0
+      },
+      "overrides": []
+    },
+    "options": {
+      "reduceOptions": {
+        "values": false,
+        "calcs": ["lastNotNull"],
+        "fields": ""
+      },
+      "orientation": "auto",
+      "textMode": "auto",
+      "colorMode": "value",
+      "graphMode": "area",
+      "justifyMode": "auto"
+    },
+    "targets": [
+      {
+        "refId": "A",
+        "instant": true,
+        "range": false,
+        "expr": "sum by (environment, logical_node, instance_id) (increase(node_network_receive_bytes_total{job=~\".*/node-exporter\",node_role=~\"entry|exit\",device=~\"ens3|eth0\"}[$__range]) + increase(node_network_transmit_bytes_total{job=~\".*/node-exporter\",node_role=~\"entry|exit\",device=~\"ens3|eth0\"}[$__range])) / 1000000000",
+        "legendFormat": "{{instance_id}}"
+      }
+    ]
+  }
   ]
 }
