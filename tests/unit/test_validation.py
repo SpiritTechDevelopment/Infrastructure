@@ -93,12 +93,13 @@ class DesiredStateValidationTests(unittest.TestCase):
             [node.object_id for node in state.nodes],
             ["develop-entry-ru", "develop-exit-ro"],
         )
-        # Slots are unique per role, and the remaining exit keeps the 02 it was
-        # given when it was the second one — renumbering would rewrite its
-        # management address and its agent identity for no reason.
+        # Slots are unique per role. The entry replacement keeps the old 01 in
+        # draining while the new 02 becomes serving; the remaining exit keeps
+        # the 02 it was given when it was the second one. Renumbering would
+        # rewrite management addresses and agent identities for no reason.
         self.assertEqual(
             [instance.object_id for instance in state.instances],
-            ["develop-entry-ru-01", "develop-exit-ro-02"],
+            ["develop-entry-ru-01", "develop-exit-ro-02", "develop-entry-ru-02"],
         )
         # The entry is what clients dial, so its public name has to be the one
         # that actually resolves; the exits are reached by address and carry
