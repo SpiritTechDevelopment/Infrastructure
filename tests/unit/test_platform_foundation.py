@@ -914,6 +914,28 @@ all:
             with self.assertRaises(resolver.ResolverError):
                 cleaner("p", payload)
 
+    def test_environment_secret_keys_preserve_lowercase_names(self) -> None:
+        """Инфраструктура проверяет форму имени, но не диктует регистр компоненту."""
+        resolver = _load_script("vault-secret-resolver.py", "spiritvpn_resolver")
+
+        environment = resolver.clean_environment_object(
+            "develop/control/bot/env",
+            {
+                "BOT_SUPPORT_URL": "https://support.example",
+                "dev_admin_user_ids": "1,2",
+                "_component_option": "enabled",
+            },
+        )
+
+        self.assertEqual(environment["dev_admin_user_ids"], "1,2")
+        self.assertEqual(environment["_component_option"], "enabled")
+        self.assertNotIn("DEV_ADMIN_USER_IDS", environment)
+
+        for invalid_key in ("1OPTION", "BAD-NAME", "BAD.NAME", "BAD NAME", "BAD=NAME"):
+            with self.subTest(key=invalid_key):
+                with self.assertRaises(resolver.ResolverError):
+                    resolver.clean_environment_object("p", {invalid_key: "value"})
+
     def test_reality_pair_must_match_between_git_and_vault(self) -> None:
         """Половинки пары живут в разных хранилищах и до резолвера не встречаются.
 

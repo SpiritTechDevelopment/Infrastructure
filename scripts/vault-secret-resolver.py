@@ -63,7 +63,10 @@ CONTROL_OBJECTS: dict[str, dict[str, str]] = {
 # из них owner, а какой runtime. Пароль внутри DATABASE_URL для этого не годится.
 POSTGRES_FIELDS = ("owner_password", "runtime_password")
 
-ENVIRONMENT_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+# Compose принимает shell-подобные имена переменных и сохраняет их регистр.
+# Строчные имена могут быть частью контракта компонента, поэтому инфраструктура
+# проверяет только безопасную для env-файла форму, а не навязывает верхний регистр.
+ENVIRONMENT_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
