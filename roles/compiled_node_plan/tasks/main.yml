@@ -183,6 +183,9 @@
     node_agent_fallback_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.block_outbound }}"
     public_port: "{{ spiritvpn_node_plan.logical_node.public.port }}"
     xray_listen_port: "{{ spiritvpn_node_plan.logical_node.public.port }}"
+    xray_transport: "{{ spiritvpn_node_plan.logical_node.public.transport }}"
+    xray_xhttp_path: >-
+      {{ (spiritvpn_node_plan.logical_node.public.xhttp | default({})).path | default('') }}
     xray_inbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.inbound }}"
     xray_direct_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.direct_outbound }}"
     xray_block_outbound_tag: "{{ spiritvpn_node_plan.infrastructure.xray.tags.block_outbound }}"
@@ -283,7 +286,10 @@
            'reality_password': item.target.reality_public_key,
            'reality_short_id': item.target.short_id,
            'fingerprint': item.target.fingerprint,
-           'flow': item.target.flow
+           'flow': item.target.flow,
+           'transport': item.target.transport,
+           'xhttp_path': (item.target.xhttp | default({})).path | default(''),
+           'xhttp_mode': (item.target.xhttp | default({})).mode | default('')
          }] }}
   loop: "{{ spiritvpn_node_plan.routing.bridges_as_entry }}"
   no_log: true

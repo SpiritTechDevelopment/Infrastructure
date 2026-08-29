@@ -194,6 +194,12 @@ class Fleet:
 
 
 @dataclass(frozen=True, slots=True)
+class XHTTPConfig:
+    path: str
+    mode: str
+
+
+@dataclass(frozen=True, slots=True)
 class LogicalNode:
     object_id: str
     role: str
@@ -203,6 +209,7 @@ class LogicalNode:
     public_port: int
     transport: str
     flow: str
+    xhttp: XHTTPConfig | None
     fingerprint: str
     server_name: str
     reality_public_key: str

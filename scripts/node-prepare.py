@@ -91,8 +91,22 @@ def logical_node_document(
     display_name: str,
     public_key: str,
     short_id: str,
+    transport: str,
+    xhttp_path: str | None,
+    xhttp_mode: str,
 ) -> dict[str, Any]:
     secret_root = f"secret://kv/{environment}/nodes/{node_id}"
+    public: dict[str, Any] = {
+        "hostname": hostname,
+        "port": port,
+        "transport": transport,
+        "flow": "" if transport == "xhttp" else "xtls-rprx-vision",
+        "fingerprint": "chrome",
+        "server_name": server_name,
+    }
+    if transport == "xhttp":
+        public["xhttp"] = {"path": xhttp_path, "mode": xhttp_mode}
+
     return {
         "apiVersion": "spiritvpn.io/v1alpha1",
         "kind": "LogicalNode",
@@ -100,14 +114,7 @@ def logical_node_document(
         "spec": {
             "role": role,
             "region": region,
-            "public": {
-                "hostname": hostname,
-                "port": port,
-                "transport": "tcp",
-                "flow": "xtls-rprx-vision",
-                "fingerprint": "chrome",
-                "server_name": server_name,
-            },
+            "public": public,
             "reality": {
                 "public_key": public_key,
                 "short_id": short_id,
@@ -316,6 +323,10 @@ def store(
 def build(arguments: argparse.Namespace) -> tuple[dict[str, str], list[dict[str, Any]]]:
     if not 1 <= arguments.slot <= 240:
         raise NodePrepareError("слот управления должен быть в диапазоне 1..240")
+    if arguments.transport == "xhttp" and not arguments.xhttp_path:
+        raise NodePrepareError("для --transport xhttp обязателен --xhttp-path")
+    if arguments.transport != "xhttp" and arguments.xhttp_path:
+        raise NodePrepareError("--xhttp-path имеет смысл только при --transport xhttp")
     private_key, public_key = generate_reality_keypair()
     short_id = generate_short_id()
     node = logical_node_document(
@@ -329,6 +340,9 @@ def build(arguments: argparse.Namespace) -> tuple[dict[str, str], list[dict[str,
         display_name=arguments.display_name,
         public_key=public_key,
         short_id=short_id,
+        transport=arguments.transport,
+        xhttp_path=arguments.xhttp_path,
+        xhttp_mode=arguments.xhttp_mode,
     )
     instance = instance_document(
         node_id=arguments.node_id,
@@ -356,6 +370,17 @@ def main() -> int:
         help="SNI, если отличается от hostname; по умолчанию совпадает",
     )
     parser.add_argument("--port", type=int, default=443)
+    parser.add_argument("--transport", default="tcp", choices=("tcp", "xhttp"))
+    parser.add_argument(
+        "--xhttp-path",
+        help="путь XHTTP, обязателен при --transport xhttp",
+    )
+    parser.add_argument(
+        "--xhttp-mode",
+        default="packet-up",
+        choices=("auto", "packet-up", "stream-up", "stream-one"),
+        help="режим XHTTP в клиентской ссылке",
+    )
     parser.add_argument("--display-name", required=True)
     parser.add_argument("--address", required=True, help="публичный IP машины")
     parser.add_argument("--slot", type=int, required=True, help="слот оверлея, 1..240")

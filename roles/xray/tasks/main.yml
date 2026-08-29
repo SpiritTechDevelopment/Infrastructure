@@ -7,6 +7,17 @@
       Xray must run a digest-pinned image from the compiled node plan.
       A tag can be moved after review and is not a supply-chain pin.
 
+- name: Require a transport the template can render
+  ansible.builtin.assert:
+    that:
+      - xray_transport in ['tcp', 'xhttp']
+      - xray_transport != 'xhttp' or (xray_xhttp_path | length) > 0
+      - xray_transport != 'tcp' or (xray_xhttp_path | length) == 0
+    fail_msg: >-
+      xray_transport must be tcp or xhttp, and xray_xhttp_path must be set for
+      xhttp and empty for tcp. A path that disagrees with the issued client link
+      answers 404 and produces a node that accepts no one.
+
 - name: Require the compiled logical-node REALITY identity
   ansible.builtin.assert:
     that:

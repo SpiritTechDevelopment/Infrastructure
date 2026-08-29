@@ -13,7 +13,7 @@ from fleetctl.planning.model import ImpactPlan
 from .addressing import agent_certificate_identity, agent_endpoint, agent_tls_server_name
 
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_UINT64 = 2**64 - 1
 
@@ -119,6 +119,19 @@ def _compile_node(
     instance: Instance,
 ) -> dict[str, Any]:
     common = state.common_for_node(node.object_id)
+    public: dict[str, Any] = {
+        "address": node.hostname,
+        "port": node.public_port,
+        "reality_public_key": node.reality_public_key,
+        "server_name": node.server_name,
+        "short_id": node.reality_short_id,
+        "fingerprint": node.fingerprint,
+        "flow": node.flow,
+        "transport": node.transport,
+    }
+    if node.xhttp is not None:
+        public["xhttp"] = {"path": node.xhttp.path, "mode": node.xhttp.mode}
+
     return {
         "node_id": node.object_id,
         "agent": {
@@ -131,16 +144,7 @@ def _compile_node(
             "tls_server_name": agent_tls_server_name(state.environment, instance),
             "certificate_identity": agent_certificate_identity(state.environment, instance),
         },
-        "public": {
-            "address": node.hostname,
-            "port": node.public_port,
-            "reality_public_key": node.reality_public_key,
-            "server_name": node.server_name,
-            "short_id": node.reality_short_id,
-            "fingerprint": node.fingerprint,
-            "flow": node.flow,
-            "transport": node.transport,
-        },
+        "public": public,
         "display_name": node.display_name,
     }
 

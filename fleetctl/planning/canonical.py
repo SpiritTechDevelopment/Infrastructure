@@ -6,7 +6,7 @@ import hashlib
 import json
 from typing import Any
 
-from fleetctl.model import DesiredState, common_values
+from fleetctl.model import DesiredState, LogicalNode, common_values
 
 
 def canonical_state(state: DesiredState) -> dict[str, Any]:
@@ -41,24 +41,7 @@ def canonical_state(state: DesiredState) -> dict[str, Any]:
             for fleet in sorted(state.fleets, key=lambda item: item.object_id)
         ],
         "nodes": [
-            {
-                "id": node.object_id,
-                "role": node.role,
-                "region": node.region,
-                "display_name": node.display_name,
-                "hostname": node.hostname,
-                "public_port": node.public_port,
-                "transport": node.transport,
-                "flow": node.flow,
-                "fingerprint": node.fingerprint,
-                "server_name": node.server_name,
-                "reality_public_key": node.reality_public_key,
-                "reality_short_id": node.reality_short_id,
-                "private_key_ref": node.private_key_ref,
-                "mask_certificate_ref": node.mask_certificate_ref,
-                "mask_private_key_ref": node.mask_private_key_ref,
-                "common": common_values(state.common_for_node(node.object_id)),
-            }
+            _node_values(state, node)
             for node in sorted(state.nodes, key=lambda item: item.object_id)
         ],
         "instances": [
@@ -76,6 +59,32 @@ def canonical_state(state: DesiredState) -> dict[str, Any]:
             for instance in sorted(state.instances, key=lambda item: item.object_id)
         ],
     }
+
+
+def _node_values(state: DesiredState, node: LogicalNode) -> dict[str, Any]:
+    """Каноническая нода; ключ xhttp есть только у XHTTP-ноды."""
+
+    values: dict[str, Any] = {
+        "id": node.object_id,
+        "role": node.role,
+        "region": node.region,
+        "display_name": node.display_name,
+        "hostname": node.hostname,
+        "public_port": node.public_port,
+        "transport": node.transport,
+        "flow": node.flow,
+        "fingerprint": node.fingerprint,
+        "server_name": node.server_name,
+        "reality_public_key": node.reality_public_key,
+        "reality_short_id": node.reality_short_id,
+        "private_key_ref": node.private_key_ref,
+        "mask_certificate_ref": node.mask_certificate_ref,
+        "mask_private_key_ref": node.mask_private_key_ref,
+        "common": common_values(state.common_for_node(node.object_id)),
+    }
+    if node.xhttp is not None:
+        values["xhttp"] = {"path": node.xhttp.path, "mode": node.xhttp.mode}
+    return values
 
 
 def _control_values(state: DesiredState) -> dict[str, Any] | None:

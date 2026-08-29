@@ -95,13 +95,56 @@ class BackendManifestTests(unittest.TestCase):
         proto = REPO_ROOT / "contracts" / "manifest" / "v1" / "manifest.proto"
         self.assertEqual(
             hashlib.sha256(proto.read_bytes()).hexdigest(),
-            "bbbe8b19780187eac043eb124609df112e6c863d9009dd2de0036bc328b67ce9",
+            "d095cd4501fd67d5e064db8bf4c9a3eb4bb426a9ca59a9c643f5d366cfff5724",
         )
 
-    def test_compiles_complete_v1_request(self) -> None:
+    def test_xhttp_node_projects_its_block_and_tcp_node_does_not(self) -> None:
+        """Бэкенд отвергает и xhttp у TCP-ноды, и его отсутствие у XHTTP-ноды.
+
+        Обе половины проверяются здесь, потому что отказ придёт по gRPC уже
+        после того, как оператор поднял машину.
+        """
+        import dataclasses
+
+        from fleetctl.model import XHTTPConfig
+
+        nodes = []
+        for node in self.state.nodes:
+            if node.role == "entry":
+                node = dataclasses.replace(
+                    node,
+                    transport="xhttp",
+                    flow="",
+                    xhttp=XHTTPConfig(path="/stat/", mode="packet-up"),
+                )
+            nodes.append(node)
+        state = dataclasses.replace(self.state, nodes=tuple(nodes))
+        plan = build_impact_plan(
+            state, build_initial_baseline(state), initial_deployment=True
+        )
+        request = compile_backend_manifest(
+            state, plan, revision=43, allow_destructive=False
+        )
+
+        by_transport = {node["public"]["transport"]: node for node in request["nodes"]}
+        self.assertEqual(set(by_transport), {"tcp", "xhttp"})
+
+        xhttp = by_transport["xhttp"]["public"]
+        self.assertEqual(xhttp["xhttp"], {"path": "/stat/", "mode": "packet-up"})
+        self.assertEqual(xhttp["flow"], "")
+
+        tcp = by_transport["tcp"]["public"]
+        self.assertNotIn("xhttp", tcp)
+        self.assertEqual(tcp["flow"], "xtls-rprx-vision")
+
+    def test_tcp_only_fleet_carries_no_xhttp_key(self) -> None:
+        for node in self.compile_initial()["nodes"]:
+            self.assertNotIn("xhttp", node["public"])
+
+    def test_compiles_complete_request(self) -> None:
         request = self.compile_initial()
 
-        self.assertEqual(request["schema_version"], 1)
+        self.assertEqual(request["schema_version"], 2)
         self.assertEqual(request["revision"], 42)
         self.assertFalse(request["allow_destructive"])
         self.assertEqual(

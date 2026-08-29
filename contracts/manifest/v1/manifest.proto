@@ -1,17 +1,16 @@
 syntax = "proto3";
 
-// Приём infrastructure manifest. Нормативный источник: BACKEND_DOMAIN_AGREEMENTS.md
-// §6 (Infrastructure manifest) и §13 (materialization). Этот proto — wire-проекция
+// Приём infrastructure manifest и материализация топологии. Этот proto — wire-проекция
 // логического YAML-снапшота, который рендерит infra CI/CD. Со-owned с infra CI/CD.
 //
-// Вызывающая сторона аутентифицируется по mTLS с ролью manifest-writer (§14). Весь
+// Вызывающая сторона аутентифицируется по mTLS с ролью manifest-writer. Весь
 // снапшот применяется атомарно или не применяется вовсе; массовая материализация
-// customer access идёт асинхронно durable-джобой после commit (§6/§13).
+// customer access идёт асинхронно durable-джобой после commit.
 //
-// Ограничения полей, которые protobuf выразить не может (schema_version == 1,
-// revision > 0, регэксп fingerprint, transport == "tcp", flow == "xtls-rprx-vision",
-// уникальность, ссылочная целостность, destructive-guard), валидирует backend до
-// проекции; см. §6.
+// Ограничения полей, которые protobuf выразить не может (поддерживаемая
+// schema_version, revision > 0, регэксп fingerprint, совместимость transport с
+// xhttp и с flow, уникальность, ссылочная целостность, destructive-guard),
+// валидирует backend до проекции.
 package spiritvpn.manifest.v1;
 
 // ManifestService принимает полные versioned-снапшоты топологии от инфраструктуры.
@@ -23,7 +22,7 @@ service ManifestService {
 }
 
 message ApplyFleetManifestRequest {
-  // Зафиксировано в 1 для этой версии документа.
+  // Версия 1 поддерживает только TCP. Версия 2 добавляет XHTTP.
   uint32 schema_version = 1;
 
   // Глобальная, строго возрастающая (не обязательно последовательная) revision.
@@ -56,23 +55,35 @@ message ManifestNode {
 // NodeAgentConfig — как backend достаёт и аутентифицирует агента этой ноды (mTLS
 // поверх management WireGuard overlay). Клиенту не показывается.
 message NodeAgentConfig {
-  string endpoint = 1;              // host:port node-agent
-  string tls_server_name = 2;       // ожидаемый TLS SNI агента
-  string certificate_identity = 3;  // например spiffe://spiritvpn/node/NL-1
+  string endpoint = 1; // host:port node-agent
+  string tls_server_name = 2; // ожидаемый TLS SNI агента
+  string certificate_identity = 3; // например spiffe://spiritvpn/node/NL-1
 }
 
 // NodePublicConfig — публичные REALITY/VLESS-параметры для клиента, проецируются в
-// URI GetCustomerAccessLinks (§8). security=reality и encryption=none фиксированы
+// URI GetCustomerAccessLinks. security=reality и encryption=none фиксированы
 // протоколом v1 и намеренно отсутствуют здесь.
 message NodePublicConfig {
-  string address = 1;             // публичный host inbound
-  uint32 port = 2;                // публичный порт (1..65535)
-  string reality_public_key = 3;  // -> pbk
-  string server_name = 4;         // -> sni
-  string short_id = 5;            // -> sid
-  string fingerprint = 6;         // -> fp; ASCII 1..64 из [A-Za-z0-9._-]
-  string flow = 7;                // v1: "xtls-rprx-vision"
-  string transport = 8;           // v1: "tcp"
+  string address = 1; // публичный host inbound
+  uint32 port = 2; // публичный порт (1..65535)
+  string reality_public_key = 3; // -> pbk
+  string server_name = 4; // -> sni
+  string short_id = 5; // -> sid
+  string fingerprint = 6; // -> fp; ASCII 1..64 из [A-Za-z0-9._-]
+  string flow = 7; // "xtls-rprx-vision" при transport "tcp"; пустой при "xhttp"
+  string transport = 8; // v1: "tcp"; v2: "tcp" или "xhttp"
+
+  // Обязателен только для transport == "xhttp" в schema_version 2. Для TCP
+  // должен отсутствовать.
+  XHTTPConfig xhttp = 9;
+}
+
+message XHTTPConfig {
+  // HTTP path XHTTP; непустой, начинается с '/', не содержит query/fragment.
+  string path = 1;
+
+  // Один из: "auto", "packet-up", "stream-up", "stream-one".
+  string mode = 2;
 }
 
 // ManifestFleet — один продаваемый fleet: набор нод-участников плюс направленные
@@ -92,11 +103,11 @@ message ManifestFleet {
 // идентичность; пара (entry, exit) неизменяема для существующего routing_key.
 message ManifestBridge {
   string routing_key = 1;
-  string entry_node_id = 2;  // куда устанавливается customer VLESS user
-  string exit_node_id = 3;   // egress-нода (отлична от entry, тот же fleet)
+  string entry_node_id = 2; // куда устанавливается customer VLESS user
+  string exit_node_id = 3; // egress-нода (отлична от entry, тот же fleet)
 
   // Статический тег Xray outbound на входной ноде для этой relation. Обязателен и
-  // непуст. Хранится и передаётся агенту дословно как User.egress_key (§7/§9);
+  // непуст. Хранится и передаётся агенту дословно как User.egress_key;
   // неймингом владеет infra, backend его не деривит.
   string egress_tag = 4;
 

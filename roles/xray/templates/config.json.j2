@@ -46,15 +46,17 @@
 {% for client in xray_static_clients %}
           {
             "id": "{{ client.id }}",
-            "email": "{{ client.email }}",
-            "flow": "{{ client.flow | default('xtls-rprx-vision') }}"
+            "email": "{{ client.email }}"
+{%- if client.flow | default('') | length > 0 %},
+            "flow": "{{ client.flow }}"
+{%- endif %}
           }{{ "," if not loop.last }}
 {% endfor %}
         ],
         "decryption": "none"
       },
       "streamSettings": {
-        "network": "tcp",
+        "network": "{{ xray_transport }}",
         "security": "reality",
         "realitySettings": {
           "show": false,
@@ -64,6 +66,12 @@
           "privateKey": "{{ reality_private_key_eff }}",
           "shortIds": {{ reality_short_ids | to_json }}
         }
+{%- if xray_transport == 'xhttp' %},
+        "xhttpSettings": {
+          "path": "{{ xray_xhttp_path }}",
+          "mode": "{{ xray_xhttp_mode }}"
+        }
+{%- endif %}
       },
       "sniffing": {
         "enabled": true,
@@ -86,15 +94,17 @@
             "users": [
               {
                 "id": "{{ exit.uuid }}",
-                "flow": "{{ exit.flow | default('xtls-rprx-vision') }}",
                 "encryption": "none"
+{%- if exit.flow | default('') | length > 0 %},
+                "flow": "{{ exit.flow }}"
+{%- endif %}
               }
             ]
           }
         ]
       },
       "streamSettings": {
-        "network": "tcp",
+        "network": "{{ exit.transport | default('tcp') }}",
         "security": "reality",
         "realitySettings": {
           "fingerprint": "{{ exit.fingerprint | default('chrome') }}",
@@ -102,6 +112,12 @@
           "password": "{{ exit.reality_password }}",
           "shortId": "{{ exit.reality_short_id | default('') }}"
         }
+{%- if (exit.transport | default('tcp')) == 'xhttp' %},
+        "xhttpSettings": {
+          "path": "{{ exit.xhttp_path }}",
+          "mode": "{{ exit.xhttp_mode }}"
+        }
+{%- endif %}
       }
     },
 {% endfor %}

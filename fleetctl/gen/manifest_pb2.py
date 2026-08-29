@@ -24,15 +24,15 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0emanifest.proto\x12\x15spiritvpn.manifest.v1\"\xca\x01\n\x19\x41pplyFleetManifestRequest\x12\x16\n\x0eschema_version\x18\x01 \x01(\r\x12\x10\n\x08revision\x18\x02 \x01(\x04\x12\x19\n\x11\x61llow_destructive\x18\x03 \x01(\x08\x12\x32\n\x05nodes\x18\x04 \x03(\x0b\x32#.spiritvpn.manifest.v1.ManifestNode\x12\x34\n\x06\x66leets\x18\x05 \x03(\x0b\x32$.spiritvpn.manifest.v1.ManifestFleet\"\xa5\x01\n\x0cManifestNode\x12\x0f\n\x07node_id\x18\x01 \x01(\t\x12\x35\n\x05\x61gent\x18\x02 \x01(\x0b\x32&.spiritvpn.manifest.v1.NodeAgentConfig\x12\x37\n\x06public\x18\x03 \x01(\x0b\x32\'.spiritvpn.manifest.v1.NodePublicConfig\x12\x14\n\x0c\x64isplay_name\x18\x04 \x01(\t\"Z\n\x0fNodeAgentConfig\x12\x10\n\x08\x65ndpoint\x18\x01 \x01(\t\x12\x17\n\x0ftls_server_name\x18\x02 \x01(\t\x12\x1c\n\x14\x63\x65rtificate_identity\x18\x03 \x01(\t\"\xaa\x01\n\x10NodePublicConfig\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\r\x12\x1a\n\x12reality_public_key\x18\x03 \x01(\t\x12\x13\n\x0bserver_name\x18\x04 \x01(\t\x12\x10\n\x08short_id\x18\x05 \x01(\t\x12\x13\n\x0b\x66ingerprint\x18\x06 \x01(\t\x12\x0c\n\x04\x66low\x18\x07 \x01(\t\x12\x11\n\ttransport\x18\x08 \x01(\t\"o\n\rManifestFleet\x12\x14\n\x0cvpn_fleet_id\x18\x01 \x01(\x03\x12\x10\n\x08node_ids\x18\x02 \x03(\t\x12\x36\n\x07\x62ridges\x18\x03 \x03(\x0b\x32%.spiritvpn.manifest.v1.ManifestBridge\"|\n\x0eManifestBridge\x12\x13\n\x0brouting_key\x18\x01 \x01(\t\x12\x15\n\rentry_node_id\x18\x02 \x01(\t\x12\x14\n\x0c\x65xit_node_id\x18\x03 \x01(\t\x12\x12\n\negress_tag\x18\x04 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x05 \x01(\t\"r\n\x1a\x41pplyFleetManifestResponse\x12\x18\n\x10\x61pplied_revision\x18\x01 \x01(\x04\x12:\n\x06result\x18\x02 \x01(\x0e\x32*.spiritvpn.manifest.v1.ManifestApplyResult*\x85\x01\n\x13ManifestApplyResult\x12%\n!MANIFEST_APPLY_RESULT_UNSPECIFIED\x10\x00\x12!\n\x1dMANIFEST_APPLY_RESULT_APPLIED\x10\x01\x12$\n MANIFEST_APPLY_RESULT_IDEMPOTENT\x10\x02\x32\x8c\x01\n\x0fManifestService\x12y\n\x12\x41pplyFleetManifest\x12\x30.spiritvpn.manifest.v1.ApplyFleetManifestRequest\x1a\x31.spiritvpn.manifest.v1.ApplyFleetManifestResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0emanifest.proto\x12\x15spiritvpn.manifest.v1\"\xca\x01\n\x19\x41pplyFleetManifestRequest\x12\x16\n\x0eschema_version\x18\x01 \x01(\r\x12\x10\n\x08revision\x18\x02 \x01(\x04\x12\x19\n\x11\x61llow_destructive\x18\x03 \x01(\x08\x12\x32\n\x05nodes\x18\x04 \x03(\x0b\x32#.spiritvpn.manifest.v1.ManifestNode\x12\x34\n\x06\x66leets\x18\x05 \x03(\x0b\x32$.spiritvpn.manifest.v1.ManifestFleet\"\xa5\x01\n\x0cManifestNode\x12\x0f\n\x07node_id\x18\x01 \x01(\t\x12\x35\n\x05\x61gent\x18\x02 \x01(\x0b\x32&.spiritvpn.manifest.v1.NodeAgentConfig\x12\x37\n\x06public\x18\x03 \x01(\x0b\x32\'.spiritvpn.manifest.v1.NodePublicConfig\x12\x14\n\x0c\x64isplay_name\x18\x04 \x01(\t\"Z\n\x0fNodeAgentConfig\x12\x10\n\x08\x65ndpoint\x18\x01 \x01(\t\x12\x17\n\x0ftls_server_name\x18\x02 \x01(\t\x12\x1c\n\x14\x63\x65rtificate_identity\x18\x03 \x01(\t\"\xdd\x01\n\x10NodePublicConfig\x12\x0f\n\x07\x61\x64\x64ress\x18\x01 \x01(\t\x12\x0c\n\x04port\x18\x02 \x01(\r\x12\x1a\n\x12reality_public_key\x18\x03 \x01(\t\x12\x13\n\x0bserver_name\x18\x04 \x01(\t\x12\x10\n\x08short_id\x18\x05 \x01(\t\x12\x13\n\x0b\x66ingerprint\x18\x06 \x01(\t\x12\x0c\n\x04\x66low\x18\x07 \x01(\t\x12\x11\n\ttransport\x18\x08 \x01(\t\x12\x31\n\x05xhttp\x18\t \x01(\x0b\x32\".spiritvpn.manifest.v1.XHTTPConfig\")\n\x0bXHTTPConfig\x12\x0c\n\x04path\x18\x01 \x01(\t\x12\x0c\n\x04mode\x18\x02 \x01(\t\"o\n\rManifestFleet\x12\x14\n\x0cvpn_fleet_id\x18\x01 \x01(\x03\x12\x10\n\x08node_ids\x18\x02 \x03(\t\x12\x36\n\x07\x62ridges\x18\x03 \x03(\x0b\x32%.spiritvpn.manifest.v1.ManifestBridge\"|\n\x0eManifestBridge\x12\x13\n\x0brouting_key\x18\x01 \x01(\t\x12\x15\n\rentry_node_id\x18\x02 \x01(\t\x12\x14\n\x0c\x65xit_node_id\x18\x03 \x01(\t\x12\x12\n\negress_tag\x18\x04 \x01(\t\x12\x14\n\x0c\x64isplay_name\x18\x05 \x01(\t\"r\n\x1a\x41pplyFleetManifestResponse\x12\x18\n\x10\x61pplied_revision\x18\x01 \x01(\x04\x12:\n\x06result\x18\x02 \x01(\x0e\x32*.spiritvpn.manifest.v1.ManifestApplyResult*\x85\x01\n\x13ManifestApplyResult\x12%\n!MANIFEST_APPLY_RESULT_UNSPECIFIED\x10\x00\x12!\n\x1dMANIFEST_APPLY_RESULT_APPLIED\x10\x01\x12$\n MANIFEST_APPLY_RESULT_IDEMPOTENT\x10\x02\x32\x8c\x01\n\x0fManifestService\x12y\n\x12\x41pplyFleetManifest\x12\x30.spiritvpn.manifest.v1.ApplyFleetManifestRequest\x1a\x31.spiritvpn.manifest.v1.ApplyFleetManifestResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'manifest_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_MANIFESTAPPLYRESULT']._serialized_start=1035
-  _globals['_MANIFESTAPPLYRESULT']._serialized_end=1168
+  _globals['_MANIFESTAPPLYRESULT']._serialized_start=1129
+  _globals['_MANIFESTAPPLYRESULT']._serialized_end=1262
   _globals['_APPLYFLEETMANIFESTREQUEST']._serialized_start=42
   _globals['_APPLYFLEETMANIFESTREQUEST']._serialized_end=244
   _globals['_MANIFESTNODE']._serialized_start=247
@@ -40,13 +40,15 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_NODEAGENTCONFIG']._serialized_start=414
   _globals['_NODEAGENTCONFIG']._serialized_end=504
   _globals['_NODEPUBLICCONFIG']._serialized_start=507
-  _globals['_NODEPUBLICCONFIG']._serialized_end=677
-  _globals['_MANIFESTFLEET']._serialized_start=679
-  _globals['_MANIFESTFLEET']._serialized_end=790
-  _globals['_MANIFESTBRIDGE']._serialized_start=792
-  _globals['_MANIFESTBRIDGE']._serialized_end=916
-  _globals['_APPLYFLEETMANIFESTRESPONSE']._serialized_start=918
-  _globals['_APPLYFLEETMANIFESTRESPONSE']._serialized_end=1032
-  _globals['_MANIFESTSERVICE']._serialized_start=1171
-  _globals['_MANIFESTSERVICE']._serialized_end=1311
+  _globals['_NODEPUBLICCONFIG']._serialized_end=728
+  _globals['_XHTTPCONFIG']._serialized_start=730
+  _globals['_XHTTPCONFIG']._serialized_end=771
+  _globals['_MANIFESTFLEET']._serialized_start=773
+  _globals['_MANIFESTFLEET']._serialized_end=884
+  _globals['_MANIFESTBRIDGE']._serialized_start=886
+  _globals['_MANIFESTBRIDGE']._serialized_end=1010
+  _globals['_APPLYFLEETMANIFESTRESPONSE']._serialized_start=1012
+  _globals['_APPLYFLEETMANIFESTRESPONSE']._serialized_end=1126
+  _globals['_MANIFESTSERVICE']._serialized_start=1265
+  _globals['_MANIFESTSERVICE']._serialized_end=1405
 # @@protoc_insertion_point(module_scope)

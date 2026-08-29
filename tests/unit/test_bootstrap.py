@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 import yaml
-from jinja2 import Environment
+from jinja2 import Environment, StrictUndefined
 
 from fleetctl.validation import validate_environment
 
@@ -33,8 +33,16 @@ def compiled_node_facts() -> dict[str, object]:
 
 
 def ansible_jinja() -> Environment:
-    """Stock Jinja plus the two Ansible filters these templates use."""
-    environment = Environment(trim_blocks=True, lstrip_blocks=True)
+    """Stock Jinja plus the two Ansible filters these templates use.
+
+    StrictUndefined because the alternative is worse than a missing value: a
+    default Undefined renders as an empty string, so a template referencing a
+    variable the test forgot to pass still produces parseable JSON with an empty
+    field, and the assertion below it passes on a config no node would accept.
+    """
+    environment = Environment(
+        trim_blocks=True, lstrip_blocks=True, undefined=StrictUndefined
+    )
     environment.filters["to_json"] = json.dumps
     environment.filters["bool"] = lambda value: (
         value
@@ -268,6 +276,9 @@ class XrayBridgeRoutingTests(unittest.TestCase):
             xray_metrics_enabled=False,
             xray_stats_user_traffic=True,
             xray_listen_port=443,
+            xray_transport="tcp",
+            xray_xhttp_path="",
+            xray_xhttp_mode="auto",
             xray_inbound_tag="xi-vless",
             xray_static_clients=[
                 {
@@ -321,6 +332,159 @@ class XrayBridgeRoutingTests(unittest.TestCase):
             self.assertIn(network, first["ip"])
         for entry in first["ip"]:
             self.assertFalse(entry.startswith(("geoip:", "geosite:")), entry)
+
+
+class XrayTransportTests(unittest.TestCase):
+    """XHTTP and TCP share one template, and the differences are not cosmetic.
+
+    Xray rejects `xtls-rprx-vision` over XHTTP with "XTLS only supports TLS and
+    REALITY directly for now.", and it does so on the client, before the node is
+    ever contacted: a node rendered with a flow it must not have accepts nobody
+    and reports nothing. `xray run -test` does not catch it either — the config
+    is valid, just unusable.
+    """
+
+    @staticmethod
+    def xray_defaults() -> dict:
+        return yaml.safe_load(
+            (REPO_ROOT / "roles" / "xray" / "defaults" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+
+    def render(self, **overrides: object) -> dict:
+        template = ansible_jinja().from_string(
+            (REPO_ROOT / "roles" / "xray" / "templates" / "config.json.j2").read_text(
+                encoding="utf-8"
+            )
+        )
+        context: dict[str, object] = dict(
+            xray_loglevel="warning",
+            xray_access_log="none",
+            xray_error_log="/var/log/xray/error.log",
+            xray_mask_address="quarter",
+            xray_dns_servers=[],
+            xray_enable_api=True,
+            xray_api_bind="127.0.0.1",
+            xray_api_port=10085,
+            xray_api_services=["HandlerService"],
+            xray_metrics_enabled=False,
+            xray_stats_user_traffic=True,
+            xray_listen_port=443,
+            xray_transport="tcp",
+            xray_xhttp_path="",
+            xray_xhttp_mode="auto",
+            xray_inbound_tag="xi-vless",
+            xray_static_clients=[],
+            reality_dest="127.0.0.1:8443",
+            reality_server_names=["vmshare.example.invalid"],
+            reality_private_key_eff="k" * 43,
+            reality_short_ids=["8456802426f0b3c1"],
+            xray_sniffing_route_only=True,
+            node_role="entry",
+            entry_exits=[],
+            xray_direct_outbound_tag="direct",
+            xray_block_outbound_tag="block",
+            xray_domain_strategy="AsIs",
+            xray_block_domains=[],
+            xray_manage_routing_via_agent=True,
+            entry_default_exit_tag="",
+            xray_entry_block_unmatched=True,
+            xray_private_networks=self.xray_defaults()["xray_private_networks"],
+        )
+        context.update(overrides)
+        return json.loads(template.render(**context))
+
+    @staticmethod
+    def exit_outbound(*, transport: str) -> dict:
+        common = {
+            "tag": f"xo-{transport}",
+            "address": "192.0.2.30",
+            "port": 443,
+            "uuid": "22222222-2222-4222-8222-222222222222",
+            "reality_sni": "exit.example.invalid",
+            "reality_password": "public-key",
+            "reality_short_id": "ab",
+            "fingerprint": "chrome",
+        }
+        if transport == "xhttp":
+            return {
+                **common,
+                "transport": "xhttp",
+                "flow": "",
+                "xhttp_path": "/stat/",
+                "xhttp_mode": "packet-up",
+            }
+        return {
+            **common,
+            "transport": "tcp",
+            "flow": "xtls-rprx-vision",
+            "xhttp_path": "",
+            "xhttp_mode": "",
+        }
+
+    def test_tcp_inbound_keeps_its_shape(self) -> None:
+        stream = self.render(
+            xray_static_clients=[{"id": "i", "email": "bridge-x", "flow": "xtls-rprx-vision"}],
+        )["inbounds"][0]
+        self.assertEqual(stream["streamSettings"]["network"], "tcp")
+        self.assertNotIn("xhttpSettings", stream["streamSettings"])
+        self.assertEqual(stream["settings"]["clients"][0]["flow"], "xtls-rprx-vision")
+
+    def test_xhttp_inbound_carries_path_and_drops_flow(self) -> None:
+        stream = self.render(
+            xray_transport="xhttp",
+            xray_xhttp_path="/stat/",
+            xray_xhttp_mode="auto",
+            xray_static_clients=[{"id": "i", "email": "bridge-x", "flow": ""}],
+        )["inbounds"][0]
+
+        self.assertEqual(stream["streamSettings"]["network"], "xhttp")
+        self.assertEqual(
+            stream["streamSettings"]["xhttpSettings"], {"path": "/stat/", "mode": "auto"}
+        )
+        self.assertEqual(stream["streamSettings"]["security"], "reality")
+        self.assertNotIn("flow", stream["settings"]["clients"][0])
+
+    def test_inbound_mode_stays_permissive(self) -> None:
+        """Server `auto` accepts any client mode; `packet-up` would refuse the
+        `stream-one` that a client on `auto` picks under REALITY."""
+
+        self.assertEqual(self.xray_defaults()["xray_xhttp_mode"], "auto")
+
+    def test_each_bridge_outbound_follows_its_own_exit(self) -> None:
+        config = self.render(
+            xray_transport="xhttp",
+            xray_xhttp_path="/stat/",
+            entry_exits=[
+                self.exit_outbound(transport="tcp"),
+                self.exit_outbound(transport="xhttp"),
+            ],
+        )
+        outbounds = {
+            item["tag"]: item for item in config["outbounds"] if item.get("protocol") == "vless"
+        }
+
+        tcp = outbounds["xo-tcp"]["streamSettings"]
+        self.assertEqual(tcp["network"], "tcp")
+        self.assertNotIn("xhttpSettings", tcp)
+        self.assertEqual(
+            outbounds["xo-tcp"]["settings"]["vnext"][0]["users"][0]["flow"],
+            "xtls-rprx-vision",
+        )
+
+        xhttp = outbounds["xo-xhttp"]["streamSettings"]
+        self.assertEqual(xhttp["network"], "xhttp")
+        self.assertEqual(xhttp["xhttpSettings"], {"path": "/stat/", "mode": "packet-up"})
+        self.assertNotIn("flow", outbounds["xo-xhttp"]["settings"]["vnext"][0]["users"][0])
+
+    def test_role_refuses_a_transport_that_disagrees_with_the_path(self) -> None:
+        tasks = (REPO_ROOT / "roles" / "xray" / "tasks" / "main.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("xray_transport in ['tcp', 'xhttp']", tasks)
+        self.assertIn("xray_transport != 'xhttp' or (xray_xhttp_path | length) > 0", tasks)
+        self.assertIn("xray_transport != 'tcp' or (xray_xhttp_path | length) == 0", tasks)
 
 
 class SshPortHandoverTests(unittest.TestCase):

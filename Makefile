@@ -36,6 +36,14 @@ fleet-sops-envelope-check: ## Validate encrypted desired-state structure without
 fleet-test: ## Run offline fleetctl unit tests
 	python3 -m unittest discover -s tests/unit -v
 
+fleet-proto-gen: ## Regenerate fleetctl/gen from contracts; needs grpcio-tools matching protobuf>=7.35,<8
+	python3 -m grpc_tools.protoc -I contracts/manifest/v1 \
+		--python_out=fleetctl/gen --grpc_python_out=fleetctl/gen \
+		contracts/manifest/v1/manifest.proto
+	sed -i 's/^import manifest_pb2 as manifest__pb2$$/from . import manifest_pb2 as manifest__pb2/' \
+		fleetctl/gen/manifest_pb2_grpc.py
+	git diff --stat fleetctl/gen
+
 fleet-render: ## Render local artifacts; ENVIRONMENT=develop by default
 	python3 -m fleetctl.cli render --environment "$(or $(ENVIRONMENT),develop)" --output "build/$(or $(ENVIRONMENT),develop)"
 

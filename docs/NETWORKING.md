@@ -146,10 +146,17 @@ sequenceDiagram
 
 ### 3.1. Приём клиента
 
-Xray слушает `0.0.0.0:<logical_node.public.port>` и принимает VLESS поверх TCP
-с REALITY и flow `xtls-rprx-vision`. Публичный firewall открывает только этот
-TCP-порт. REALITY направляет маскировочный трафик в nginx на
-`127.0.0.1:8443`; nginx не доступен с сети напрямую.
+Xray слушает `0.0.0.0:<logical_node.public.port>` и принимает VLESS поверх
+транспорта из `logical_node.public.transport` с REALITY. Публичный firewall
+открывает только этот TCP-порт. REALITY направляет маскировочный трафик в nginx
+на `127.0.0.1:8443`; nginx не доступен с сети напрямую.
+
+Транспорт задаёт flow. У `tcp` это `xtls-rprx-vision`; у `xhttp` flow пуст, и
+дополнительно объявляются `public.xhttp.path` и `public.xhttp.mode`. Inbound
+рендерится с `mode: auto`, принимающим клиента в любом режиме, а объявленный
+`mode` уезжает в клиентскую ссылку. Транспорт ноды выбирается независимо от
+транспорта её бриджей: outbound на exit собирается по транспорту самой
+exit-ноды.
 
 Обе роли, entry и exit, имеют публичный VLESS inbound. Entry обслуживает
 пользователей и выбирает exit; exit принимает инфраструктурную bridge-учётную

@@ -28,11 +28,32 @@
           "properties": {
             "hostname": {"type": "string", "format": "hostname", "maxLength": 253},
             "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-            "transport": {"const": "tcp"},
-            "flow": {"const": "xtls-rprx-vision"},
+            "transport": {"enum": ["tcp", "xhttp"]},
+            "flow": {"type": "string"},
             "fingerprint": {"type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$"},
-            "server_name": {"type": "string", "format": "hostname", "maxLength": 253}
-          }
+            "server_name": {"type": "string", "format": "hostname", "maxLength": 253},
+            "xhttp": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "mode"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "pattern": "^/[A-Za-z0-9._~%!$&'()*+,;=:@/-]*$"
+                },
+                "mode": {"enum": ["auto", "packet-up", "stream-up", "stream-one"]}
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {"properties": {"transport": {"const": "xhttp"}}, "required": ["transport"]},
+              "then": {"required": ["xhttp"], "properties": {"flow": {"const": ""}}},
+              "else": {"not": {"required": ["xhttp"]}, "properties": {"flow": {"const": "xtls-rprx-vision"}}}
+            }
+          ]
         },
         "reality": {
           "type": "object",

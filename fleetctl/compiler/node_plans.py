@@ -52,6 +52,7 @@ def compile_node_plans(state: DesiredState) -> dict[str, dict[str, Any]]:
                     "flow": node.flow,
                     "fingerprint": node.fingerprint,
                     "server_name": node.server_name,
+                    **_xhttp_values(node),
                 },
                 "reality": {
                     "public_key": node.reality_public_key,
@@ -106,6 +107,14 @@ def compile_node_plans(state: DesiredState) -> dict[str, dict[str, Any]]:
             "logs": _logs_projection(state),
         }
     return plans
+
+
+def _xhttp_values(node: LogicalNode) -> dict[str, Any]:
+    """Блок xhttp попадает в план только у XHTTP-ноды."""
+
+    if node.xhttp is None:
+        return {}
+    return {"xhttp": {"path": node.xhttp.path, "mode": node.xhttp.mode}}
 
 
 def _logs_projection(state: DesiredState) -> dict[str, Any]:
@@ -165,6 +174,7 @@ def _routing_projection(
                         "fingerprint": exit_node.fingerprint,
                         "flow": exit_node.flow,
                         "transport": exit_node.transport,
+                        **_xhttp_values(exit_node),
                     },
                 }
             )

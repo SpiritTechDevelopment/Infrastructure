@@ -9,6 +9,9 @@ xray_config_dir: "{{ vpn_stack_dir }}/xray"
 
 public_port: 443
 xray_listen_port: "{{ public_port }}"
+xray_transport: tcp
+xray_xhttp_path: ""
+xray_xhttp_mode: auto
 xray_loglevel: info
 # 'none' disables the log. An empty string would send it to stdout, so the
 # safe default for a record of client addresses and destinations is not "".

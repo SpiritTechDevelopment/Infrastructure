@@ -21,6 +21,7 @@ from fleetctl.model import (
     Instance,
     ImmutableImage,
     LogicalNode,
+    XHTTPConfig,
     common_from_values,
 )
 
@@ -368,6 +369,7 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 public_port=spec["public"]["port"],
                 transport=spec["public"]["transport"],
                 flow=spec["public"]["flow"],
+                xhttp=_xhttp_from_spec(spec["public"].get("xhttp")),
                 fingerprint=spec["public"]["fingerprint"],
                 server_name=spec["public"]["server_name"],
                 reality_public_key=spec["reality"]["public_key"],
@@ -396,6 +398,14 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 bootstrap_port=spec.get("bootstrap_port", 22),
             )
     raise AssertionError(f"unreachable kind: {document['kind']}")
+
+
+def _xhttp_from_spec(xhttp_spec: dict[str, Any] | None) -> XHTTPConfig | None:
+    """Отсутствие блока — это TCP-нода, а не неполная запись."""
+
+    if xhttp_spec is None:
+        return None
+    return XHTTPConfig(path=xhttp_spec["path"], mode=xhttp_spec["mode"])
 
 
 def _to_public_endpoint(endpoint_spec: dict[str, Any] | None) -> dict[str, str | None]:

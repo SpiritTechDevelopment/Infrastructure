@@ -16,6 +16,7 @@ from .objects import (
     NetworkingConfig,
     ObservabilityConfig,
     RolloutConfig,
+    XHTTPConfig,
     XrayConfig,
 )
 from .overrides import CommonOverrideError, apply_common_overrides, common_from_values
@@ -39,6 +40,7 @@ __all__ = [
     "NetworkingConfig",
     "ObservabilityConfig",
     "RolloutConfig",
+    "XHTTPConfig",
     "XrayConfig",
     "CommonOverrideError",
     "apply_common_overrides",

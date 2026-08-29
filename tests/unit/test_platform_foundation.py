@@ -1039,6 +1039,9 @@ all:
                     resource_id=None,
                     ssh_host_key=FIXTURE_SSH_HOST_KEY,
                     bootstrap_port=22,
+                    transport="tcp",
+                    xhttp_path=None,
+                    xhttp_mode="packet-up",
                 )
             )
             # 22 — умолчание, и в объявлении его быть не должно: явное значение
@@ -1065,6 +1068,84 @@ all:
                 {node["spec"]["reality"]["private_key_ref"]: private_key},
                 {node["spec"]["reality"]["private_key_ref"]: node["spec"]["reality"]["public_key"]},
             )
+
+    def test_node_prepare_emits_an_xhttp_declaration_the_contract_accepts(self) -> None:
+        """XHTTP-объявление проходит ту же схему, что и TCP.
+
+        Контракт связывает transport, flow и блок xhttp: у XHTTP-ноды flow
+        обязан быть пустым, а path и mode обязаны присутствовать. Генератор,
+        собирающий эту тройку несогласованно, выдал бы объявление, которое
+        схема примет, а бэкенд отвергнет уже после создания VPS.
+        """
+        from fleetctl.validation import validate_environment
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            desired_root = root / "desired"
+            shutil.copytree(VALID_DESIRED, desired_root)
+            module = _load_script("node-prepare.py", "spiritvpn_node_prepare")
+            _, (node, instance) = module.build(
+                argparse.Namespace(
+                    environment="develop",
+                    node_id="develop-entry-se",
+                    role="entry",
+                    region="se",
+                    hostname="edge-se.develop.example.invalid",
+                    server_name=None,
+                    port=443,
+                    display_name="Sweden",
+                    address="192.0.2.31",
+                    slot=4,
+                    bandwidth_profile="vps-1g",
+                    resource_id=None,
+                    ssh_host_key=FIXTURE_SSH_HOST_KEY,
+                    bootstrap_port=22,
+                    transport="xhttp",
+                    xhttp_path="/stat/",
+                    xhttp_mode="packet-up",
+                )
+            )
+
+            self.assertEqual(node["spec"]["public"]["flow"], "")
+            self.assertEqual(
+                node["spec"]["public"]["xhttp"], {"path": "/stat/", "mode": "packet-up"}
+            )
+
+            topology_fixture.put(desired_root, node)
+            topology_fixture.put(desired_root, instance)
+            state = validate_environment(REPO_ROOT, "develop", desired_root=desired_root)
+            declared = {item.object_id: item for item in state.nodes}["develop-entry-se"]
+            self.assertEqual(declared.transport, "xhttp")
+            self.assertEqual(declared.flow, "")
+            self.assertIsNotNone(declared.xhttp)
+            self.assertEqual(declared.xhttp.path, "/stat/")
+
+    def test_node_prepare_refuses_an_incoherent_transport(self) -> None:
+        """Транспорт без пути и путь без транспорта — отказ до Vault."""
+
+        module = _load_script("node-prepare.py", "spiritvpn_node_prepare")
+        base = dict(
+            environment="develop",
+            node_id="develop-entry-se",
+            role="entry",
+            region="se",
+            hostname="edge-se.develop.example.invalid",
+            server_name=None,
+            port=443,
+            display_name="Sweden",
+            address="192.0.2.31",
+            slot=4,
+            bandwidth_profile="vps-1g",
+            resource_id=None,
+            ssh_host_key=FIXTURE_SSH_HOST_KEY,
+            bootstrap_port=22,
+            xhttp_mode="packet-up",
+        )
+
+        with self.assertRaises(module.NodePrepareError):
+            module.build(argparse.Namespace(**base, transport="xhttp", xhttp_path=None))
+        with self.assertRaises(module.NodePrepareError):
+            module.build(argparse.Namespace(**base, transport="tcp", xhttp_path="/stat/"))
 
     def test_bot_pem_secrets_are_checked_for_being_pem(self) -> None:
         """Непустое — ещё не сертификат.
