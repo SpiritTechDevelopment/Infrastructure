@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import stat
 import sys
 from pathlib import Path
 
@@ -16,6 +14,7 @@ from fleetctl.adapters import (
     GitAdapterError,
     GitRepository,
     OutputDirectoryError,
+    read_cloudflare_token,
     reconcile_cloudflare_dns,
     write_generated_artifact,
     write_rendered_files,
@@ -57,6 +56,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--source", default="HEAD", help="source commit or ref (default: HEAD)")
     plan.add_argument("--output", type=Path, help="fleetctl-managed build directory; JSON is printed when omitted")
+    check_change = commands.add_parser(
+        "check-change",
+        help="validate and compile the exact transition from the deployment ref",
+    )
+    check_change.add_argument("--environment", required=True, choices=("develop", "prod"))
+    check_change.add_argument("--source", default="HEAD", help="source commit or ref (default: HEAD)")
+    check_change.add_argument(
+        "--initial",
+        action="store_true",
+        help="check an intentional first deployment when no deployment ref exists",
+    )
+    check_change.add_argument("--output", required=True, type=Path)
     manifest = commands.add_parser(
         "manifest",
         help="render a deployment-scoped backend manifest without making an RPC",
@@ -127,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
     deploy.add_argument("--bootstrap-vars", type=Path)
     deploy.add_argument("--compiled-secrets", type=Path)
     deploy.add_argument("--readiness-vars", type=Path)
+    deploy.add_argument(
+        "--cloudflare-token-file",
+        type=Path,
+        help="mode-0600 token used to reconcile DNS after readiness and backend apply",
+    )
     deploy.add_argument(
         "--backend-client-certificate",
         type=Path,
@@ -222,6 +238,49 @@ def main(argv: list[str] | None = None) -> int:
         except (GitAdapterError, PlanningError, OutputDirectoryError) as exc:
             print(str(exc), file=sys.stderr)
             return 2
+    if args.command == "check-change":
+        try:
+            current, impact_plan = _prepare_plan(
+                args.root,
+                args.environment,
+                source=args.source,
+                baseline_path=None,
+                initial=args.initial,
+            )
+            files = render_files(current)
+            write_rendered_files(args.output, files)
+            host_count = validate_ansible_artifacts(args.output, args.environment)
+            target = write_generated_artifact(
+                args.output,
+                "impact-plan.json",
+                impact_plan.to_json_bytes(),
+            )
+        except DesiredStateInvalid as exc:
+            for issue in exc.issues:
+                print(issue.render(), file=sys.stderr)
+            print(f"{args.environment}: invalid ({len(exc.issues)} error(s))", file=sys.stderr)
+            return 1
+        except (
+            CompiledArtifactsError,
+            GitAdapterError,
+            PlanningError,
+            OutputDirectoryError,
+        ) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        summary = {
+            "environment": args.environment,
+            "source_git_sha": impact_plan.source_git_sha,
+            "baseline_git_sha": impact_plan.baseline_git_sha,
+            "initial_deployment": impact_plan.initial_deployment,
+            "transition_kinds": list(impact_plan.transition_kinds),
+            "change_count": len(impact_plan.changes),
+            "destructive": impact_plan.destructive,
+            "compiled_host_count": host_count,
+            "impact_plan": str(target),
+        }
+        print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     if args.command == "manifest":
         try:
             current, impact_plan = _prepare_plan(
@@ -305,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
                 repository = GitRepository(args.root)
                 source_git_sha = repository.resolve_commit("HEAD")
                 repository.assert_desired_matches_commit(source_git_sha)
-            token = _read_cloudflare_token(args.token_file)
+            token = read_cloudflare_token(args.token_file)
             result = reconcile_cloudflare_dns(
                 compile_dns_plan(state),
                 CloudflareClient(token),
@@ -335,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
                     bootstrap_vars=args.bootstrap_vars,
                     compiled_secrets=args.compiled_secrets,
                     readiness_vars=args.readiness_vars,
+                    cloudflare_token_file=args.cloudflare_token_file,
                     ca_state=args.ca_state,
                     backend_client_certificate=args.backend_client_certificate,
                     backend_client_private_key=args.backend_client_private_key,
@@ -378,27 +438,6 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     raise AssertionError(f"unreachable command: {args.command}")
-
-
-def _read_cloudflare_token(token_file: Path | None) -> str:
-    if token_file is None:
-        token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
-        if not token:
-            raise CloudflareDnsError("provide --token-file or set CLOUDFLARE_API_TOKEN")
-        return token
-    if token_file.is_symlink():
-        raise CloudflareDnsError(f"refusing symlink Cloudflare token file: {token_file}")
-    metadata = token_file.stat()
-    if not stat.S_ISREG(metadata.st_mode):
-        raise CloudflareDnsError(f"Cloudflare token path is not a regular file: {token_file}")
-    if stat.S_IMODE(metadata.st_mode) & 0o077:
-        raise CloudflareDnsError(
-            f"Cloudflare token file must not be group/world accessible: {token_file}"
-        )
-    token = token_file.read_text(encoding="utf-8").strip()
-    if not token:
-        raise CloudflareDnsError(f"Cloudflare token file is empty: {token_file}")
-    return token
 
 
 def _prepare_plan(

@@ -360,6 +360,15 @@ def _check_stability_preconditions(current: DesiredState, baseline: DesiredState
         current_instance = current_instances.get(instance.object_id)
         if current_instance is not None and current_instance.logical_node != instance.logical_node:
             raise PlanningError(f"instance {instance.object_id!r} was rebound to a different logical node")
+        if current_instance is not None and (
+            current_instance.provider_name != instance.provider_name
+            or current_instance.provider_resource_id != instance.provider_resource_id
+            or current_instance.ssh_host_key != instance.ssh_host_key
+        ):
+            raise PlanningError(
+                f"instance {instance.object_id!r} changed machine identity; "
+                "declare the replacement with a new instance ID so bootstrap cannot be skipped"
+            )
 
 
 def _by_id(items: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:

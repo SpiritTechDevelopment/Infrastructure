@@ -44,8 +44,24 @@ class ImpactPlanningTests(unittest.TestCase):
         second = build_impact_plan(state, state)
         self.assertEqual(first.to_json_bytes(), second.to_json_bytes())
         self.assertEqual(first.changes, ())
+        self.assertEqual(first.transition_kinds, ("no-op",))
         self.assertFalse(first.destructive)
         self.assertEqual(first.source_digest, first.baseline_digest)
+
+    def test_physical_machine_cannot_hide_behind_an_existing_instance_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            baseline_root = copy_valid_desired(root, "baseline")
+            current_root = copy_valid_desired(root, "current")
+            instance = topology_fixture.get(current_root, "develop-entry-nl-01")
+            instance["spec"]["provider"]["resource_id"] = "a-different-machine"
+            topology_fixture.put(current_root, instance)
+
+            baseline = validate_environment(REPO_ROOT, "develop", desired_root=baseline_root)
+            current = validate_environment(REPO_ROOT, "develop", desired_root=current_root)
+
+        with self.assertRaisesRegex(PlanningError, "new instance ID"):
+            build_impact_plan(current, baseline)
 
     def test_exit_replacement_expands_to_linked_entry(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -68,6 +84,7 @@ class ImpactPlanningTests(unittest.TestCase):
         self.assertNotIn("INSTANCE_ADDED", change_types)
         self.assertNotIn("INSTANCE_REMOVED", change_types)
         self.assertFalse(plan.destructive)
+        self.assertEqual(plan.transition_kinds, ("replacement",))
         self.assertEqual(plan.affected["provision"], ("develop-exit-de-02",))
         self.assertEqual(plan.affected["retire"], ("develop-exit-de-01",))
         self.assertIn("develop-entry-nl-01", plan.affected["node_runtime"])
@@ -134,6 +151,7 @@ class ImpactPlanningTests(unittest.TestCase):
 
         self.assertIn("develop-entry-nl-02", plan.affected["monitoring"])
         self.assertNotIn("develop-entry-nl", plan.affected["dns_nodes"])
+        self.assertEqual(plan.transition_kinds, ("addition",))
 
     def test_agent_port_change_affects_monitoring_but_not_dns(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

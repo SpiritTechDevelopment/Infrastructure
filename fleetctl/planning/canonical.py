@@ -67,6 +67,8 @@ def canonical_state(state: DesiredState) -> dict[str, Any]:
                 "logical_node": instance.logical_node,
                 "target_state": instance.target_state,
                 "public_address": instance.public_address,
+                "ssh_host_key": instance.ssh_host_key,
+                "bootstrap_port": instance.bootstrap_port,
                 "bandwidth_profile": instance.bandwidth_profile,
                 "provider_name": instance.provider_name,
                 "provider_resource_id": instance.provider_resource_id,

@@ -48,10 +48,14 @@ def build_record(**overrides):
         "source_git_sha": SOURCE_SHA,
         "baseline_git_sha": BASELINE_SHA,
         "dry_run": False,
-        "status": "BACKEND_APPLIED",
+        "status": "RECONCILED",
         "deployment_ref_updated": False,
-        "diagnostic": "Backend accepted manifest revision 17 (MANIFEST_APPLY_RESULT_APPLIED).",
-        "steps": [{"name": "readiness_gates", "status": "COMPLETED"}],
+        "diagnostic": "Infrastructure, backend manifest and DNS reached the reviewed source.",
+        "dns_apply": {"status": "APPLIED", "change_count": 1, "record_count": 2},
+        "steps": [
+            {"name": "readiness_gates", "status": "COMPLETED"},
+            {"name": "apply_dns", "status": "COMPLETED"},
+        ],
     }
     record.update(overrides)
     return record
@@ -117,6 +121,16 @@ class DeploymentRecordTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stdout, "promote=false\n")
         self.assertIn("no RPC was sent", stderr)
+
+    def test_backend_without_dns_does_not_advance_the_ref(self) -> None:
+        for status in ("BACKEND_APPLIED", "WAITING_FOR_DNS"):
+            with self.subTest(status=status):
+                code, stdout, stderr = self.run_for_record(
+                    build_record(status=status, diagnostic="DNS was not applied")
+                )
+                self.assertEqual(code, 0)
+                self.assertEqual(stdout, "promote=false\n")
+                self.assertIn("DNS was not applied", stderr)
 
     def test_record_for_another_deployment_is_refused(self) -> None:
         for overrides in (

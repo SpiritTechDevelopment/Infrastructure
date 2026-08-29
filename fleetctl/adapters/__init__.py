@@ -3,6 +3,7 @@ from .backend import BackendCallError, BackendEndpoint, apply_fleet_manifest
 from .cloudflare_dns import (
     CloudflareClient,
     CloudflareDnsError,
+    read_cloudflare_token,
     reconcile_cloudflare_dns,
 )
 from .git import GitAdapterError, GitRepository
@@ -15,6 +16,7 @@ __all__ = [
     "CloudflareDnsError",
     "GitAdapterError",
     "GitRepository",
+    "read_cloudflare_token",
     "apply_fleet_manifest",
     "reconcile_cloudflare_dns",
     "CompiledArtifactsError",

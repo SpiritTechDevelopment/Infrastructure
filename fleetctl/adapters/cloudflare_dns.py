@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
+import stat
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -16,6 +19,29 @@ DEFAULT_API_BASE = "https://api.cloudflare.com/client/v4"
 
 class CloudflareDnsError(Exception):
     """Cloudflare отклонил запрос либо скомпилированный план небезопасен."""
+
+
+def read_cloudflare_token(token_file: Path | None) -> str:
+    """Read a token without accepting a loose or redirected credential file."""
+
+    if token_file is None:
+        token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+        if not token:
+            raise CloudflareDnsError("provide --token-file or set CLOUDFLARE_API_TOKEN")
+        return token
+    if token_file.is_symlink():
+        raise CloudflareDnsError(f"refusing symlink Cloudflare token file: {token_file}")
+    metadata = token_file.stat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise CloudflareDnsError(f"Cloudflare token path is not a regular file: {token_file}")
+    if stat.S_IMODE(metadata.st_mode) & 0o077:
+        raise CloudflareDnsError(
+            f"Cloudflare token file must not be group/world accessible: {token_file}"
+        )
+    token = token_file.read_text(encoding="utf-8").strip()
+    if not token:
+        raise CloudflareDnsError(f"Cloudflare token file is empty: {token_file}")
+    return token
 
 
 class DnsRecordClient(Protocol):

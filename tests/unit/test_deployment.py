@@ -53,6 +53,25 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
             return_value="MANIFEST_APPLY_RESULT_APPLIED",
         )
 
+    def fake_dns(self):
+        """Return an idempotent provider result without making a network call."""
+
+        return mock.patch(
+            "fleetctl.deployment.coordinator.reconcile_cloudflare_dns",
+            return_value={
+                "mode": "apply",
+                "change_count": 1,
+                "records": [{"action": "update"}, {"action": "unchanged"}],
+            },
+        )
+
+    @staticmethod
+    def cloudflare_token(root: Path) -> Path:
+        path = root / "cloudflare-token"
+        path.write_text("test-token\n", encoding="utf-8")
+        path.chmod(0o600)
+        return path
+
     def prepare_repository(self, parent: Path) -> TemporaryFleetRepository:
         root = parent / "repository"
         root.mkdir()
@@ -234,9 +253,10 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 path = repository.root / name
                 path.write_text("{}\n", encoding="utf-8")
                 variables[name] = path
+            token = self.cloudflare_token(repository.root)
             with mock.patch.object(coordinator, "_run_ansible"), self.fake_signer(
                 coordinator
-            ), self.fake_backend():
+            ), self.fake_backend(), self.fake_dns():
                 resumed = coordinator.run(
                     DeploymentOptions(
                         environment="develop",
@@ -246,6 +266,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                         bootstrap_vars=variables["bootstrap.yml"],
                         compiled_secrets=variables["secrets.yml"],
                         readiness_vars=variables["readiness.yml"],
+                        cloudflare_token_file=token,
                         ca_state=repository.root / "ca",
                     )
                 )
@@ -253,7 +274,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
         self.assertFalse(resumed["dry_run"])
         # An apply now issues its own manifest-writer identity, so it no longer
         # stops at the contract boundary for want of one.
-        self.assertEqual(resumed["status"], "BACKEND_APPLIED")
+        self.assertEqual(resumed["status"], "RECONCILED")
 
     def test_apply_requires_all_operator_inputs_before_ansible(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -363,6 +384,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
             for instance in ("develop-entry-nl-01", "develop-exit-de-01"):
                 (markers / f"{instance}.json").write_text("{}\n", encoding="utf-8")
 
+            token = self.cloudflare_token(repository.root)
             options = DeploymentOptions(
                 environment="develop",
                 initial=True,
@@ -370,6 +392,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 bootstrap_vars=variables["bootstrap.yml"],
                 compiled_secrets=variables["secrets.yml"],
                 readiness_vars=variables["readiness.yml"],
+                cloudflare_token_file=token,
                 backend_client_certificate=material["tls.crt"],
                 backend_client_private_key=material["tls.key"],
                 backend_certificate_authority=material["ca.crt"],
@@ -377,7 +400,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
             with mock.patch.object(coordinator, "_run_ansible"), mock.patch(
                 "fleetctl.deployment.coordinator.apply_fleet_manifest",
                 return_value="MANIFEST_APPLY_RESULT_APPLIED",
-            ) as send:
+            ) as send, self.fake_dns():
                 first = coordinator.run(options)
                 resumed = coordinator.run(
                     dataclasses.replace(options, initial=True, resume=True)
@@ -391,7 +414,7 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
         self.assertEqual(endpoint.target, "10.80.0.1:9443")
         self.assertEqual(endpoint.tls_server_name, "backend.develop.internal")
 
-        self.assertEqual(first["status"], "BACKEND_APPLIED")
+        self.assertEqual(first["status"], "RECONCILED")
         self.assertEqual(
             first["backend_apply"],
             {
@@ -400,8 +423,50 @@ class InfrastructureDeploymentCoordinatorTests(unittest.TestCase):
                 "result": "MANIFEST_APPLY_RESULT_APPLIED",
             },
         )
-        self.assertEqual(resumed["status"], "BACKEND_APPLIED")
+        self.assertEqual(resumed["status"], "RECONCILED")
         self.assertEqual(resumed["backend_apply"], first["backend_apply"])
+
+    def test_missing_dns_credential_pauses_and_resume_finishes_without_resending_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.prepare_repository(Path(temporary))
+            coordinator = DeploymentCoordinator(repository.root)
+            variables = {}
+            for name in ("bootstrap.yml", "secrets.yml", "readiness.yml"):
+                path = repository.root / name
+                path.write_text("{}\n", encoding="utf-8")
+                variables[name] = path
+            missing_token = repository.root / "protected" / "cloudflare-token"
+            options = DeploymentOptions(
+                environment="develop",
+                initial=True,
+                apply=True,
+                bootstrap_vars=variables["bootstrap.yml"],
+                compiled_secrets=variables["secrets.yml"],
+                readiness_vars=variables["readiness.yml"],
+                cloudflare_token_file=missing_token,
+                ca_state=repository.root / "ca",
+            )
+
+            with mock.patch.object(coordinator, "_run_ansible"), self.fake_signer(
+                coordinator
+            ), mock.patch(
+                "fleetctl.deployment.coordinator.apply_fleet_manifest",
+                return_value="MANIFEST_APPLY_RESULT_APPLIED",
+            ) as send:
+                first = coordinator.run(options)
+                missing_token.parent.mkdir(mode=0o700)
+                missing_token.write_text("test-token\n", encoding="utf-8")
+                missing_token.chmod(0o600)
+                with self.fake_dns() as dns:
+                    resumed = coordinator.run(dataclasses.replace(options, resume=True))
+
+        self.assertEqual(first["status"], "WAITING_FOR_DNS")
+        self.assertEqual(first["backend_apply"]["status"], "APPLIED")
+        self.assertEqual(first["dns_apply"]["status"], "NOT_APPLIED")
+        self.assertEqual(resumed["status"], "RECONCILED")
+        self.assertEqual(resumed["dns_apply"]["status"], "APPLIED")
+        self.assertEqual(send.call_count, 1)
+        dns.assert_called_once()
 
     def test_bootstrapping_nodes_refuses_to_start_without_a_ca(self) -> None:
         # Fail before the CSR phase mutates anything: collecting requests that

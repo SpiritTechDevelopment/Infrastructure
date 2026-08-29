@@ -16,8 +16,12 @@ from typing import Any
 from fleetctl.adapters import (
     BackendCallError,
     BackendEndpoint,
+    CloudflareClient,
+    CloudflareDnsError,
     GitRepository,
     apply_fleet_manifest,
+    read_cloudflare_token,
+    reconcile_cloudflare_dns,
     validate_ansible_artifacts,
     write_rendered_files,
 )
@@ -25,6 +29,7 @@ from fleetctl.compiler import (
     backend_manifest_bytes,
     backend_manifest_payload_digest,
     compile_backend_manifest,
+    compile_dns_plan,
     render_files,
 )
 from fleetctl.compiler.addressing import control_management_address
@@ -75,6 +80,7 @@ class DeploymentOptions:
     bootstrap_vars: Path | None = None
     compiled_secrets: Path | None = None
     readiness_vars: Path | None = None
+    cloudflare_token_file: Path | None = None
     # Корень offline CA нужен только для подписи при бутстрапе.
     ca_state: Path | None = None
     # Без identity manifest-writer процесс останавливается до отправки.
@@ -344,6 +350,13 @@ class DeploymentCoordinator:
                 request=manifest_request,
                 identity_directory=backend_identity_directory,
             )
+            self._reconcile_dns(
+                record=record,
+                record_path=record_path,
+                current=current,
+                plan=plan,
+                options=options,
+            )
             record["updated_at"] = _timestamp()
             self._write_record(record_path, record)
             return record
@@ -506,9 +519,8 @@ class DeploymentCoordinator:
         }
         record["status"] = "BACKEND_APPLIED"
         record["diagnostic"] = (
-            f"Backend accepted manifest revision {revision} ({result}). "
-            "DNS/data-plane promotion and the deployment-ref update remain separate, "
-            "deliberately manual steps."
+            f"Backend accepted manifest revision {revision} ({result}); "
+            "DNS reconciliation is the next guarded deployment step."
         )
         self._complete_step(
             record,
@@ -516,6 +528,79 @@ class DeploymentCoordinator:
             "apply_backend_manifest",
             f"revision {revision}: {result}",
         )
+
+    def _reconcile_dns(
+        self,
+        *,
+        record: dict[str, Any],
+        record_path: Path,
+        current: DesiredState,
+        plan: ImpactPlan,
+        options: DeploymentOptions,
+    ) -> None:
+        """Apply desired DNS only after nodes and the backend accepted the source."""
+
+        if self._step_is_completed(record, "apply_dns"):
+            record["status"] = "RECONCILED"
+            return
+        dns_affected = bool(plan.affected["dns_nodes"] or plan.affected["dns_control"])
+        if not options.apply:
+            self._skip_step(
+                record,
+                record_path,
+                "apply_dns",
+                "SKIPPED_DRY_RUN; no provider request was made",
+            )
+            return
+        if record.get("backend_apply", {}).get("status") != "APPLIED":
+            record["status"] = "WAITING_FOR_BACKEND"
+            record["diagnostic"] = "DNS was not considered because the backend has not accepted the manifest."
+            self._write_record(record_path, record)
+            return
+        if not dns_affected:
+            record["dns_apply"] = {"status": "NOT_REQUIRED", "change_count": 0}
+            self._complete_step(record, record_path, "apply_dns", "semantic plan contains no DNS change")
+            record["status"] = "RECONCILED"
+            record["diagnostic"] = "Backend applied; the semantic plan required no DNS change."
+            self._write_record(record_path, record)
+            return
+        token_file = options.cloudflare_token_file
+        token_missing = (
+            token_file is None
+            or (not token_file.is_symlink() and not token_file.exists())
+        )
+        if token_missing:
+            record["dns_apply"] = {"status": "NOT_APPLIED", "change_count": None}
+            record["status"] = "WAITING_FOR_DNS"
+            record["diagnostic"] = (
+                "Backend applied, but DNS promotion requires an installed Cloudflare token file. "
+                "Resume the same source SHA after installing the protected credential."
+            )
+            self._write_record(record_path, record)
+            return
+        try:
+            token = read_cloudflare_token(token_file)
+            result = reconcile_cloudflare_dns(
+                compile_dns_plan(current),
+                CloudflareClient(token),
+                apply=True,
+            )
+        except (CloudflareDnsError, OSError) as exc:
+            raise DeploymentError(f"DNS reconciliation failed: {exc}") from exc
+        record["dns_apply"] = {
+            "status": "APPLIED",
+            "change_count": result["change_count"],
+            "record_count": len(result["records"]),
+        }
+        self._complete_step(
+            record,
+            record_path,
+            "apply_dns",
+            f"Cloudflare accepted the complete desired record set; {result['change_count']} mutation(s)",
+        )
+        record["status"] = "RECONCILED"
+        record["diagnostic"] = "Infrastructure, backend manifest and DNS reached the reviewed source."
+        self._write_record(record_path, record)
 
     @staticmethod
     def _bootstrap_marker(bootstrapped_directory: Path, environment: str, instance_id: str) -> Path:

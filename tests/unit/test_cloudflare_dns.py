@@ -6,8 +6,7 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from fleetctl.adapters import CloudflareDnsError, reconcile_cloudflare_dns
-from fleetctl.cli import _read_cloudflare_token
+from fleetctl.adapters import CloudflareDnsError, read_cloudflare_token, reconcile_cloudflare_dns
 
 
 def dns_plan(*records: dict[str, Any]) -> dict[str, Any]:
@@ -181,15 +180,15 @@ class CloudflareDnsTests(unittest.TestCase):
             token_path = Path(temporary_directory) / "cloudflare-token"
             token_path.write_text(" secret-token\n", encoding="utf-8")
             token_path.chmod(0o600)
-            self.assertEqual(_read_cloudflare_token(token_path), "secret-token")
+            self.assertEqual(read_cloudflare_token(token_path), "secret-token")
 
             token_path.chmod(0o640)
             with self.assertRaisesRegex(CloudflareDnsError, "group/world"):
-                _read_cloudflare_token(token_path)
+                read_cloudflare_token(token_path)
 
     def test_token_can_be_read_from_environment(self) -> None:
         with unittest.mock.patch.dict(os.environ, {"CLOUDFLARE_API_TOKEN": " token "}):
-            self.assertEqual(_read_cloudflare_token(None), "token")
+            self.assertEqual(read_cloudflare_token(None), "token")
 
 
 if __name__ == "__main__":

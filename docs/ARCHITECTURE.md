@@ -106,16 +106,19 @@ desired/
 | `validate` | нет | Схемы и семантика одного окружения |
 | `render` | нет | Детерминированные артефакты в `--output` |
 | `plan` | git | План влияния: источник против базы |
+| `check-change` | git | CI-проверка перехода от deployment ref с компиляцией артефактов |
 | `manifest` | нет | Манифест бэкенда, требует `--revision` |
 | `ansible-check` | нет | Проверка скомпилированного инвентаря и планов нод |
 | `provisioning-check` | нет | Проверка ручных объявлений VPS |
 | `dns` | Cloudflare | Сверка или применение DNS |
-| `deploy` | SSH, gRPC | Координатор: bootstrap → configure → readiness → манифест |
+| `deploy` | SSH, gRPC, Cloudflare | Координатор: bootstrap → configure → readiness → манифест → DNS |
 | `update-deployment-ref` | git | Compare-and-swap `refs/deployments/<env>` |
 | `pki-issue`, `pki-sign` | нет | Выпуск сертификата control-плоскости, подпись CSR ноды |
 
 `plan` и `manifest` имеют два режима базы: `--baseline <dir>` (только тесты,
 несовместим с `--source ≠ HEAD`) и штатный — `refs/deployments/<env>`.
+`check-change` намеренно не принимает каталог базы: CI всегда проверяет именно
+переход от последнего подтверждённого deployment ref к проверяемому SHA.
 
 ### Компилируемые артефакты
 
@@ -198,7 +201,7 @@ flowchart TD
         C["lint:<br/>check-static, yamllint, ansible-lint"]
     end
     subgraph trust["self-hosted — с age identity"]
-        B["trusted-desired-state:<br/>validate develop и prod,<br/>render дважды + diff,<br/>ansible-inventory, plan"]
+        B["trusted-desired-state:<br/>validate develop и prod,<br/>render дважды + diff,<br/>check-change от deployment ref"]
     end
 ```
 
@@ -206,6 +209,10 @@ flowchart TD
 `id -un = github-runner` и права `600:github-runner` на
 `$HOME/.config/spiritvpn/sops/age-identity.txt`, после чего экспортирует
 `SOPS_AGE_KEY_FILE`.
+
+Live topology остаётся входом тестов, а не golden fixture: тесты не перечисляют
+текущие ID нод, IP и размеры флотов. Конкретный переход проверяет
+`check-change`, поэтому изменение топологии не требует синхронной правки тестов.
 
 Публичный раннер работает с `SPIRITVPN_SKIP_LIVE_DESIRED=1` и видит только
 синтетические фикстуры.
@@ -243,6 +250,7 @@ sequenceDiagram
     participant M as management host
     participant N as traffic-ноды
     participant B as backend
+    participant D as Cloudflare DNS
 
     R->>R: checkout SHA, проверка ancestor main
     R->>R: git bundle: refs/spiritvpn/source<br/>+ refs/deployments/&lt;env&gt;
@@ -251,14 +259,21 @@ sequenceDiagram
     M->>M: fleetctl deploy
     M->>N: bootstrap_csr → bootstrap → configure → readiness
     M->>B: манифест по mTLS
+    B-->>M: APPLIED / IDEMPOTENT
+    M->>D: reconcile полного desired DNS
     M-->>R: transcript
-    R->>R: deployment-record.py → promote?
+    R->>R: deployment-record.py: только RECONCILED → promote
     R->>R: update-deployment-ref + push --force-with-lease
 ```
 
 `promote` — отдельный job на `ubuntu-latest` с `contents: write`. Ref двигается
 compare-and-swap: ожидаемая база проверяется и передаётся в
 `--force-with-lease`.
+
+Автоматический вызов передаёт `resume=true`: для нового SHA запись создаётся,
+а повтор того же SHA продолжает только незавершённые шаги. Это позволяет после
+устранимой ошибки (например, Vault временно недоступен) довести тот же
+коммит до конца без вспомогательного коммита.
 
 ### release-bump
 
@@ -308,6 +323,8 @@ flowchart TD
     conf --> rg["readiness_gates"]
     rg --> rf["render_final_artifacts"]
     rf --> man["deliver_backend_manifest"]
+    man --> dns["apply_dns"]
+    dns --> done["RECONCILED"]
 ```
 
 В режиме `dry-run` шаги `bootstrap_csr`, `sign_agent_certificates`,
@@ -316,6 +333,24 @@ flowchart TD
 
 Нода бутстрапится один раз за свою жизнь: факт фиксируется маркером в каталоге
 `bootstrapped/` и не выводится из Git-диффа.
+
+Обычные изменения выполняются одним коммитом в topology:
+
+- смена IP той же машины сохраняет instance ID и классифицируется как
+  `modification`;
+- физическая замена обязана получить новый instance ID (смена provider resource
+  или SSH host key под прежним ID запрещена) и классифицируется как
+  `replacement`;
+- новая логическая нода, её instance и включение во fleet могут появиться в
+  одном коммите и классифицируются как `addition`.
+
+Перед apply environment-scoped AppRole читает
+`secret://kv/<env>/dns/cloudflare#api_token`; resolver материализует значение во
+временный файл `0600` рядом с остальными входами executor, а `trap` удаляет его
+при любом исходе. После readiness координатор сначала применяет backend
+manifest, затем DNS. Ручной запуск без token-файла остаётся в
+`WAITING_FOR_DNS`; повтор с `resume` не переотправляет уже принятый manifest.
+Deployment ref двигается только для `RECONCILED`.
 
 ## 10. Каталоги при первоначальном бутстрапе
 

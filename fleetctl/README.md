@@ -12,6 +12,7 @@ Implemented commands:
 fleetctl validate --environment develop
 fleetctl render --environment develop --output build/develop
 fleetctl plan --environment develop --source HEAD --output build/develop
+fleetctl check-change --environment develop --source HEAD --output build/develop
 fleetctl ansible-check --environment develop --build-dir build/develop
 fleetctl provisioning-check --environment develop
 fleetctl dns --environment develop --token-file /protected/cloudflare-token
@@ -32,6 +33,12 @@ deployment is explicitly declared with `--initial`. The source and baseline are
 read directly from Git commit trees without checkout or reset, and dirty or
 untracked `desired/` input cannot be attributed to a Git SHA. An explicit
 `--baseline <desired-directory>` remains available only for tests.
+
+`check-change` is the CI entry point for an ordinary fleet edit. It always uses
+that deployment ref (or an explicit `--initial`), validates the source, renders
+all artifacts, validates the generated Ansible inventory and prints a compact
+transition summary (`addition`, `replacement`, `modification`, `removal` or
+`no-op`). Tests do not duplicate live node IDs, addresses or fleet sizes.
 
 The current render produces:
 
@@ -54,7 +61,7 @@ infrastructure stages are:
 ```text
 validate → resolve Git baseline → impact plan → manual provisioning preflight
          → allocate/pin manifest revision → render/Ansible input validation
-         → bootstrap → configure → readiness
+         → bootstrap → configure → readiness → backend manifest → DNS
 ```
 
 In dry-run mode, bootstrap, configure, and readiness are recorded as
@@ -65,22 +72,28 @@ three readable operator-input files are required:
 fleetctl deploy --environment develop --source HEAD --apply \
   --bootstrap-vars /protected/bootstrap.yml \
   --compiled-secrets /protected/compiled-secrets.yml \
-  --readiness-vars /protected/readiness.yml
+  --readiness-vars /protected/readiness.yml \
+  --cloudflare-token-file /protected/cloudflare-token
 ```
 
-With a manifest-writer identity the coordinator hands the compiled manifest to
-the backend and finishes at `BACKEND_APPLIED`; without one it stops at
-`WAITING_FOR_BACKEND` and says so. DNS/data-plane promotion and
-`refs/deployments/*` updates remain outside the coordinator, and it never
-reports them as complete. DNS reconciliation is a separate, explicitly guarded
-operator operation and is not inferred from a successful Ansible deployment.
+After readiness the coordinator hands the compiled manifest to the backend and
+then reconciles the complete desired Cloudflare record set when the semantic
+plan affects DNS. A missing token is a resumable `WAITING_FOR_DNS`, not a failed
+or half-promoted deployment. A retry of the same source uses `--resume`, keeps
+completed steps and does not resend an accepted manifest. The successful final
+status is `RECONCILED`; a plan without DNS impact records DNS as `NOT_REQUIRED`.
+The standalone `dns` command remains useful for an operator preview.
+On the management executor the token is not a persistent config file: the
+environment AppRole reads `kv/<environment>/dns/cloudflare#api_token`, the
+resolver writes a temporary mode-`0600` file, and the executor removes it on
+exit. The explicit CLI option remains available for a manual deployment.
 
 `update-deployment-ref` is the atomic compare-and-swap that records a deployment
 the coordinator has already finished. The coordinator does not call it: moving
 the ref means writing to the repository, and the whole point of the split is
 that the process holding the fleet's SSH keys never holds that right. The caller
 is the `promote` job in `.github/workflows/fleet-deploy.yml`, which runs only
-after the deployment record it reads back reports `BACKEND_APPLIED` for exactly
+after the deployment record it reads back reports `RECONCILED` for exactly
 the environment, source SHA and baseline the run requested. `make fleet-promote`
 is the same step by hand.
 

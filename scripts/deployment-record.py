@@ -4,9 +4,9 @@
 The hub prints the coordinator's deployment record as the last thing on stdout,
 after everything Ansible had to say. That record is the only report of what the
 deployment actually reached, and `fleet-deploy` exits 0 in more than one of those
-outcomes: an apply run that never obtained a manifest-writer identity stops at
-WAITING_FOR_BACKEND and still succeeds. Reading the exit code alone would promote
-the ref for a deployment that never crossed the backend boundary.
+outcomes: an apply run can stop at WAITING_FOR_BACKEND or WAITING_FOR_DNS and
+still exit cleanly. Reading the exit code alone would promote a ref before the
+reviewed public endpoint was published.
 
 Everything here is fail-closed and stdlib-only: it runs on the self-hosted runner
 before any Python environment has been prepared.
@@ -103,9 +103,9 @@ def promotion_refusal(record: dict[str, Any]) -> str | None:
 
     if record["dry_run"] is not False:
         return "deployment ran as a dry run"
-    if record["status"] != "BACKEND_APPLIED":
+    if record["status"] != "RECONCILED":
         diagnostic = record.get("diagnostic") or "no diagnostic recorded"
-        return f"deployment status is {record['status']!r}, not BACKEND_APPLIED: {diagnostic}"
+        return f"deployment status is {record['status']!r}, not RECONCILED: {diagnostic}"
     return None
 
 
@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         print("promote=false")
         return 0
     print(
-        f"deployment {record['deployment_id']} reached BACKEND_APPLIED; "
+        f"deployment {record['deployment_id']} reached RECONCILED; "
         f"the {args.environment} deployment ref may advance to {args.source_git_sha}",
         file=sys.stderr,
     )

@@ -95,14 +95,23 @@ jobs:
           SECOND_RENDER: ${{ runner.temp }}/fleetctl-render-second
         run: |
           set -euo pipefail
+          deployment_refs="$(git ls-remote --refs origin 'refs/deployments/*')"
+          if test -n "$deployment_refs"; then
+            git fetch --no-tags origin '+refs/deployments/*:refs/deployments/*'
+          fi
           for environment in develop prod; do
             python -m fleetctl.cli render --environment "$environment" --output "$FIRST_RENDER/$environment"
             python -m fleetctl.cli render --environment "$environment" --output "$SECOND_RENDER/$environment"
             diff -ru "$FIRST_RENDER/$environment" "$SECOND_RENDER/$environment"
             ansible-inventory -i "$FIRST_RENDER/$environment/ansible-inventory.json" --list >/dev/null
-            python -m fleetctl.cli plan \
+            initial=()
+            if ! git show-ref --verify --quiet "refs/deployments/$environment"; then
+              initial=(--initial)
+            fi
+            python -m fleetctl.cli check-change \
               --environment "$environment" \
-              --baseline desired \
+              --source HEAD \
+              "${initial[@]}" \
               --output "$FIRST_RENDER/$environment"
             python -m json.tool "$FIRST_RENDER/$environment/impact-plan.json" >/dev/null
           done

@@ -28,8 +28,9 @@ bundle="$(mktemp "$executor_dir/incoming/$environment.XXXXXXXX.bundle")"
 worktree="$(mktemp -d "$executor_dir/incoming/$environment.XXXXXXXX.worktree")"
 secrets_file="$(mktemp "$executor_dir/incoming/$environment.XXXXXXXX.secrets.yml")"
 ssh_key_file="$(mktemp "$executor_dir/incoming/$environment.XXXXXXXX.ssh-key")"
+cloudflare_token_file="$(mktemp "$executor_dir/incoming/$environment.XXXXXXXX.cloudflare-token")"
 cleanup() {
-  rm -f -- "$bundle" "$secrets_file" "$ssh_key_file"
+  rm -f -- "$bundle" "$secrets_file" "$ssh_key_file" "$cloudflare_token_file"
   rm -rf -- "$worktree"
 }
 trap cleanup EXIT
@@ -134,9 +135,10 @@ if test "$mode" = apply; then
     --credentials-dir "$config_dir/vault-approle" \
     --compiled-secrets "$secrets_file" \
     --ssh-private-key "$ssh_key_file" \
+    --cloudflare-token-file "$cloudflare_token_file" \
     --vault-address "https://127.0.0.1:{{ platform_vault_api_port }}" \
     --vault-ca "{{ platform_vault_dir }}/tls/vault-ca.crt"
-  chmod 0600 "$secrets_file" "$ssh_key_file"
+  chmod 0600 "$secrets_file" "$ssh_key_file" "$cloudflare_token_file"
   export ANSIBLE_HOST_KEY_CHECKING=True
   export ANSIBLE_PRIVATE_KEY_FILE="$ssh_key_file"
   # known_hosts компилируется из desired state вместе с инвентарями и лежит в
@@ -155,6 +157,7 @@ if test "$mode" = apply; then
     --compiled-secrets "$secrets_file"
     --readiness-vars "$config_dir/readiness.yml"
     --ca-state "$config_dir/ca"
+    --cloudflare-token-file "$cloudflare_token_file"
   )
   # Личность manifest-writer здесь не передаётся: координатор выпускает и
   # обновляет её сам из того же корня CA, что подписывает сертификаты агентов.

@@ -108,6 +108,14 @@ class RecordingVault(BaseHTTPRequestHandler):
                 ).encode(),
             )
             return
+        if self.path == "/v1/kv/data/develop/dns/cloudflare":
+            self._respond(
+                200,
+                json.dumps(
+                    {"data": {"data": {"api_token": "cloudflare.TEST"}}}
+                ).encode(),
+            )
+            return
         self._respond(
             200,
             json.dumps(
@@ -1634,6 +1642,8 @@ all:
             self.assertIn(required, text)
         self.assertNotIn("update-deployment-ref", text)
         self.assertNotIn("eval", text)
+        self.assertIn('--cloudflare-token-file "$cloudflare_token_file"', text)
+        self.assertNotIn('$config_dir/cloudflare-token', text)
 
     def test_executor_trusts_only_compiled_host_keys(self) -> None:
         path = REPO_ROOT / "roles" / "platform_executor" / "templates" / "spiritvpn-fleet-deploy.j2"
@@ -1681,6 +1691,7 @@ all:
                     "--scope", "fleet",
                     "--credentials-dir", str(credentials),
                     "--compiled-secrets", str(workspace / "compiled.yml"),
+                    "--cloudflare-token-file", str(workspace / "cloudflare-token"),
                     "--vault-address", f"http://127.0.0.1:{server.server_address[1]}",
                     "--vault-ca", str(authority),
                 ],
@@ -1718,6 +1729,21 @@ all:
                     if not fail_reads:
                         compiled = workspace / "compiled.yml"
                         self.assertEqual(compiled.stat().st_mode & 0o777, 0o600)
+                        cloudflare_token = workspace / "cloudflare-token"
+                        self.assertEqual(
+                            cloudflare_token.read_text(encoding="utf-8"),
+                            "cloudflare.TEST\n",
+                        )
+                        self.assertEqual(cloudflare_token.stat().st_mode & 0o777, 0o600)
+                        cloudflare_reads = [
+                            call
+                            for call in RecordingVault.calls
+                            if call[1] == "/v1/kv/data/develop/dns/cloudflare"
+                        ]
+                        self.assertEqual(
+                            cloudflare_reads,
+                            [("GET", "/v1/kv/data/develop/dns/cloudflare", "s.TEST")],
+                        )
 
     def test_vault_operator_is_manual_and_environment_scoped(self) -> None:
         operator = (
@@ -2045,11 +2071,15 @@ all:
         self.assertEqual(result.returncode, 0, result.stderr)
         references = result.stdout.splitlines()
         self.assertTrue(references)
-        self.assertEqual(references, sorted(references[:-1]) + [references[-1]])
+        self.assertEqual(references, sorted(references))
         self.assertTrue(all(reference.startswith("secret://kv/develop/") for reference in references))
-        self.assertEqual(
-            references[-1],
+        self.assertIn(
             "secret://kv/develop/executor/ansible#private_key",
+            references,
+        )
+        self.assertIn(
+            "secret://kv/develop/dns/cloudflare#api_token",
+            references,
         )
 
     def run_resolver(self, *flags: str) -> str:
@@ -2106,7 +2136,7 @@ all:
         )
         self.assertIn("kv/develop/control/bot/env", objects)
         # Чужие поддеревья сюда попасть не должны ни в каком виде.
-        for foreign in ("executor/", "bridges/", "nodes/"):
+        for foreign in ("executor/", "dns/", "bridges/", "nodes/"):
             self.assertFalse(any(foreign in item for item in objects), foreign)
 
     def test_private_writer_refuses_symlink_and_sets_mode(self) -> None:

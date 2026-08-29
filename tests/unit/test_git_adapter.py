@@ -108,6 +108,29 @@ class GitDeploymentBaselineTests(unittest.TestCase):
             )
         return exit_code, stdout.getvalue(), stderr.getvalue()
 
+    def run_check_change(
+        self,
+        root: Path,
+        output: Path,
+        *arguments: str,
+    ) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = main(
+                [
+                    "--root",
+                    str(root),
+                    "check-change",
+                    "--environment",
+                    "develop",
+                    "--output",
+                    str(output),
+                    *arguments,
+                ]
+            )
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
     def test_missing_baseline_is_fail_closed_unless_initial_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = self.make_repository(Path(temporary))
@@ -160,6 +183,27 @@ class GitDeploymentBaselineTests(unittest.TestCase):
         self.assertFalse(plan["initial_deployment"])
         self.assertEqual(ref_after_plan, baseline)
         self.assertIn("INSTANCE_CHANGED", {change["type"] for change in plan["changes"]})
+
+    def test_check_change_compiles_the_transition_from_the_deployment_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = self.make_repository(Path(temporary))
+            baseline = repository.head()
+            repository.git("update-ref", "refs/deployments/develop", baseline)
+            source = repository.change_entry_address_and_commit()
+            output = repository.root / "build" / "develop"
+
+            exit_code, stdout, stderr = self.run_check_change(repository.root, output)
+            summary = json.loads(stdout)
+            impact = json.loads((output / "impact-plan.json").read_text(encoding="utf-8"))
+            inventory_exists = (output / "ansible-inventory.json").is_file()
+
+        self.assertEqual((exit_code, stderr), (0, ""))
+        self.assertEqual(summary["source_git_sha"], source)
+        self.assertEqual(summary["baseline_git_sha"], baseline)
+        self.assertEqual(summary["transition_kinds"], ["modification"])
+        self.assertGreater(summary["compiled_host_count"], 0)
+        self.assertIn("INSTANCE_CHANGED", {item["type"] for item in impact["changes"]})
+        self.assertTrue(inventory_exists)
 
     def test_materialized_desired_comes_from_commit_not_working_tree(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

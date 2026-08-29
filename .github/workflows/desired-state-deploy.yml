@@ -190,7 +190,10 @@ jobs:
       source_git_sha: ${{ github.event.workflow_run.head_sha }}
       mode: apply
       initial: false
-      resume: false
+      # The coordinator keys durable progress by environment + source SHA.
+      # Passing resume for an automatic run starts a new record when absent and
+      # continues only verified completed steps when the same SHA is retried.
+      resume: true
       allow_destructive: false
     secrets: inherit
 

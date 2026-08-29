@@ -42,6 +42,9 @@ fleet-render: ## Render local artifacts; ENVIRONMENT=develop by default
 fleet-plan: ## Plan SOURCE=HEAD against deployment ref; INITIAL=1 only for first deploy
 	python3 -m fleetctl.cli plan --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(BASELINE),--baseline "$(BASELINE)",$(if $(filter 1 yes true,$(INITIAL)),--initial,)) --output "build/$(or $(ENVIRONMENT),develop)"
 
+fleet-change-check: ## Validate and compile SOURCE against the actual deployment ref
+	python3 -m fleetctl.cli check-change --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) --output "build/$(or $(ENVIRONMENT),develop)"
+
 fleet-manifest: fleet-render ## Render backend manifest offline; requires explicit REVISION
 	@test -n "$(REVISION)" || (echo 'REVISION is required' >&2; exit 2)
 	python3 -m fleetctl.cli manifest --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" --revision "$(REVISION)" $(if $(BASELINE),--baseline "$(BASELINE)",$(if $(filter 1 yes true,$(INITIAL)),--initial,)) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) --output "build/$(or $(ENVIRONMENT),develop)"
@@ -100,7 +103,7 @@ fleet-bootstrap: fleet-ansible-check ## Bootstrap clean hosts; requires APPLY=1 
 	ansible-playbook -i "build/$(or $(ENVIRONMENT),develop)/bootstrap-inventory.json" playbooks/bootstrap/bootstrap.yml --extra-vars "@$(BOOTSTRAP_VARS)"
 
 fleet-deploy: ## Infrastructure coordinator; dry-run by default, APPLY=1 enables SSH
-	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) $(if $(FLEET_STATE_DIR),--state-dir "$(FLEET_STATE_DIR)",) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",) $(if $(CA_STATE),--ca-state "$(CA_STATE)",)
+	python3 -m fleetctl.cli deploy --environment "$(or $(ENVIRONMENT),develop)" --source "$(SOURCE)" $(if $(filter 1 yes true,$(INITIAL)),--initial,) $(if $(filter 1 yes true,$(APPLY)),--apply,) $(if $(filter 1 yes true,$(RESUME)),--resume,) $(if $(filter 1 yes true,$(ALLOW_DESTRUCTIVE)),--allow-destructive,) $(if $(FLEET_STATE_DIR),--state-dir "$(FLEET_STATE_DIR)",) $(if $(BOOTSTRAP_VARS),--bootstrap-vars "$(BOOTSTRAP_VARS)",) $(if $(COMPILED_SECRETS),--compiled-secrets "$(COMPILED_SECRETS)",) $(if $(READINESS_VARS),--readiness-vars "$(READINESS_VARS)",) $(if $(CA_STATE),--ca-state "$(CA_STATE)",) $(if $(CLOUDFLARE_TOKEN_FILE),--cloudflare-token-file "$(CLOUDFLARE_TOKEN_FILE)",)
 
 fleet-promote: ## Record a deployment verified elsewhere; needs SOURCE_GIT_SHA and BASELINE_GIT_SHA (or INITIAL=1); APPLY=1 pushes
 	@# Ручной путь для того же, что делает задача promote в fleet-deploy.yml:
@@ -204,7 +207,7 @@ check-static: ## Static checks minus the suite `desired-state` already ran
 	  exit 1; \
 	fi
 
-.PHONY: help fleet-validate fleet-sops-envelope-check fleet-test fleet-render fleet-plan fleet-manifest \
+.PHONY: help fleet-validate fleet-sops-envelope-check fleet-test fleet-render fleet-plan fleet-change-check fleet-manifest \
 	fleet-ansible-check fleet-configure-check fleet-configure fleet-provisioning-check \
 	fleet-dns-plan fleet-dns-apply \
 	fleet-bootstrap-check fleet-bootstrap fleet-deploy fleet-promote fleet-platform-check \

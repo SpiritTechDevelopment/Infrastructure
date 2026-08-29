@@ -377,6 +377,7 @@ def main() -> int:
     parser.add_argument("--credentials-dir", type=Path)
     parser.add_argument("--compiled-secrets", type=Path)
     parser.add_argument("--ssh-private-key", type=Path)
+    parser.add_argument("--cloudflare-token-file", type=Path)
     parser.add_argument("--scope", choices=("all", "fleet", "control"), default="all")
     parser.add_argument("--list-references", action="store_true")
     parser.add_argument("--list-objects", action="store_true")
@@ -395,13 +396,18 @@ def main() -> int:
             args.scope,
         )
         ssh_reference = f"secret://kv/{args.environment}/executor/ansible#private_key"
+        cloudflare_reference = (
+            f"secret://kv/{args.environment}/dns/cloudflare#api_token"
+        )
         objects: dict[str, dict[str, str]] = {}
         if args.scope in {"all", "control"}:
             objects = control_object_paths(args.root, args.environment, args.desired_root)
         if args.list_references:
             listed_references = references
             if args.scope in {"all", "fleet"}:
-                listed_references = [*references, ssh_reference]
+                listed_references = sorted(
+                    (*references, ssh_reference, cloudflare_reference)
+                )
             for reference in listed_references:
                 print(reference)
             return 0
@@ -413,6 +419,8 @@ def main() -> int:
                 for kind in sorted(objects[component]):
                     print(f"kv/{objects[component][kind]}")
             return 0
+        if args.cloudflare_token_file is not None and args.scope not in {"all", "fleet"}:
+            raise ResolverError("Cloudflare token output requires fleet or all scope")
         if args.credentials_dir is None or args.compiled_secrets is None:
             raise ResolverError(
                 "resolution requires --credentials-dir and --compiled-secrets"
@@ -458,6 +466,17 @@ def main() -> int:
                 if "PRIVATE KEY" not in ssh_private_key:
                     raise ResolverError("executor Ansible private key has an invalid format")
                 write_private(args.ssh_private_key, ssh_private_key.rstrip("\n") + "\n")
+            if args.cloudflare_token_file is not None:
+                cloudflare_path, cloudflare_field = parse_reference(
+                    cloudflare_reference,
+                    args.environment,
+                )
+                cloudflare_token = client.read(cloudflare_path, cloudflare_field).strip()
+                if not cloudflare_token or "\n" in cloudflare_token or "\r" in cloudflare_token:
+                    raise ResolverError(
+                        f"{cloudflare_reference} must be one non-empty line"
+                    )
+                write_private(args.cloudflare_token_file, cloudflare_token + "\n")
         finally:
             # Revocation runs on the failure path too, where a leftover token
             # matters most. It never changes the outcome: the secrets are
