@@ -564,7 +564,34 @@ class SshPortHandoverTests(unittest.TestCase):
             task for task in tasks if task.get("name") == "Remove explicitly retired sshd drop-ins"
         )
         self.assertEqual(removal["ansible.builtin.file"]["state"], "absent")
-        self.assertEqual(removal["notify"], "Reload sshd")
+
+    def test_live_sshd_is_reconciled_even_when_the_file_did_not_change(self) -> None:
+        """An interrupted bootstrap may write the drop-in without running handlers."""
+        tasks = yaml.safe_load(
+            (REPO_ROOT / "roles" / "common" / "tasks" / "main.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        names = [task.get("name") for task in tasks]
+        validate_name = "Validate the assembled sshd configuration on every hardened run"
+        reload_name = "Reconcile the live sshd configuration on every hardened run"
+        listen_name = "Require sshd to listen on every declared port"
+        validate = tasks[names.index(validate_name)]
+        reload = tasks[names.index(reload_name)]
+        listener = tasks[names.index(listen_name)]
+
+        self.assertEqual(validate["ansible.builtin.command"]["argv"], ["/usr/sbin/sshd", "-t"])
+        self.assertFalse(validate["changed_when"])
+        self.assertEqual(reload["ansible.builtin.service"]["state"], "reloaded")
+        self.assertFalse(reload["changed_when"])
+        self.assertEqual(listener["loop"], "{{ common_ssh_ports }}")
+        self.assertEqual(listener["ansible.builtin.wait_for"]["state"], "started")
+        self.assertLess(
+            names.index("Remove explicitly retired sshd drop-ins"),
+            names.index(validate_name),
+        )
+        self.assertLess(names.index(validate_name), names.index(reload_name))
+        self.assertLess(names.index(reload_name), names.index(listen_name))
 
     def test_live_nftables_is_reconciled_even_when_the_file_did_not_change(self) -> None:
         tasks = yaml.safe_load(
