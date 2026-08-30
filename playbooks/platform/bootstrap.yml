@@ -24,6 +24,11 @@
     # объявлен поимённо, а транзит оператор → хаб → нода живёт отдельно.
     common_trusted_interfaces: []
     common_forward_interfaces: ["{{ platform_wireguard_interface }}"]
+    # bootstrap_wireguard доказывает связность пингом management-
+    # адреса хаба. Весь wg0 доверенным для этого делать нельзя, но
+    # echo от адресов самих management-сетей нужен и новым нодам, и
+    # операторам. Список выводится из того же контракта, что и peer'ы.
+    common_icmp_echo_cidrs: "{{ platform_overlay_networks }}"
     # То же, что в steady.yml: расхождение между bootstrap и steady означало бы
     # хаб, у которого выход из контейнеров то появляется, то пропадает.
     common_container_egress_interfaces: ["docker0", "br-*"]

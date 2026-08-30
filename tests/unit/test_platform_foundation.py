@@ -1380,12 +1380,10 @@ all:
             "platform_grafana_bind_address not in ['0.0.0.0', '*', '']",
             collector_tasks,
         )
-        # Условие, ради которого это вообще безопасно. На хабе wg0 доверен
-        # целиком: правило `iifname` срабатывает раньше любого ограничивающего,
-        # поэтому порт на оверлейном адресе достижим для каждой ноды флота, и
-        # firewall тут не поможет. Единственное, что отделяет дашборды с
-        # составом флота и объёмами трафика от узла, вышедшего в оверлей, —
-        # выключенный анонимный доступ.
+        # Firewall отделяет Grafana от нод по адресам операторов,
+        # но авторизация остаётся вторым независимым рубежом: ошибка в
+        # сетевом allowlist не должна открыть анонимно дашборды с составом
+        # флота и объёмами трафика.
         self.assertIn("not (platform_grafana_anonymous_enabled | bool)", collector_tasks)
         self.assertIn(
             'GF_AUTH_ANONYMOUS_ENABLED: "{{ platform_grafana_anonymous_enabled',
@@ -1410,6 +1408,14 @@ all:
                 # входу. Без него сужение отрезало бы операторов от нод.
                 self.assertIn(
                     'common_forward_interfaces: ["{{ platform_wireguard_interface }}"]',
+                    text,
+                )
+                # bootstrap_wireguard проверяет новый peer пингом хаба.
+                # После снятия полного доверия с wg0 хаб обязан разрешать
+                # echo из management-сетей явно, иначе первая же новая нода
+                # падает после успешного WireGuard handshake.
+                self.assertIn(
+                    'common_icmp_echo_cidrs: "{{ platform_overlay_networks }}"',
                     text,
                 )
                 # Источники выводятся из ростера, а не перечисляются: список,
