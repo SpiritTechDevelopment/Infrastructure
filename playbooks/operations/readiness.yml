@@ -280,4 +280,19 @@
       ansible.builtin.command:
         argv: "{{ ['timeout', spiritvpn_smoke_timeout_seconds | string] + spiritvpn_entry_exit_smoke_argv }}"
       changed_when: false
+      failed_when: false
+      register: _readiness_entry_exit_smoke
       when: spiritvpn_node_plan.routing.bridges_as_entry | length > 0
+
+    - name: Report an unreachable exit without stopping the deployment
+      ansible.builtin.debug:
+        msg: >-
+          ADVISORY: entry-to-exit smoke failed with rc={{ _readiness_entry_exit_smoke.rc }}.
+          One of {{ spiritvpn_node_plan.routing.bridges_as_entry
+                    | map(attribute='exit_node_id') | join(', ') }}
+          is unreachable from this node. The deployment continues and the manifest will
+          publish these relations: customers routed through a dead exit get access that
+          resolves, authenticates and carries no traffic.
+      when:
+        - spiritvpn_node_plan.routing.bridges_as_entry | length > 0
+        - _readiness_entry_exit_smoke.rc | default(0) | int != 0
