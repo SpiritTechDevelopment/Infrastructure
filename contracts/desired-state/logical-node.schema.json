@@ -24,7 +24,7 @@
         "public": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["hostname", "port", "transport", "flow", "fingerprint", "server_name"],
+          "required": ["hostname", "port", "transport", "fingerprint", "server_name"],
           "properties": {
             "hostname": {"type": "string", "format": "hostname", "maxLength": 253},
             "port": {"type": "integer", "minimum": 1, "maximum": 65535},
@@ -50,8 +50,12 @@
           "allOf": [
             {
               "if": {"properties": {"transport": {"const": "xhttp"}}, "required": ["transport"]},
-              "then": {"required": ["xhttp"], "properties": {"flow": {"const": ""}}},
-              "else": {"not": {"required": ["xhttp"]}, "properties": {"flow": {"const": "xtls-rprx-vision"}}}
+              "then": {"required": ["xhttp"], "not": {"required": ["flow"]}},
+              "else": {
+                "required": ["flow"],
+                "not": {"required": ["xhttp"]},
+                "properties": {"flow": {"const": "xtls-rprx-vision"}}
+              }
             }
           ]
         },

@@ -100,12 +100,13 @@ def logical_node_document(
         "hostname": hostname,
         "port": port,
         "transport": transport,
-        "flow": "" if transport == "xhttp" else "xtls-rprx-vision",
         "fingerprint": "chrome",
         "server_name": server_name,
     }
     if transport == "xhttp":
         public["xhttp"] = {"path": xhttp_path, "mode": xhttp_mode}
+    else:
+        public["flow"] = "xtls-rprx-vision"
 
     return {
         "apiVersion": "spiritvpn.io/v1alpha1",

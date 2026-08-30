@@ -1072,10 +1072,10 @@ all:
     def test_node_prepare_emits_an_xhttp_declaration_the_contract_accepts(self) -> None:
         """XHTTP-объявление проходит ту же схему, что и TCP.
 
-        Контракт связывает transport, flow и блок xhttp: у XHTTP-ноды flow
-        обязан быть пустым, а path и mode обязаны присутствовать. Генератор,
-        собирающий эту тройку несогласованно, выдал бы объявление, которое
-        схема примет, а бэкенд отвергнет уже после создания VPS.
+        Контракт связывает transport, flow и блок xhttp: у XHTTP-ноды flow не
+        объявляется вовсе, а path и mode обязаны присутствовать. Пустая строка
+        здесь не годится: sops нечего в ней шифровать, и она осталась бы
+        plaintext-скаляром в зашифрованном spec.
         """
         from fleetctl.validation import validate_environment
 
@@ -1106,7 +1106,7 @@ all:
                 )
             )
 
-            self.assertEqual(node["spec"]["public"]["flow"], "")
+            self.assertNotIn("flow", node["spec"]["public"])
             self.assertEqual(
                 node["spec"]["public"]["xhttp"], {"path": "/stat/", "mode": "packet-up"}
             )

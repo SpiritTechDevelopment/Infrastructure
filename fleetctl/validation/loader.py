@@ -368,7 +368,7 @@ def _to_model(document: dict[str, Any], path: Path) -> object:
                 hostname=spec["public"]["hostname"],
                 public_port=spec["public"]["port"],
                 transport=spec["public"]["transport"],
-                flow=spec["public"]["flow"],
+                flow=spec["public"].get("flow", ""),
                 xhttp=_xhttp_from_spec(spec["public"].get("xhttp")),
                 fingerprint=spec["public"]["fingerprint"],
                 server_name=spec["public"]["server_name"],
