@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import re
 import shutil
@@ -51,6 +52,18 @@ class KnownHostsCompilerTests(unittest.TestCase):
         # management overlay on the declared port. One machine, one key.
         self.assertEqual(entries["192.0.2.10"], ENTRY_KEY)
         self.assertEqual(entries["[10.80.1.11]:232"], ENTRY_KEY)
+
+    def test_bootstrap_host_key_uses_the_declared_non_default_port(self) -> None:
+        instance = self.state.instances[0]
+        state = replace(
+            self.state,
+            instances=(replace(instance, bootstrap_port=2222), *self.state.instances[1:]),
+        )
+
+        entries = self.entries(compile_known_hosts(state))
+
+        self.assertEqual(entries["[192.0.2.10]:2222"], ENTRY_KEY)
+        self.assertNotIn("192.0.2.10", entries)
 
     def test_a_non_default_port_is_bracketed_the_way_ssh_looks_it_up(self) -> None:
         self.assertEqual(host_pattern("10.80.1.11", 232), "[10.80.1.11]:232")

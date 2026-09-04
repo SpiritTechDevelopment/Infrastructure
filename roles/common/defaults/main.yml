@@ -39,7 +39,7 @@ common_retired_sshd_dropins:
 # steady-state plans must override it with the management network.
 # The firewall and fail2ban must follow the port the role is moving sshd to, not
 # the port the current connection came in on — during first bootstrap those
-# differ (connection on 22, sshd headed for common_ssh_port).
+# may differ (connection on ansible_port, sshd headed for common_ssh_port).
 ssh_port: >-
   {{ common_ssh_port if (common_ssh_port | string | length > 0)
   else (ansible_port | default(22)) }}
@@ -54,7 +54,8 @@ ssh_port: >-
 # Установившаяся фаза оставляет только объявленный порт: к ней узел уже
 # слушает оба, и путь под ней ничего не меняет.
 common_ssh_ports: >-
-  {{ ([22, ssh_port | int] | unique | list) if deploy_mode == 'bootstrap'
+  {{ ([ansible_port | default(22) | int, ssh_port | int] | unique | list)
+  if deploy_mode == 'bootstrap'
   else [ssh_port | int] }}
 ssh_allowed_cidrs: []                      # [] = allow SSH from anywhere (fallback)
 common_public_tcp_ports: []                # ports open to the internet (input chain)

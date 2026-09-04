@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import re
 import tempfile
@@ -32,6 +33,20 @@ class CompiledAnsibleArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output = self.render(Path(temporary))
             self.assertEqual(validate_ansible_artifacts(output, "develop"), 2)
+
+    def test_non_default_bootstrap_port_matches_pinned_known_hosts(self) -> None:
+        state = validate_environment(REPO_ROOT, "develop", desired_root=VALID_DESIRED)
+        instance = state.instances[0]
+        state = replace(
+            state,
+            instances=(replace(instance, bootstrap_port=2222), *state.instances[1:]),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "develop"
+            write_rendered_files(output, render_files(state))
+
+            self.assertEqual(validate_ansible_artifacts(output, "develop"), 2)
+            self.assertIn("[192.0.2.10]:2222,", (output / "known_hosts").read_text())
 
     # known_hosts решает, к какой машине выкатка вообще согласится подключиться.
     # Расхождение с инвентарями обязано остановить прогон здесь, а не на проводе

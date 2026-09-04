@@ -497,7 +497,13 @@ class SshPortHandoverTests(unittest.TestCase):
     post_tasks cannot help — the break happens long before they run.
     """
 
-    def render_ports(self, deploy_mode: str, common_ssh_port: object) -> list[int]:
+    def render_ports(
+        self,
+        deploy_mode: str,
+        common_ssh_port: object,
+        *,
+        ansible_port: int = 22,
+    ) -> list[int]:
         defaults = yaml.safe_load(
             (REPO_ROOT / "roles" / "common" / "defaults" / "main.yml").read_text(
                 encoding="utf-8"
@@ -507,7 +513,7 @@ class SshPortHandoverTests(unittest.TestCase):
         context = {
             "deploy_mode": deploy_mode,
             "common_ssh_port": common_ssh_port,
-            "ansible_port": 22,
+            "ansible_port": ansible_port,
         }
         context["ssh_port"] = environment.from_string(defaults["ssh_port"]).render(**context).strip()
         rendered = environment.from_string(defaults["common_ssh_ports"]).render(**context)
@@ -515,6 +521,18 @@ class SshPortHandoverTests(unittest.TestCase):
 
     def test_bootstrap_keeps_the_default_port_open_alongside_the_declared_one(self) -> None:
         self.assertEqual(self.render_ports("bootstrap", 232), [22, 232])
+
+    def test_bootstrap_keeps_a_non_default_connection_port_open(self) -> None:
+        self.assertEqual(
+            self.render_ports("bootstrap", 232, ansible_port=2222),
+            [2222, 232],
+        )
+
+    def test_bootstrap_deduplicates_matching_connection_and_declared_ports(self) -> None:
+        self.assertEqual(
+            self.render_ports("bootstrap", 232, ansible_port=232),
+            [232],
+        )
 
     def test_steady_state_closes_the_default_port(self) -> None:
         self.assertEqual(self.render_ports("hardened", 232), [232])

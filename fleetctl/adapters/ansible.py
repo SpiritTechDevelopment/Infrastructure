@@ -185,8 +185,10 @@ def _validate_bootstrap_inventory(
         if hostvars["ansible_host"] != instance.get("public_address"):
             raise CompiledArtifactsError(f"bootstrap ansible_host disagrees with public address for {host}")
         plan_files.add(plan_path.resolve())
-        # Чистая VPS при бутстрапе отвечает на стандартном порту 22.
-        endpoints.add(host_pattern(hostvars["ansible_host"], 22))
+        # Порт первого контакта объявлен самим instance и уже спроецирован в
+        # bootstrap inventory. Hardcode 22 здесь проверял не тот endpoint и
+        # пропускал несовместимый known_hosts для VPS с нестандартным sshd.
+        endpoints.add(host_pattern(hostvars["ansible_host"], hostvars["ansible_port"]))
     return plan_files, endpoints
 
 

@@ -44,8 +44,10 @@ def compile_known_hosts(state: DesiredState) -> str:
             )
         node = nodes[instance.logical_node]
         patterns = [
-            # Бутстрап подключается к публичному адресу чистой VPS.
-            host_pattern(instance.public_address, 22),
+            # Бутстрап подключается к публичному адресу на порту, который
+            # объявил провайдер. Для большинства VPS это 22, но pin обязан
+            # совпадать с bootstrap inventory и для нестандартного порта.
+            host_pattern(instance.public_address, instance.bootstrap_port),
             # Штатное подключение идёт через оверлей с тем же host key.
             host_pattern(
                 management_address(state.environment, node, instance),
